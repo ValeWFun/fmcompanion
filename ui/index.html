@@ -192,8 +192,10 @@
   .fieldrow input[type=range]{flex:1;min-width:0}
   .statedit{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-top:4px}
   .statedit .se{display:flex;gap:6px;align-items:center;font-size:12px}
-  .statedit .se input.lab{width:52px;text-transform:uppercase}
-  .statedit .se input.val{width:52px}
+  /* min-width:0 noetig: die Grundregel input{min-width:160px} wuerde die
+     schmalen Felder aufblasen und die Editor-Zeile ueber den Rand schieben */
+  .statedit .se input.lab{width:52px;min-width:0;text-transform:uppercase}
+  .statedit .se input.val{width:52px;min-width:0}
   .statedit .se input[type=range]{flex:1;min-width:40px}
   .tierpick{display:flex;gap:6px;flex-wrap:wrap}
   .tierpick button{padding:6px 12px;border:1px solid var(--border);border-radius:7px;
@@ -346,6 +348,11 @@
   /* ---- Karteikarten ---- */
   .galitem{border-radius:2px;border:0;box-shadow:var(--shadow);background:var(--surface)}
   .cardsvg{filter:drop-shadow(0 6px 16px rgba(60,48,28,.28))}
+  /* Spielerauswahl im Dossier: Suchfeld ueber dem Dropdown, gleiche Breite
+     wie die Karte darunter */
+  .cardpick{display:flex;flex-direction:column;gap:6px;width:340px;max-width:88vw}
+  .cardpick input,.cardpick select{width:100%;min-width:0}
+  .cardpick #cardCount{font-family:var(--mono);font-size:10.5px;letter-spacing:.3px}
   .galsub{font-size:10.5px}
 
   /* ---- Diagramm: Achsenbeschriftung in Mono, Rest Tinte ---- */
@@ -939,6 +946,59 @@ function cardEditor(){
 
 function setCardView(v){ CARD_VIEW=v; renderCards(); }
 
+// ---- Spielersuche fuer die Dossier-Auswahl -------------------------------
+// Der Pool hat mehrere tausend Eintraege; ein reines Dropdown ist damit nicht
+// mehr bedienbar. Diakritika werden weggefaltet, damit "estevao" auch
+// "Estêvão" findet und "velickovic" auch "Veličković".
+let CARD_FILTER = "";
+// eigener Helfer: das esc() in cardEditor() ist dort lokal, hier nicht sichtbar
+const escAttr = s => (s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+  .replace(/</g, "&lt;");
+const cardNorm = s => (s || "").normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function cardMatches(){
+  const field = PLAYERS.filter(p => p.id != null)
+    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  const q = cardNorm(CARD_FILTER).trim();
+  const matches = q ? field.filter(p => cardNorm(p.name).includes(q)) : field;
+  // Der gerade gezeigte Spieler bleibt waehlbar, auch wenn er nicht zur Suche
+  // passt - sonst zeigt die Karte jemanden, der nicht in der Liste steht.
+  // Er zaehlt aber NICHT als Treffer, sonst meldet die Suche bei null Treffern
+  // faelschlich einen.
+  let list = matches;
+  if(CARD_PID != null && !list.some(p => p.id === CARD_PID)){
+    const cur = field.find(p => p.id === CARD_PID);
+    if(cur) list = [cur].concat(list);
+  }
+  return {field, list, matches};
+}
+function cardOptionsHtml(list){
+  return list.map(q => `<option value="${q.id}"${q.id===CARD_PID?" selected":""}>`
+    + `${q.name}${q.score!=null?" · "+q.score:""}${q.age?" · "+Math.round(q.age)+"J":""}`
+    + `</option>`).join("");
+}
+function cardCountHtml(field, matches){
+  if(!cardNorm(CARD_FILTER).trim()) return `${field.length} Spieler im Pool`;
+  return matches.length
+    ? `${matches.length} von ${field.length} · Enter wählt den ersten Treffer`
+    : `kein Treffer – die Suche geht nur über den Namen`;
+}
+function cardFilter(v){
+  CARD_FILTER = v;
+  const {field, list, matches} = cardMatches();
+  const sel = document.getElementById("cardPlayer");
+  if(sel) sel.innerHTML = cardOptionsHtml(list);
+  const info = document.getElementById("cardCount");
+  if(info) info.textContent = cardCountHtml(field, matches);
+}
+function cardSearchKey(ev){
+  if(ev.key !== "Enter") return;
+  ev.preventDefault();
+  const {matches} = cardMatches();
+  if(matches.length) cardSelectPlayer(matches[0].id);
+}
+
 function renderCards(){
   const host=document.getElementById("tableHost");
   const nav=`<div class="seg" style="margin:0 0 14px">
@@ -946,15 +1006,21 @@ function renderCards(){
     <button class="${CARD_VIEW==='gallery'?'on':''}" onclick="setCardView('gallery')">Hall of Fame</button></div>`;
   if(CARD_VIEW==="gallery"){ host.innerHTML=nav+`<div id="galHost" class="muted">lade…</div>`;
     renderGallery(document.getElementById("galHost")); return; }
-  const field=PLAYERS.filter(p=>p.id!=null).sort((a,b)=>(b.score??-1)-(a.score??-1));
-  if(!field.length){ host.innerHTML=nav+`<div class="empty"><h2>Keine Daten</h2>Erst „Spiel scannen".</div>`; return; }
-  if(CARD_PID==null || !field.some(p=>p.id===CARD_PID)) CARD_PID=field[0].id;
+  const all=PLAYERS.filter(p=>p.id!=null).sort((a,b)=>(b.score??-1)-(a.score??-1));
+  if(!all.length){ host.innerHTML=nav+`<div class="empty"><h2>Keine Daten</h2>Erst „Kader scannen".</div>`; return; }
+  if(CARD_PID==null || !all.some(p=>p.id===CARD_PID)) CARD_PID=all[0].id;
   const p=PLAYERS.find(q=>q.id===CARD_PID);
   if(!CARD || CARD.pid!==p.id) CARD=cardConfigFor(p);
-  const opts=field.map(q=>`<option value="${q.id}" ${q.id===p.id?"selected":""}>${q.name}${q.score!=null?" · "+q.score:""}</option>`).join("");
+  const {field, list, matches}=cardMatches();
   host.innerHTML=nav+`<div class="cardwrap">
     <div class="cardstage">
-      <select id="cardPlayer" style="width:340px;max-width:88vw" onchange="cardSelectPlayer(this.value)">${opts}</select>
+      <div class="cardpick">
+        <input id="cardSearch" type="search" placeholder="Spieler suchen…"
+               value="${escAttr(CARD_FILTER)}" oninput="cardFilter(this.value)"
+               onkeydown="cardSearchKey(event)">
+        <select id="cardPlayer" onchange="cardSelectPlayer(this.value)">${cardOptionsHtml(list)}</select>
+        <div class="muted" id="cardCount">${cardCountHtml(field, matches)}</div>
+      </div>
       <div id="cardHost">${cardSVG(CARD)}</div>
       <select id="cardSrc" style="width:340px;max-width:88vw" onchange="cardSelectSrc(this.value)"></select>
     </div>
