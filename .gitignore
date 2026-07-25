@@ -1,0 +1,59 @@
+# --- Python-Umgebung -------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+
+# --- PyInstaller-Bauartefakte (werden aus FMCompanion.spec neu erzeugt) -----
+build/
+dist/
+*.manifest
+
+# --- Laufzeitdaten ---------------------------------------------------------
+# Die Snapshot-Datenbank enthaelt den Stand des eigenen Savegames: gesammelte
+# Spielernamen, Statistiken, Merkliste, Karten. Persoenlich und veraenderlich,
+# gehoert nicht in die Versionsverwaltung.
+fmcompanion.db
+fmcompanion.db-shm
+fmcompanion.db-wal
+*.db-journal
+
+# --- FM-Exporte und Messdaten ----------------------------------------------
+# HTML-Exporte aus dem Spiel (Kaderlisten, Scouting) und Rohdumps der
+# Reverse-Engineering-Laeufe: gross, binaer und nur lokal von Nutzen.
+*.html
+!ui/index.html
+research/*.npz
+research/objects.json
+
+# --- Screenshots und Ausgaben ----------------------------------------------
+*.png
+*.jpg
+
+# --- Bleibt lokal, nicht im oeffentlichen Repo -----------------------------
+# Reverse-Engineering-Skripte und Roadmap: die Pläne enthalten Kontext zum
+# eigenen Savegame, research/ dokumentiert die Speicheranalyse. Beides bleibt
+# auf der Platte, gehoert aber nicht in ein oeffentliches Repository.
+research/
+PLAN.md
+PLAN-NACHLADEN.md
+
+# --- Arbeitsnotizen und Sitzungsartefakte ----------------------------------
+# Prompt-Sammlungen und Notizen aus der Zusammenarbeit mit KI-Werkzeugen -
+# auch solche, die erst spaeter angelegt werden.
+prompts.md
+PROMPTS.md
+prompts/
+*.prompts.md
+notes.md
+NOTES.md
+.claude/
+CLAUDE.md
+AGENTS.md
+.cursor/
+.aider*
+
+# --- Editor / System -------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
