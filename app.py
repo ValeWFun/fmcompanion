@@ -18,7 +18,14 @@ UI_INDEX = os.path.join(BASE, "ui", "index.html")
 class Api:
     def __init__(self):
         self._local = threading.local()         # DB-Connection PRO Thread
-        self.window = None
+        # WICHTIG der fuehrende Unterstrich: pywebview spiegelt das js_api-Objekt
+        # nach JavaScript und laeuft dafuer in generate_js_object() REKURSIV durch
+        # alle oeffentlichen Attribute (webview/util.py get_functions, Zeile 190ff;
+        # Namen mit _ werden uebersprungen). Ein oeffentliches "window" fuehrt in
+        # das PyWebView-Window, von dort in window.native und damit in den
+        # gesamten WinForms-Objektbaum - das laeuft minutenlang gegen die
+        # Rekursionsgrenze und blockiert den Programmstart.
+        self._window = None
         self._scan_lock = threading.Lock()      # nie zwei Scans gleichzeitig
         self._auto_thread = None
         self._auto_stop = threading.Event()
@@ -421,7 +428,7 @@ class Api:
     def import_export(self):
         """Oeffnet einen Datei-Dialog, importiert einen FM-HTML-Export."""
         try:
-            paths = self.window.create_file_dialog(
+            paths = self._window.create_file_dialog(
                 webview.OPEN_DIALOG, allow_multiple=False,
                 file_types=("HTML-Export (*.html;*.htm)", "Alle Dateien (*.*)"))
         except Exception as e:
@@ -474,7 +481,7 @@ class Api:
         """PNG (data-URL vom Canvas) via nativen Speicherdialog ablegen."""
         import base64
         try:
-            path = self.window.create_file_dialog(
+            path = self._window.create_file_dialog(
                 webview.SAVE_DIALOG, save_filename=suggested,
                 file_types=("PNG-Bild (*.png)",))
         except Exception as e:
@@ -496,7 +503,7 @@ class Api:
         """Bild fuer die Spielerkarte waehlen -> als data-URI zurueck (bleibt
         im Karten-Config, keine Datei-Referenz)."""
         try:
-            paths = self.window.create_file_dialog(
+            paths = self._window.create_file_dialog(
                 webview.OPEN_DIALOG, allow_multiple=False,
                 file_types=("Bilder (*.png;*.jpg;*.jpeg;*.webp)", "Alle Dateien (*.*)"))
         except Exception as e:
@@ -583,7 +590,7 @@ class Api:
 
 def main():
     api = Api()
-    api.window = webview.create_window(
+    api._window = webview.create_window(
         "FM Companion – Moneyball", UI_INDEX, js_api=api,
         width=1280, height=820, min_size=(960, 600),
         background_color="#0f1115",
