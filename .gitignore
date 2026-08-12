@@ -47,6 +47,7 @@ prompts/
 notes.md
 NOTES.md
 .claude/
+.mcp.json
 CLAUDE.md
 AGENTS.md
 .cursor/
