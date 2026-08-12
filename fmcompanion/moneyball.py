@@ -146,6 +146,11 @@ def enrich(players, ref_year=None, ref_day=None):
         p["keyp_p90"] = _p90(p.get("key_passes") or 0, m)
         p["loss_p90"] = _p90(p.get("losses") or 0, m)
         p["rec_p90"] = _p90(p.get("recoveries") or 0, m)
+        # Ballverluste je 100 Ballaktionen statt je 90 Minuten. Die /90-Variante
+        # bestraft ballaktive Spieler: wer den Ball fordert, verliert ihn
+        # zwangslaeufig oefter als jemand, der ihn sofort abgibt.
+        akt = (p.get("pass_try") or 0) + (p.get("dribbles") or 0)
+        p["loss_rate"] = round(100 * (p.get("losses") or 0) / akt, 1) if akt else None
         # Non-Penalty-Tore: Elfer-Offset noch unverifiziert (kein Elfer im Save)
         # -> pen_goals ist 0, bis der Matcher ihn nach den ersten Elfern pinnt.
         p["np_goals"] = int(p.get("goals") or 0) - int(p.get("pen_goals") or 0)
@@ -158,6 +163,7 @@ def enrich(players, ref_year=None, ref_day=None):
         xga = float(p.get("xga") or 0.0)
         p["conceded"], p["xga"], p["apps"] = conc, xga, int(p.get("apps") or 0)
         p["goals_prevented"] = round(xga - conc, 2)
+        p["gp_p90"] = _p90(xga - conc, m)      # verhinderte Tore je 90 Minuten
         p["conceded_p90"] = _p90(conc, m)
         # Positionsgruppen (fuer die Positions-Dashboards) + Kurzlabel
         groups, label = pos_info(int(p.get("pos_mask") or 0), p["is_gk"])

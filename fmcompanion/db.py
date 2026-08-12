@@ -293,26 +293,67 @@ def latest_players(conn):
     return [dict(r) for r in rows]
 
 
-def pool_players(conn):
+def pool_players(conn, pids=None):
     """Je Spieler der Datensatz aus seinem NEUESTEN Snapshot: der Pool waechst
     mit jedem Scan (Scouting-Listen ansehen -> mehr Spieler) und behaelt
     Spieler, die gerade nicht mehr im RAM geladen sind. 'stale' + taken_at
-    kennzeichnen aeltere Staende."""
+    kennzeichnen aeltere Staende.
+
+    pids: nur diese Spieler laden (z.B. der eigene Kader). Spart bei 1,1 Mio.
+    Zeilen den Grossteil der Arbeit.
+
+    Die frühere Fassung nutzte eine KORRELIERTE Unterabfrage
+    (WHERE snapshot_id = (SELECT MAX(...) WHERE player_id = p.player_id)).
+    Die lief je Ergebniszeile erneut und ohne passenden Index: gemessen
+    35 Zeilen in 30 Sekunden. Jetzt eine einzige Gruppierung plus Join.
+    """
     latest = latest_snapshot_id(conn)
     if latest is None:
         return []
-    rows = conn.execute("""
+    _ensure_indexes(conn)
+    wo, args = "", []
+    if pids is not None:
+        ids = [int(p) for p in pids]
+        if not ids:
+            return []
+        wo = f" WHERE player_id IN ({','.join('?' * len(ids))})"
+        args = ids
+    rows = conn.execute(f"""
         SELECT p.*, s.taken_at FROM player_stats p
-        JOIN snapshots s ON s.id = p.snapshot_id
-        WHERE p.snapshot_id = (
-            SELECT MAX(p2.snapshot_id) FROM player_stats p2
-            WHERE p2.player_id = p.player_id)""").fetchall()
+        JOIN (SELECT player_id, MAX(snapshot_id) AS sid
+              FROM player_stats{wo} GROUP BY player_id) m
+          ON m.player_id = p.player_id AND m.sid = p.snapshot_id
+        JOIN snapshots s ON s.id = p.snapshot_id""", args).fetchall()
     out = []
     for r in rows:
         d = dict(r)
         d["stale"] = d["snapshot_id"] != latest
         out.append(d)
     return out
+
+
+_indexed = set()
+
+
+def _ensure_indexes(conn):
+    """Indizes, ohne die die Historie quadratisch bremst. Werden erst angelegt,
+    wenn sie gebraucht werden – bei 1,1 Mio. Zeilen dauert das ein paar
+    Sekunden, aber nur einmal."""
+    key = id(conn)
+    if key in _indexed:
+        return
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS ix_pstats_player "
+        "ON player_stats(player_id, snapshot_id)",
+        "CREATE INDEX IF NOT EXISTS ix_sstats_player "
+        "ON season_stats(player_id, snapshot_id)",
+    ):
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
+    _indexed.add(key)
 
 
 def watchlist_set(conn, player_id, status, note=""):

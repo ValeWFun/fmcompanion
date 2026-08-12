@@ -8,7 +8,7 @@ import threading
 import time
 import webview
 
-from fmcompanion import scanner, moneyball, db, importer
+from fmcompanion import scanner, moneyball, db, importer, tactics
 
 # Pfad zu den UI-Dateien (funktioniert auch im PyInstaller-Bundle)
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -38,6 +38,10 @@ class Api:
         self._last_pids = set()
         self._collect_until = 0.0               # Scouting-Modus laeuft bis …
         self._names_start = None                # Namensstand bei dessen Beginn
+        # Suchmenge der Ersatzsuche: Pool + Vergleichsmenge, aufgehoben, damit
+        # das Umschalten zwischen den Suchmodi nicht jedes Mal 30.000 Zeilen
+        # neu anreichert. Unterstrich, sonst spiegelt pywebview das nach JS.
+        self._repl_cache = None
 
     def _db(self):
         conn = getattr(self._local, "conn", None)
@@ -46,16 +50,14 @@ class Api:
             self._local.conn = conn
         return conn
 
-    SETTING_DEFAULTS = {"cur_max_min": 400, "min_minutes": 45,
+    # cur_max_min gilt JE WETTBEWERBS-RECORD, nicht je Saison: die Saison eines
+    # Spielers ist die Summe seiner Wettbewerbe (siehe scanner._aggregate).
+    SETTING_DEFAULTS = {"cur_max_min": scanner.CUR_MAX_MIN, "min_minutes": 45,
                         "sig_min_minutes": 900, "auto_scan": 1, "auto_pause": 180,
                         # Vergleichskohorte: namenlose RAM-Records als Perzentil-
                         # Basis (0 = aus). Mindestminuten, damit Kurzeinsaetze die
-                        # /90-Verteilungen nicht verzerren – wird intern am
-                        # Saison-Limit gedeckelt (siehe scanner._cohort_rows).
-                        "cohort_on": 1, "cohort_min_minutes": 180,
-                        # Saisongrenze automatisch aus den Einsatzzahlen
-                        # ableiten statt cur_max_min von Hand nachzuziehen.
-                        "season_auto": 1}
+                        # /90-Verteilungen nicht verzerren.
+                        "cohort_on": 1, "cohort_min_minutes": 180}
 
     def get_settings(self):
         conn = self._db()
@@ -71,6 +73,54 @@ class Api:
             return {"ok": False, "error": "Ungültiger Wert"}
         db.set_setting(self._db(), key, v)
         return {"ok": True, "value": v}
+
+    # Rohzaehler, die der HTML-Export mitbringt. Abgeleitetes (/90-Raten,
+    # Quoten) rechnet moneyball.enrich daraus neu – deshalb wird VOR dem
+    # enrich zusammengefuehrt.
+    EXPORT_STATS = ("minutes", "apps", "goals", "assists", "xg", "xa", "rating",
+                    "duels", "duels_total", "shots_total", "shots_on",
+                    "pass_try", "pass_ok", "dribbles", "prog_passes",
+                    "press_win", "press_try", "interceptions", "key_passes",
+                    "clearances", "headers_won", "headers_total", "losses")
+    # Zaehler, die es NUR im RAM gibt. Gewinnt der Export, gehoeren sie nicht
+    # mehr zu seinen Minuten – eine Ballgewinn-Rate aus RAM-Zaehlern und
+    # Export-Minuten waere schlicht falsch. Dann lieber leer lassen: die
+    # Score-Engine ueberspringt fehlende Kennzahlen und gewichtet neu.
+    RAM_ONLY_STATS = ("recoveries", "conceded", "xga", "fouls",
+                      "fouls_against", "yellow")
+
+    def _merge_export_stats(self, rows, exp_by_eid):
+        """Export-Zahlen in die RAM-Zeilen ziehen. VOR moneyball.enrich rufen.
+
+        Regel: der Export gewinnt, ausser der RAM hat mehr Minuten.
+
+        Der Export ist FMs eigene Zahl und damit exakt – aber nur so frisch wie
+        der letzte Import. Der RAM ist live, sieht jedoch nur, was FM gerade
+        geladen hat: an Buendia gemessen 10 Minuten im RAM gegen 337 im Export,
+        ueber 300 Spieler stimmten beide Quellen nur in 5 % der Faelle ueberein.
+        Wer mehr Minuten hat, hat den vollstaendigeren Stand.
+
+        Stammdaten (Position, Verein, Liga, Marktwert) kommen IMMER aus dem
+        Export – die kennt der RAM-Scan gar nicht.
+        """
+        n = 0
+        for p in rows:
+            e = exp_by_eid.get(int(p["eid"])) if p.get("eid") else None
+            if not e:
+                continue
+            for k in ("position", "club", "league", "value", "wage"):
+                if e.get(k) not in (None, ""):
+                    p[k] = e[k]
+            if (e.get("minutes") or 0) <= (p.get("minutes") or 0):
+                continue                      # RAM ist vollstaendiger
+            for k in self.EXPORT_STATS:
+                p[k] = e.get(k)
+            for k in self.RAM_ONLY_STATS:
+                p[k] = None
+            p["stat_quelle"] = "export"
+            p["stat_stand"] = e.get("imported_at")
+            n += 1
+        return n
 
     def _ref_year(self, conn, players=None):
         """Bezugsjahr fuers Alter. Der RAM liefert das GEBURTSJAHR, nicht das
@@ -132,8 +182,6 @@ class Api:
                                    self.SETTING_DEFAULTS["cohort_min_minutes"]))
                 if int(db.get_setting(conn, "cohort_on",
                                       self.SETTING_DEFAULTS["cohort_on"])) else None)
-        sauto = bool(int(db.get_setting(conn, "season_auto",
-                                        self.SETTING_DEFAULTS["season_auto"])))
         meta = {}
         with self._scan_lock:
             # Namen liegen nur in ~6 % des Speichers. Die bekannten Bloecke
@@ -143,7 +191,7 @@ class Api:
             full = self._hot_regions is None or self._scan_no % 5 == 1
             raw = scanner.scan_players(
                 cur_max_min=cur, known=db.names_all(conn), meta=meta,
-                cohort_min_minutes=cmin, season_auto=sauto,
+                cohort_min_minutes=cmin,
                 hot_regions=self._hot_regions, full_sweep=full)
             ref = self._ref_year(conn, raw)
             if ref:
@@ -249,9 +297,6 @@ class Api:
                 "running": bool(self._auto_thread and self._auto_thread.is_alive()),
                 "scanning": self._scanning, "idle": self._auto_idle,
                 "last_id": db.latest_snapshot_id(conn) or 0,
-                # damit die Saison-Anzeige auch nach Auto-Scans stimmt und
-                # nicht nur nach einem Klick-Scan
-                "season_apps": (self._last_meta or {}).get("season_apps"),
                 "collect": self._collecting(),
                 "collect_left": max(0, int(self._collect_until - time.time())),
                 "names_known": db.names_count(conn),
@@ -312,12 +357,13 @@ class Api:
         conn = self._db()
         ry = self._ref_year(conn)
         raw = db.pool_players(conn) if mode == "pool" else db.latest_players(conn)
+        exp = db.load_export(conn)
+        exp_by_eid = {int(e["eid"]): e for e in exp if e.get("eid")}
+        aus_export = self._merge_export_stats(raw, exp_by_eid)
         players = moneyball.enrich(raw, ref_year=ry)
         for p in players:
             p.setdefault("id", p.get("player_id"))
             p["source"] = "ram"
-        exp = db.load_export(conn)
-        exp_by_eid = {int(e["eid"]): e for e in exp if e.get("eid")}
         ram_eids = {int(p["eid"]) for p in players if p.get("eid")}
         for p in players:                       # RAM mit Wert/Alter anreichern
             e = exp_by_eid.get(int(p["eid"])) if p.get("eid") else None
@@ -346,7 +392,8 @@ class Api:
             p["value_score"] = (round(p["score"] / (v / 1e6), 1)
                                 if v and v > 0 and p.get("score") is not None else None)
         return {"ok": True, "players": players, "count": len(players),
-                "snapshots": db.snapshot_count(conn), "exports": len(exp)}
+                "snapshots": db.snapshot_count(conn), "exports": len(exp),
+                "aus_export": aus_export}
 
     def value_history(self, eid):
         """Marktwert-Verlauf eines Spielers ueber die Export-Importe."""
@@ -414,6 +461,127 @@ class Api:
                 "min_minutes": min_minutes, "max_minutes": max_min,
                 "eligible": len(eligible), "total": len(field)}
 
+    # -------------------------------------------------- Taktik-Analyse
+    def detect_squads(self):
+        """Sucht Kaderlisten im Speicher. FM haelt mehrere Vereine gleichzeitig
+        vor – welcher der eigene ist, geht aus den Daten NICHT hervor, das muss
+        der Nutzer einmal auswaehlen."""
+        try:
+            with self._scan_lock:
+                pm, _ = scanner.memlib.attach()
+                regions = list(scanner.memlib.read_regions(pm))
+                names, _e = scanner._build_name_index(regions, with_eid=True)
+                # Dauerhaft gemerkte Namen ergaenzen: direkt nach dem Laden des
+                # Savegames stehen oft nur ein paar Dutzend Namen im RAM, dann
+                # findet die Kadersuche fast nichts.
+                for pid, info in db.names_all(self._db()).items():
+                    if info.get("name"):
+                        names.setdefault(int(pid), info["name"])
+                stats = scanner._find_records(regions, set(names))
+                gefunden = tactics.find_squads(regions, names, set(stats))
+        except Exception as e:
+            if "ProcessNotFound" in type(e).__name__:
+                return {"ok": False, "error": "Football Manager läuft nicht."}
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        conn = self._db()
+        aktuell = set(self._squad_pids(conn))
+        for s in gefunden[:12]:
+            s["gewaehlt"] = bool(aktuell and set(s["pids"]) & aktuell)
+        return {"ok": True, "kader": gefunden[:12]}
+
+    def _squad_pids(self, conn):
+        import json
+        try:
+            return json.loads(db.get_setting(conn, "squad_pids", "[]") or "[]")
+        except Exception:
+            return []
+
+    def set_squad(self, pids):
+        import json
+        conn = self._db()
+        liste = sorted({int(p) for p in (pids or [])})
+        db.set_setting(conn, "squad_pids", json.dumps(liste))
+        return {"ok": True, "anzahl": len(liste)}
+
+    def tactic_board(self):
+        """Je Position der Formation die passenden Kaderspieler mit Score und
+        Aufschluesselung. Perzentile gegen alle Spieler, die dort spielen
+        koennen (Pool + namenlose Vergleichskohorte)."""
+        conn = self._db()
+        pids = set(self._squad_pids(conn))
+        if not pids:
+            return {"ok": False, "kein_kader": True}
+        ry = self._ref_year(conn)
+        # NUR den Kader laden, nicht den ganzen Pool: fuer 25 Spieler die
+        # Historie von tausenden durchzugehen war die eigentliche Bremse.
+        # Export vor dem enrich einmischen: er liefert die Position (kennt auch
+        # die Seite) und gewinnt bei den Zahlen, solange er mehr Minuten hat.
+        exp = {int(e["eid"]): e for e in db.load_export(conn) if e.get("eid")}
+        roh = db.pool_players(conn, pids)
+        aus_export = self._merge_export_stats(roh, exp)
+        kader = moneyball.enrich(roh, ref_year=ry)
+        for p in kader:
+            p.setdefault("id", p.get("player_id"))
+        # Vergleichsmenge fuer die Perzentile: die Kohorte reicht: sie enthaelt
+        # zehntausende Spieler mit Position und Statistik.
+        referenz = kader + moneyball.enrich(db.cohort_load(conn), ref_year=ry)
+        fehlt = len(pids) - len(kader)
+        return {"ok": True, "slots": tactics.build_board(kader, referenz),
+                "kader": len(kader), "ohne_daten": fehlt, "aus_export": aus_export,
+                "export_positionen": sum(1 for p in kader if p.get("position"))}
+
+    def _repl_pool(self, conn):
+        """Suchmenge der Ersatzsuche: der GANZE Pool (rund 7000 Spieler, in
+        0,3 s geladen) plus dieselbe Vergleichsmenge wie im Taktikbrett.
+
+        Dieselbe Referenz ist keine Kosmetik: nur so liegen die Scores der
+        Ersatzkandidaten auf derselben Skala wie die Zahl auf dem Spielfeld –
+        sonst hiesse "besser als 71" nichts.
+
+        Gepuffert bis zum naechsten Snapshot oder Kaderwechsel.
+        """
+        kader_ids = frozenset(self._squad_pids(conn))
+        key = (db.latest_snapshot_id(conn), kader_ids)
+        if self._repl_cache and self._repl_cache[0] == key:
+            return self._repl_cache[1:]
+        ry = self._ref_year(conn)
+        exp = {int(e["eid"]): e for e in db.load_export(conn) if e.get("eid")}
+        roh = db.pool_players(conn)
+        # Dieselbe Zusammenfuehrung wie im Taktikbrett – sonst laegen die
+        # Scores der Kandidaten auf einer anderen Skala als die auf dem Feld.
+        self._merge_export_stats(roh, exp)
+        pool = moneyball.enrich(roh, ref_year=ry)
+        for p in pool:
+            p.setdefault("id", p.get("player_id"))
+        referenz = ([p for p in pool if p["id"] in kader_ids]
+                    + moneyball.enrich(db.cohort_load(conn), ref_year=ry))
+        self._repl_cache = (key, pool, referenz, kader_ids)
+        return pool, referenz, kader_ids
+
+    def tactic_replacements(self, slot_key, player_id, modus="aehnlich",
+                            min_minutes=None):
+        """Ersatz fuer einen Spieler auf einer Position suchen.
+
+        modus: 'aehnlich' (gleiches Niveau, gleiches Profil), 'besser' oder
+        'juenger'. Positionsfremde Kandidaten sind zugelassen, bekommen aber
+        den Umschulungsaufwand abgezogen – siehe tactics.UMSCHULUNG_KANTEN.
+        """
+        slot = next((s for s in tactics.FORMATION if s["key"] == slot_key), None)
+        if slot is None:
+            return {"ok": False, "error": "Unbekannte Position."}
+        conn = self._db()
+        if not self._squad_pids(conn):
+            return {"ok": False, "kein_kader": True}
+        pool, referenz, kader_ids = self._repl_pool(conn)
+        original = next((p for p in pool if p["id"] == int(player_id)), None)
+        if original is None:
+            return {"ok": False, "error": "Spieler nicht im Datenbestand."}
+        mm = (tactics.MIN_MINUTES if min_minutes in (None, "")
+              else max(90, int(min_minutes)))
+        return tactics.find_replacements(
+            slot, original, pool, referenz, modus=modus,
+            min_minutes=mm, kader_ids=kader_ids)
+
     def watchlist(self):
         return db.watchlist_all(self._db())
 
@@ -428,9 +596,12 @@ class Api:
     def import_export(self):
         """Oeffnet einen Datei-Dialog, importiert einen FM-HTML-Export."""
         try:
+            # KEIN Bindestrich in der Beschreibung: pywebview prueft den Filter
+            # gegen ^([\w ]+)\(…\) – "HTML-Export" faellt durch und der Dialog
+            # geht gar nicht erst auf (webview/util.py parse_file_type).
             paths = self._window.create_file_dialog(
                 webview.OPEN_DIALOG, allow_multiple=False,
-                file_types=("HTML-Export (*.html;*.htm)", "Alle Dateien (*.*)"))
+                file_types=("HTML Export (*.html;*.htm)", "Alle Dateien (*.*)"))
         except Exception as e:
             return {"ok": False, "error": f"Dialog-Fehler: {e}"}
         if not paths:
@@ -483,7 +654,7 @@ class Api:
         try:
             path = self._window.create_file_dialog(
                 webview.SAVE_DIALOG, save_filename=suggested,
-                file_types=("PNG-Bild (*.png)",))
+                file_types=("PNG Bild (*.png)",))     # Bindestrich: s.o.
         except Exception as e:
             return {"ok": False, "error": f"Dialog-Fehler: {e}"}
         if not path:
@@ -563,12 +734,14 @@ class Api:
 
             for immersive in (20, 19):          # DWMWA_USE_IMMERSIVE_DARK_MODE
                 setattr_(immersive, 1 if dark else 0)
+            # Muss den --surface/--text-Werten aus ui/index.html folgen, sonst
+            # sitzt eine warme Leiste auf einer kuehlen Oberflaeche.
             if dark:                            # COLORREF = 0x00BBGGRR
-                setattr_(35, 0x00181E21)        # CAPTION_COLOR = surface #211e18
-                setattr_(36, 0x00D3E4EC)        # TEXT_COLOR    = #ece4d3
+                setattr_(35, 0x00201A16)        # CAPTION_COLOR = surface #161a20
+                setattr_(36, 0x00EFEAE7)        # TEXT_COLOR    = #e7eaef
             else:
-                setattr_(35, 0x00EFF7FA)        # #faf7ef
-                setattr_(36, 0x00191F23)        # #231f19
+                setattr_(35, 0x00FFFFFF)        # #ffffff
+                setattr_(36, 0x001C1714)        # #14171c
             return {"ok": True, "hwnd": int(hwnd)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -593,7 +766,7 @@ def main():
     api._window = webview.create_window(
         "FM Companion – Moneyball", UI_INDEX, js_api=api,
         width=1280, height=820, min_size=(960, 600),
-        background_color="#0f1115",
+        background_color="#0b0e12",   # --bg (dunkel): kein heller Blitz beim Start
     )
     webview.start(api._boot)
 

@@ -14,7 +14,11 @@ import time
 import numpy as np
 from . import memlib
 
-CUR_MAX_MIN = 400          # aktuelle Saison ist zu Saisonbeginn kurz
+# Obergrenze fuer EINEN Wettbewerbs-Record. Mehr als eine volle Liga-Saison
+# (38 Spiele a 90 Min) kann ein einzelner Wettbewerb nicht haben – was darueber
+# liegt, ist eine abgeschlossene Saison und faellt raus. Frueher standen hier
+# 400 Minuten, weil ein Record faelschlich fuer "die Saison" gehalten wurde.
+CUR_MAX_MIN = 3600
 MAX_PID = 0x0FFFFFFF
 STRIDE = 168               # Groesse eines Stat-Records (gueltig M-24..M+142)
 
@@ -29,7 +33,7 @@ def _fields(data, M):
     return {
         "xg": round(float(a), 2), "xa": round(float(xa), 2),
         "goals": m12 & 0xFF, "conceded": m12 >> 8,
-        "apps": m14 & 0xFF, "xga": round(xga, 2),
+        "apps": m14 & 0xFF, "xga": round(xga, 2), "rated": rated,
         # Ø-Note = Notensumme(M-16)/10 durch BEWERTETE Spiele (Kurzeinsätze ohne
         # Note zählen nicht mit; per Kaderliste massenverifiziert, s. Memory).
         "rating": round(u16(-16) / 10 / rated, 2) if rated else 0.0,
@@ -348,8 +352,20 @@ def _find_person_records(regions, eids=None, counts=None):
 
 
 def detect_season_apps(hist, ceiling=60):
-    """Ermittelt automatisch, wie viele Einsaetze die LAUFENDE Saison hoechstens
-    hat – und ersetzt damit das von Hand gepflegte Minuten-Limit.
+    """NICHT MEHR IM SCAN BENUTZT – die Annahme dahinter war falsch.
+
+    Die Funktion sucht die Kante im Einsatz-Histogramm und hielt sie fuer die
+    Grenze zwischen laufender und abgeschlossener Saison. Tatsaechlich liegt
+    dort die Grenze zwischen LIGA- und POKAL-Records: FM speichert je
+    Wettbewerb (siehe _aggregate). Am 8. Spieltag fiel das nicht auf, weil die
+    Liga-Records damals die schaerfste Kante bildeten und zufaellig richtig
+    lagen. Im Saisonverlauf wandert die Kante auf den Pokal-Block – am
+    12.08.2026 lieferte sie 4 Einsaetze und degradierte jeden Spieler auf
+    seinen Ligapokal.
+
+    Bleibt als Anker fuer die Vergleichs-Skripte in research/ stehen.
+
+    Ermittelt, wie viele Einsaetze die LAUFENDE Saison hoechstens hat.
 
     Idee: in der laufenden Saison kann niemand mehr Einsaetze haben, als
     Spieltage gespielt wurden. Ueber alle ~37.000 Records im RAM ergibt das
@@ -396,44 +412,98 @@ def _plausible(r):
             and r["shots_on"] <= r["minutes"] // 6 + 3)
 
 
-def _is_current(r, limit, season_apps):
-    """Gehoert der Record zur LAUFENDEN Saison? Bevorzugt ueber die Einsaetze
-    (hart durch die Spieltage gedeckelt), sonst ueber das Minuten-Limit."""
-    if season_apps:
-        return r["apps"] <= season_apps
+def _is_current(r, limit):
+    """Gehoert der Record zur laufenden Saison? Ein einzelner Wettbewerb kann
+    nicht mehr als eine volle Liga-Saison umfassen (siehe CUR_MAX_MIN)."""
     return r["minutes"] <= limit
 
 
-def _cohort_rows(stats, named, limit, min_minutes, season_apps=None):
-    """Vergleichsdatensaetze der NAMENLOSEN Spieler-IDs: je ID der Record der
-    laufenden Saison. Fuer Perzentile braucht es keinen Namen – Positionsmaske,
-    Minuten und alle Kennzahlen stehen im Record. Damit rechnen die Scores
-    gegen Zehntausende statt gegen die Handvoll geladener Spieler.
+# Zaehler, die sich ueber Wettbewerbe hinweg aufaddieren lassen. Alles andere
+# (Note, Positionsmaske, is_gk) wird eigens behandelt.
+SUM_FIELDS = ("minutes", "apps", "rated", "goals", "assists", "conceded",
+              "xg", "xa", "xga", "pass_try", "pass_ok", "duels_total", "duels",
+              "dribbles", "shots_total", "shots_on", "fouls", "fouls_against",
+              "key_passes", "interceptions", "headers_total", "headers_won",
+              "clearances", "prog_passes", "recoveries", "losses",
+              "press_try", "press_win", "yellow")
+
+
+def _aggregate(recs):
+    """Fasst die Records eines Spielers zu SEINER SAISON zusammen.
+
+    FM legt die Statistik JE WETTBEWERB ab, nicht je Saison. An Correia
+    (Benfica, 12.08.2026) gegen die Spielerstatistik im Spiel verifiziert:
+
+        Liga 21 Einsaetze/1654 Min/7,64 · CL 7/522/7,59 · Taca 2/180/8,25
+        · Ligapokal 4/230/7,70 · Supertaca 1/63/6,80
+
+    Genau diese fuenf Records lagen im Speicher. Die fruehere Fassung nahm den
+    GROESSTEN unterhalb einer Saisongrenze und zeigte deshalb 230 Minuten statt
+    2649 – bei jedem Spieler, ueber die ganze Auswertung hinweg.
+
+    Deshalb wird summiert. Zwei Faelle brauchen Sonderbehandlung:
+
+    * Manche Spieler tragen zusaetzlich einen GESAMT-Record, der die uebrigen
+      schon aufsummiert (an Kouame und Tressoldi gefunden: 16/725 + 2/80 =
+      18/805 auf die Minute genau). Wer den mitsummiert, zaehlt doppelt – also
+      erkennen und allein verwenden.
+    * Die Note ist ein Mittelwert und darf nicht addiert werden. Gewichtet wird
+      mit den BEWERTETEN Spielen, denn genau darueber bildet FM sie (siehe
+      _fields); Kurzeinsaetze ohne Note zaehlen so auch hier nicht mit.
+    """
+    recs = [r for r in recs if r.get("minutes")]
+    if not recs:
+        return None
+    if len(recs) > 1:
+        gross = max(recs, key=lambda r: r["minutes"])
+        rest = [r for r in recs if r is not gross]
+        if (abs(gross["minutes"] - sum(r["minutes"] for r in rest)) <= 1
+                and abs(gross["apps"] - sum(r["apps"] for r in rest)) <= 1):
+            recs = [gross]          # Gesamt-Record, die uebrigen stecken drin
+    out = {k: sum(r.get(k) or 0 for r in recs) for k in SUM_FIELDS}
+    for k in ("xg", "xa", "xga"):
+        out[k] = round(out[k], 2)
+    rated = out["rated"]
+    out["rating"] = round(sum((r.get("rating") or 0) * (r.get("rated") or 0)
+                              for r in recs) / rated, 2) if rated else 0.0
+    mask = 0
+    for r in recs:                  # mehrere Wettbewerbe = mehrere Positionen
+        mask |= r.get("pos_mask") or 0
+    out["pos_mask"] = mask
+    out["is_gk"] = any(r.get("is_gk") for r in recs) or bool(mask & 1)
+    return out
+
+
+def _cohort_rows(stats, named, limit, min_minutes):
+    """Vergleichsdatensaetze der NAMENLOSEN Spieler-IDs: je ID die aufaddierte
+    Saison. Fuer Perzentile braucht es keinen Namen – Positionsmaske, Minuten
+    und alle Kennzahlen stehen im Record. Damit rechnen die Scores gegen
+    Zehntausende statt gegen die Handvoll geladener Spieler.
 
     Bewusst NUR die laufende Saison: die Score-Engine schrumpft /90-Raten mit
-    min/(min+180). Eine Kohorte aus 3000-Minuten-Altsaisonrecords bekaeme fast
-    volles Gewicht und wuerde die aktuell bewerteten Spieler systematisch
-    nach unten druecken. Die Mindestminuten werden am Saison-Limit gedeckelt,
-    sonst waere die Kohorte bei fruehem Saisonstand still leer."""
-    if not season_apps:
-        min_minutes = min(min_minutes, max(90, limit // 2))
+    min/(min+180). Eine Kohorte aus Altsaisonrecords bekaeme fast volles
+    Gewicht und wuerde die aktuell bewerteten Spieler systematisch nach unten
+    druecken. Die Mindestminuten gelten fuer die SUMME, nicht je Wettbewerb –
+    sonst faellt ein Spieler raus, der seine 200 Minuten auf Liga und Pokal
+    verteilt hat."""
     out = []
     for pid, recs in stats.items():
         if pid in named:
             continue
-        cur = [r for r in recs if r["minutes"] >= min_minutes
-               and _is_current(r, limit, season_apps) and _plausible(r)]
-        if not cur:
+        agg = _aggregate([r for r in recs
+                          if _is_current(r, limit) and _plausible(r)])
+        if agg is None or agg["minutes"] < min_minutes:
             continue
-        r = max(cur, key=lambda r: r["minutes"])
-        out.append(dict(r, id=pid, name=None, eid=None))
+        out.append(dict(agg, id=pid, name=None, eid=None))
     return out
 
 
 def scan_players(process_name="fm.exe", cur_max_min=None, known=None, meta=None,
-                 cohort_min_minutes=None, season_auto=True,
-                 hot_regions=None, full_sweep=True):
+                 cohort_min_minutes=None, hot_regions=None, full_sweep=True):
     """Liste von Spieler-Dicts der aktuellen Saison. Wirft, wenn fm.exe fehlt.
+
+    Ein Spieler-Dict ist die SUMME seiner Wettbewerbs-Records (siehe
+    _aggregate), nicht ein einzelner Record.
 
     hot_regions/full_sweep: Der Namensindex kostet 77 % der Scanzeit, obwohl
     Namen nur in ~6 % des Speichers liegen. Mit hot_regions (Basisadressen aus
@@ -442,14 +512,9 @@ def scan_players(process_name="fm.exe", cur_max_min=None, known=None, meta=None,
     neu belegte Bereiche unentdeckt. meta["hot_regions"] traegt die
     aktualisierte Menge zurueck.
 
-    season_auto: Saisongrenze automatisch aus den Einsatzzahlen ableiten
-    (detect_season_apps) statt aus cur_max_min. Das Minuten-Limit bleibt als
-    Rueckfallebene, falls keine klare Kante gefunden wird.
-
-    cur_max_min: Saison-Minuten-Limit (Records darueber = Altsaison), nur noch
-    Rueckfall. Jeder Spieler traegt zusaetzlich all_recs =
-    ALLE plausiblen Records (aktuelle Saison, Altsaison, andere Wettbewerbe)
-    fuer Saison-Historie und spaetere Wachstums-Erkennung.
+    cur_max_min: Obergrenze JE WETTBEWERBS-RECORD (darueber = Altsaison),
+    Standard CUR_MAX_MIN. Jeder Spieler traegt zusaetzlich all_recs = alle
+    plausiblen Einzel-Records fuer die Wettbewerbs-Ansicht.
 
     known: {pid: {"name":…, "eid":…}} bereits FRUEHER gesehener Spieler.
     FM haelt Namens-Records nur fuer gerade geladene Spieler vor, die
@@ -491,19 +556,15 @@ def scan_players(process_name="fm.exe", cur_max_min=None, known=None, meta=None,
     # sonst nur die benannten.
     want_cohort = cohort_min_minutes is not None
     stats = _find_records(regions, None if want_cohort else idset, counts)
-    # Saisongrenze aus dem Einsatz-Histogramm ALLER Records (nicht nur der
-    # benannten – dort ist die Kante statistisch nicht zu sehen).
-    season_apps = detect_season_apps(counts.get("apps_hist")) if season_auto else None
     born = _find_person_records(regions, eids, counts)
     if meta is not None:
         counts.pop("apps_hist", None)          # Rohhistogramm nicht weiterreichen
         meta.update(counts)
         meta["names_known"] = len(names)
-        meta["season_apps"] = season_apps
         meta["season_limit_min"] = limit
         if want_cohort:
             rows = _cohort_rows(stats, idset, limit,
-                                max(0, int(cohort_min_minutes)), season_apps)
+                                max(0, int(cohort_min_minutes)))
             for r in rows:                     # Kohorte braucht Alter fuer die
                 b = born.get(r["id"])          # altersbereinigten Perzentile
                 if b:
@@ -520,24 +581,17 @@ def scan_players(process_name="fm.exe", cur_max_min=None, known=None, meta=None,
             if key not in seen:
                 seen.add(key)
                 uniq.append(r)
-        current = [r for r in uniq if _is_current(r, limit, season_apps)]
-        if not current:
+        current = [r for r in uniq if _is_current(r, limit)]
+        rec = _aggregate(current)      # Summe ueber alle Wettbewerbe
+        if rec is None:
             continue
-        rec = max(current, key=lambda r: r["minutes"])
+        # In der Wettbewerbs-Ansicht kennzeichnen, was in die Summe eingeht.
         for r in uniq:
-            r["is_current"] = r is rec
-        # Positionsmaske (M-8) ueber ALLE echten Records des Spielers ODER-t:
-        # erfasst mehrere gespielte Positionen; Position ist statisch.
-        mask = 0
-        for r in uniq:
-            mask |= r.get("pos_mask", 0)
+            r["is_current"] = any(r is c for c in current)
         all_recs = sorted(uniq, key=lambda r: -r["minutes"])[:12]
-        # Torhueter, sobald IRGENDEIN Record es sagt: im aktuellen Record kann
-        # xGA 0 und die Positionsmaske leer sein (kurzer/torloser Einsatz).
-        is_gk = any(r.get("is_gk") for r in uniq) or bool(mask & 1)
         b = born.get(pid)
-        rec = dict(rec, id=pid, name=name, pos_mask=mask, all_recs=all_recs,
-                   eid=eids.get(pid), is_gk=is_gk,
+        rec = dict(rec, id=pid, name=name, all_recs=all_recs,
+                   eid=eids.get(pid),
                    birth_day=b[0] if b else None, birth_year=b[1] if b else None)
         players.append(rec)
     players.sort(key=lambda r: (-r["xg"], -r["goals"]))
