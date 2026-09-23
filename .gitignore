@@ -7,6 +7,10 @@ __pycache__/
 build/
 dist/
 *.manifest
+# Die Start-Exe liegt im Projektordner NEBEN fmcompanion.db – gefroren sucht
+# die App die DB neben sich (db._BASE). Vom Desktop aus zeigt eine Verknüpfung
+# hierher; eine Kopie der Exe woanders legte eine leere DB an.
+FMCompanion.exe
 
 # --- Laufzeitdaten ---------------------------------------------------------
 # Die Snapshot-Datenbank enthaelt den Stand des eigenen Savegames: gesammelte
@@ -34,8 +38,7 @@ research/objects.json
 # eigenen Savegame, research/ dokumentiert die Speicheranalyse. Beides bleibt
 # auf der Platte, gehoert aber nicht in ein oeffentliches Repository.
 research/
-PLAN.md
-PLAN-NACHLADEN.md
+PLAN*.md
 
 # --- Arbeitsnotizen und Sitzungsartefakte ----------------------------------
 # Prompt-Sammlungen und Notizen aus der Zusammenarbeit mit KI-Werkzeugen -

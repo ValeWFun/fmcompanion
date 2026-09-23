@@ -267,6 +267,19 @@
   .pos{color:var(--pos)} .neg{color:var(--neg)} .muted{color:var(--muted)}
   .cur{color:var(--accent);font-weight:700}
 
+  /* Fair ±% – Abstand des Marktwerts zum leistungsbasierten Schätzwert.
+     Grün = unterbewertet (Kauf-Signal), Violett = überbewertet; kein Rot
+     (Regel 2). Die Fläche kommt wie bei .pill als Inline-Stil aus cell(),
+     hier steht nur die Schrift. Unsichere Stichprobe bleibt ungefärbt und
+     gedämpft, fehlender Wert steht als „–" in --dim. */
+  td.fair{font-family:var(--mono);font-size:11.5px}
+  /* Charakter: das Wort in Stufenfarbe (Inline-Stil aus persTd), knapp
+     gehalten, damit die Spalte nicht die Tabelle sprengt. */
+  td.pers{font-size:11.5px;white-space:nowrap;max-width:132px;overflow:hidden;text-overflow:ellipsis}
+  td.pers.leer{color:var(--dim)}
+  td.fair.unsicher{color:var(--muted)}
+  td.fair.leer{color:var(--dim)}
+
   /* Kennzahl-Plakette. Die Fläche kommt als Inline-Stil aus cell(); hier
      steht nur, wie sie aussieht, nicht welche Farbe sie hat. */
   .pill{display:inline-block;min-width:24px;text-align:center;padding:2px 8px;
@@ -358,6 +371,17 @@
   .pbar b{width:34px;text-align:right;font-family:var(--mono);font-size:11.5px}
   .pbar .tval{width:64px;text-align:right;font-family:var(--mono);font-size:11px;
     color:var(--muted)}
+  /* Preislot – Marktwert und geschätzter Fair Value als zwei Balken auf
+     GEMEINSAMER Skala, damit der Abstand ablesbar ist statt errechnet.
+     Baut vollständig auf .pbar auf: keine eigenen Radien (Flächen bleiben
+     eckig, Regel 3), keine 45°-Schraffur (die gehört den Möbeln, Regel 1).
+     Fehlt der Marktwert, entfällt der Block ganz – Abwesenheit statt
+     Platzhalter. */
+  .lot .pbar .plab{width:104px}
+  .lot .pbar .tval{width:78px;color:var(--text)}
+  .lotdelta{font-family:var(--mono);font-size:13px;font-weight:700;margin:8px 0 2px}
+  .lotnote{color:var(--muted);font-size:11.5px}
+  .lotwarn{color:var(--dim);font-size:11.5px;margin-top:2px}
   .sparkrow{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12.5px}
   .sparkrow .plab{width:70px;color:var(--muted)}
   .sparkrow svg{background:var(--surface2)}
@@ -515,6 +539,32 @@
     font-size:12.5px;font-weight:400;letter-spacing:0;color:var(--text);
     text-transform:none}
   .ctxmenu button:hover{background:var(--accent);color:var(--on-accent);filter:none}
+  /* Untereintraege der Spezialistensuche: eingerueckt, damit die Staffelung
+     ohne Trennlinie je Eintrag lesbar bleibt. */
+  .ctxmenu button.ctxsub{padding-left:24px;color:var(--muted)}
+  .ctxmenu button.ctxsub:hover{color:var(--on-accent)}
+  .ctxmenu .ctxsep{padding:7px 12px 3px;color:var(--muted);font-family:var(--mono);
+    font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+    border-top:1px solid var(--rule);margin-top:4px}
+  .ctxmenu .ctxsep:empty{padding:0;margin-top:4px}
+  .seg.archseg{margin:6px 0 2px}
+
+  /* Formpfeil und Elf-Marken in der Kandidatenliste */
+  .fpfeil{display:inline-flex;vertical-align:-1px;margin-left:5px}
+  .telfmark,.tbusy{display:inline-block;margin-left:6px;padding:1px 5px;
+    font-family:var(--mono);font-size:9px;letter-spacing:.08em;
+    text-transform:uppercase;vertical-align:1px}
+  .telfmark{background:var(--accent);color:var(--on-accent)}
+  /* manuell gesetzt: umrandet statt gefuellt, damit man den Pin von der
+     Automatik unterscheidet, ohne eine weitere Farbe einzufuehren */
+  .telfmark.manuell{background:transparent;color:var(--accent);
+    box-shadow:inset 0 0 0 1px var(--accent)}
+  .tbusy{border:1px solid var(--rule);color:var(--muted)}
+  table.tcand tr.telf td{background:var(--surface2)}
+  table.tcand tr.telf td:first-child{box-shadow:inset 4px 0 0 var(--rule)}
+  /* Auswahl schlaegt Elf-Markierung: gleiche Spezifitaet, deshalb MUSS diese
+     Regel nach .telf stehen, sonst gewinnt die Elf-Kante. */
+  table.tcand tr.tsel.telf td:first-child{box-shadow:inset 4px 0 0 var(--accent)}
   .replbox{width:920px}
   .replhead{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
     margin:10px 0 4px}
@@ -629,10 +679,10 @@
 
 <div class="controls">
   <div class="viewnav" id="modeSeg">
-    <button class="on" data-mode="table" onclick="setMode('table')">tabelle</button>
+    <button class="on" data-mode="tactic" onclick="setMode('tactic')">mein team</button>
+    <button data-mode="table" onclick="setMode('table')">tabelle</button>
     <button data-mode="chart" onclick="setMode('chart')">chart</button>
     <button data-mode="signals" onclick="setMode('signals')">signale</button>
-    <button data-mode="tactic" onclick="setMode('tactic')">taktik</button>
     <button data-mode="cards" onclick="setMode('cards')">dossier</button>
   </div>
   <button id="watchFilter" class="wbtn" onclick="toggleWatchFilter()" title="Nur Merkliste zeigen">★ Merkliste</button>
@@ -644,7 +694,7 @@
     <label class="status" style="display:flex;gap:5px;align-items:center">Y
       <select id="yAxis" onchange="setAxis()"></select></label>
   </span>
-  <input id="search" type="search" placeholder="Spieler suchen…" oninput="render()">
+  <input id="search" type="search" placeholder="Spieler suchen…" oninput="sucheGeaendert()">
 </div>
 
 <div class="controls sub">
@@ -763,7 +813,10 @@ function setBtnLabel(id, text){
 let PLAYERS = [];
 let RANKINGS = [];
 let TAB = "all";
-let MODE = "table";
+// Startseite ist der eigene Kader, nicht die Tabelle: die Frage beim Oeffnen
+// lautet "wer steht gerade wie da", nicht "zeig mir 7000 Zeilen". Die Tabelle
+// bleibt als Tab erreichbar.
+let MODE = "tactic";
 let SRC = "last";          // "last" = letzter Snapshot, "pool" = akkumulierter Pool
 let MINMIN = 45;           // Minuten-Untergrenze (Slider)
 let WATCHFILTER = false;   // nur Merkliste-Spieler zeigen
@@ -775,6 +828,7 @@ let xKey = "finishing", yKey = "goals_p90";
 // Kennzahlen fuer die Chart-Achsen (Moneyball: Effizienz & Produktion pro 90)
 const METRICS_FIELD = [
   ["score","Moneyball-Score"],
+  ["dna","Vereins-DNA"],
   ["finishing","xG-Überperformance"], ["goals_p90","Tore/90"], ["xg_p90","xG/90"],
   ["xa_p90","xA/90"], ["assists_p90","Vorlagen/90"], ["rating","Ø-Note"],
   ["attack_p90","Angriff/90"], ["shots_p90","Schüsse/90"],
@@ -786,14 +840,16 @@ const METRICS_FIELD = [
   ["rec_p90","Ballgewinne/90"],
   ["header_pct","Kopfball %"], ["pass_pct","Pass %"],
   ["value_m","Marktwert (M€)"], ["value_score","Wert-Effizienz"], ["age","Alter"],
-  ["talent","Talent (Altersband)"],
+  ["talent","Talent (Altersband)"], ["pers_score","Charakter"],
   ["goals","Tore"], ["xg","xG"], ["minutes","Minuten"],
 ];
 const METRICS_GK = [
   ["score","Moneyball-Score"],
+  ["note_resid","Note über Erwartung"], ["gp_shot","Verhindert je 100 Schüsse"],
+  ["save_pct","Paradenquote %"], ["sot_faced","Schüsse aufs Tor"],
   ["goals_prevented","Goals Prevented"], ["xga","xGA"], ["conceded","Gegentore"],
   ["conceded_p90","Gegentore/90"], ["rating","Ø-Note"], ["pass_pct","Pass %"],
-  ["apps","Einsätze"], ["minutes","Minuten"],
+  ["pers_score","Charakter"], ["apps","Einsätze"], ["minutes","Minuten"],
 ];
 const metricsFor = () => TABS[TAB].gk ? METRICS_GK : METRICS_FIELD;
 
@@ -809,23 +865,49 @@ const C_GOALS=["goals","Tore"], C_XG=["xg","xG"], C_FIN=["finishing","Δ xG"],
       C_LOSS=["losses","Ballverl."],
       C_AGE=["age","Alter"], C_VAL=["value_m","Wert M€"], C_VEFF=["value_score","€-Eff"],
       // Talent = Perzentil im eigenen Altersband auf der eigenen Position
-      C_TAL=["talent","Talent"];
-const ALL_COLS=[NAME,POS,C_AGE,MIN,C_SC,C_TAL,C_VAL,C_VEFF,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_SH,C_DU,C_DR,C_PP];
+      C_TAL=["talent","Talent"],
+      // Fair ±% = Abstand des Marktwerts zum leistungsbasierten Schätzwert
+      C_FAIR=["value_delta_pct","Fair ±%"],
+      // Charakter = Persönlichkeit aus dem Spielerprofil (charakter.py); die
+      // Zelle zeigt das Wort, sortiert wird nach der Zahl 0-100
+      C_PERS=["pers_score","Charakter"];
+// Vereins-DNA: passstark × Ballgewinner, 0-100 (moneyball.add_dna)
+const C_DNA=["dna","DNA"];
+const ALL_COLS=[NAME,POS,C_AGE,MIN,C_SC,C_DNA,C_TAL,C_PERS,C_VAL,C_VEFF,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_SH,C_DU,C_DR,C_PP];
+
+// Minutenschwelle, ab der ein Fair Value als belastbar gilt. Das Backend
+// senkt sie, solange in der laufenden Saison noch niemand 450 Minuten hat,
+// und meldet den tatsächlich benutzten Wert über load_saved zurück.
+let FAIR_MIN_MIN = 450;
+
+// Erklärungen für Spaltenköpfe – nur wo die Überschrift allein zu knapp ist.
+const COL_TIPS = {
+  value_delta_pct: "Abweichung des Marktwerts vom leistungsbasierten Schätzwert. Positiv = unterbewertet.",
+  pers_score: "Persönlichkeit aus dem Spielerprofil, übersetzt in Entwicklung und Mentalität (0–100). Steht neben dem Score, nicht darin. Sortiert nach der Zahl.",
+  note_resid: "Ø-Note minus dem, was die Gegentore/90 der Mannschaft erwarten lassen (Note = 7,65 − 0,68 × GT/90). Der eigene Anteil des Torwarts – über Saisonhälften stabil.",
+  gp_shot: "Verhinderte Tore (xGA − Gegentore) je 100 Schüsse aufs Tor – je Schuss statt je Spiel, damit der Keeper der Schießbude keinen Volumenvorteil hat.",
+  save_pct: "Paraden ÷ (Paraden + Gegentore), aus den drei Paraden-Spalten des Exports gerechnet – FMs eigene Par % ist im Export kaputt.",
+  sot_faced: "Schüsse aufs Tor gegen ihn = Paraden + Gegentore. Die Stichprobe hinter den Quoten.",
+};
 
 // Positions-Dashboards: eigene Spalten; Standard-Sortierung = Moneyball-Score
 const TABS = {
   all:{title:"Feldspieler", sort:["score",true],           cols:ALL_COLS},
   def:{title:"Abwehr",      sort:["score",true], group:"def",
-       cols:[NAME,POS,MIN,C_SC,C_NOTE,C_DU,C_DPCT,C_KGW,C_KL,C_INT,C_PRG,C_PRW,C_PP,C_FO]},
+       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_DU,C_DPCT,C_KGW,C_KL,C_INT,C_PRG,C_PRW,C_PP,C_FO]},
   mid:{title:"Mittelfeld",  sort:["score",true],   group:"mid",
-       cols:[NAME,POS,MIN,C_SC,C_NOTE,C_PP,C_PRG,C_PRW,C_LOSS,C_DU,C_DPCT,C_XA,C_AS,C_GOALS]},
+       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_PP,C_PRG,C_PRW,C_LOSS,C_DU,C_DPCT,C_XA,C_AS,C_GOALS]},
   off:{title:"Offensivspieler", sort:["score",true], group:"off",
-       cols:[NAME,POS,MIN,C_SC,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_DR,C_SH,C_PRW]},
+       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_DR,C_SH,C_PRW]},
   st: {title:"Stürmer",     sort:["score",true],   group:"st",
-       cols:[NAME,POS,MIN,C_SC,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_SH,C_TS,C_XA,C_PRW]},
+       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_SH,C_TS,C_XA,C_PRW]},
+  // Torwart nach dem Nachschärfen: Note über Erwartung, Paraden je Schuss und
+  // die Stichprobe dahinter; "Verhindert gesamt" bleibt als Rohwert sichtbar.
   tw: {title:"Torhüter",    sort:["score",true], gk:true,
-       cols:[["name","Torhüter"],MIN,C_SC,C_NOTE,["apps","Eins."],["conceded","GEG"],
-             ["xga","xGA"],["goals_prevented","Verhind."],C_PP]},
+       cols:[["name","Torhüter"],MIN,C_SC,C_PERS,C_FAIR,C_NOTE,["note_resid","Note ü. Erw."],
+             ["conceded","GEG"],["sot_faced","Schüsse"],["save_pct","Paraden %"],
+             ["gp_shot","Verh./100"],["goals_prevented","Verhind."],
+             ["pen_saved","Elfer par."],C_PP]},
   unk:{title:"ohne Position", sort:["xg",true], group:"unk", cols:ALL_COLS},
 };
 
@@ -837,6 +919,29 @@ function tabMatch(p){
 }
 
 function fmt(v){ return (typeof v==="number" && !Number.isInteger(v)) ? v.toFixed(2) : v; }
+// Millionenbetrag mit Dezimalkomma, z.B. "9,0 Mio €"
+function fmtMio(v){ return v==null ? "–" : v.toFixed(1).replace(".", ",") + " Mio €"; }
+
+// Persönlichkeit: Farbe nach Stufe – Grün für Vorbild/stark, Violett für
+// Risiko, sonst Textfarbe (kein Rot, Regel 2). Tooltip mit beiden Achsen
+// und den Hinweisen aus charakter.py. Kurzform spart Spaltenbreite.
+const persInk = v => v==null ? "var(--dim)" : v>=65 ? "var(--pos)" : v<50 ? "var(--neg)" : "var(--text)";
+const persKurz = l => (l||"").replace("Relativ ", "rel. ").replace("Führungspersönlichkeit","Führung");
+function persTip(p){
+  if(p.pers_score==null)
+    return "Persönlichkeit noch nicht gescoutet" + (p.pers_medien ? ` · Medienumgang: ${esc2(p.pers_medien)}` : "");
+  return [`${p.pers_label} · ${p.pers_stufe} (${p.pers_score})`,
+    `Entwicklung ${p.pers_dev} · Mentalität ${p.pers_ment}`,
+    p.pers_medien ? `Medienumgang: ${p.pers_medien}` : "",
+    ...(p.pers_hinweise||[])].filter(Boolean).map(esc2).join("&#10;");
+}
+const persTd = p => p.pers_score==null
+  ? `<td class="pers leer" title="${persTip(p)}">–</td>`
+  : `<td class="pers" title="${persTip(p)}" style="color:${persInk(p.pers_score)}">${esc2(persKurz(p.pers_label))}</td>`;
+// Statuskürzel aus der Info-Spalte des Exports, soweit bekannt
+const INFO_KUERZEL = {Ver:"verletzt", Trn:"Transferliste", Lei:"Leihliste", Unz:"unzufrieden",
+  Bit:"bittet um Wechsel", nEU:"Nicht-EU", Jug:"Jugend", Beo:"beobachtet", TL:"Transfer-/Leihliste"};
+const infoText = s => (s||"").split(",").map(t=>t.trim()).filter(Boolean).map(t=>INFO_KUERZEL[t]||t).join(", ");
 
 // Hell/Dunkel
 function applyTheme(t){
@@ -899,13 +1004,63 @@ function cell(p, key){
     const v=p.value_score, a=Math.min(0.5, v/6*0.5).toFixed(2);
     return `<td style="background:rgba(var(--heat-pos),${a})">${v}</td>`;
   }
+  if(key==="value_delta_pct"){
+    // Kein Wert = kein Marktwert im Export ODER das Fair-Value-Modell trägt
+    // (noch) nicht. Beides ist ehrlicher als eine Zahl ohne Deckung.
+    if(p.value_delta_pct==null)
+      return `<td class="fair leer" title="Kein Schätzwert – ohne Marktwert im Export oder solange die Regression kein belastbares Signal findet">–</td>`;
+    const v = p.value_delta_pct;
+    const txt = (v>0?"+":v<0?"−":"±") + Math.abs(v).toLocaleString("de-DE") + " %";
+    const tip = `Marktwert ${fmtMio(p.value_m)} · Fair Value ${fmtMio(p.fair_value_m)}`;
+    // Dünne Stichprobe: Zahl gedämpft, keine Einfärbung – der Wert steht da,
+    // aber er behauptet nichts.
+    if(!p.value_reliable)
+      return `<td class="fair unsicher" title="${tip} – unsichere Stichprobe">${txt}</td>`;
+    // Neutralzone: unter 10 % ist die Abweichung Rauschen, nicht Signal.
+    if(Math.abs(v) < 10) return `<td class="fair">${txt}</td>`;
+    const col = v>0 ? "--heat-pos" : "--heat-neg";
+    const a = Math.min(0.5, 0.10 + Math.abs(v)/120*0.40).toFixed(2);
+    return `<td class="fair" title="${tip}" style="background:rgba(var(${col}),${a})">${txt}</td>`;
+  }
+  if(key==="pers_score") return persTd(p);
+  if(key==="note_resid"){
+    const v = p.note_resid;
+    if(v==null) return `<td class="muted" title="nur für Torhüter mit Export-Zahlen">–</td>`;
+    const cls = v>0.1?"pos":(v<-0.1?"neg":"muted");
+    return `<td class="${cls}">${v>0?"+":""}${v.toFixed(2)}</td>`;
+  }
+  if(key==="save_pct" || key==="gp_shot"){
+    const v = p[key];
+    if(v==null) return `<td class="muted" title="keine Paraden im Export – Liga ohne Detailstatistik oder älterer Import">–</td>`;
+    return `<td>${key==="save_pct" ? Math.round(v)+" %" : (v>0?"+":"")+v.toFixed(1)}</td>`;
+  }
+  if(key==="sot_faced") return `<td>${p.sot_faced==null?'<span class="muted">–</span>':p.sot_faced}</td>`;
   if(key==="score"){
     if(p.score==null) return `<td class="muted" title="Keine Positionsgruppe – kein Score">–</td>`;
     const v=p.score, col = v>=50 ? "var(--heat-pos)" : "var(--heat-neg)";
     const a = (0.14 + Math.abs(v-50)/50*0.50).toFixed(2);
-    const parts=(p.score_parts||[]).map(sp=>`${sp.label}: P${sp.pct} × ${sp.w}`).join("&#10;");
+    // pct null = Kennzahl fehlt (z.B. Chancen kreiert bei RAM-Spielern) und
+    // wurde uebersprungen; das steht im Tooltip, statt "P null" zu zeigen.
+    const parts=(p.score_parts||[]).map(sp=>sp.pct==null
+      ? `${sp.label}: fehlt (übersprungen)` : `${sp.label}: P${sp.pct} × ${sp.w}`).join("&#10;");
     const liga = p.league ? `${p.league} (Koeff. ${p.league_coeff})` : "unbekannt (Koeff. 1.0)";
     const tip = `Profil: ${p.profile_label||"?"}&#10;${parts}&#10;Liga: ${liga}&#10;Perzentile relativ zum Pool, /90-Raten geshrinkt (min/(min+180)) × Liga-Koeffizient`;
+    return `<td><span class="pill" title="${tip}" style="background:rgba(${col},${a})">${v}</span></td>`;
+  }
+  if(key==="dna"){
+    // Wie der Score als Pill – aber ohne diesen Zweig fiele 'dna' in den
+    // Standardzweig und zeigte bei Torhütern eine 0 statt eines Strichs.
+    if(p.dna==null) return `<td class="muted" title="Keine Vereins-DNA – Torhüter oder zu wenig Daten">–</td>`;
+    const v=p.dna, col = v>=50 ? "var(--heat-pos)" : "var(--heat-neg)";
+    const a = (0.14 + Math.abs(v-50)/50*0.50).toFixed(2);
+    // Die Einzelkennzahlen kommen in der Tabelle nicht mehr mit (Paketgröße,
+    // siehe load_saved) – wenn sie da sind, zeigen wir sie, sonst nur die Formel.
+    const teile=(p.dna_teile||[]).filter(t=>t.pct!=null)
+      .map(t=>`${t.label}: P${t.pct} × ${t.w}`).join("&#10;");
+    const tip = `Vereins-DNA ${v} = √(passstark ${p.dna_pass} × Ballgewinner ${p.dna_ball})`
+      + (teile ? `&#10;${teile}` : "")
+      + `&#10;Perzentile je Positionsgruppe, Raten × Liga-Koeffizient. `
+      + `Geometrisches Mittel: wer beides kann, liegt vorn.`;
     return `<td><span class="pill" title="${tip}" style="background:rgba(${col},${a})">${v}</span></td>`;
   }
   if(key==="reason") return `<td class="reason">${p.reason||""}</td>`;
@@ -914,6 +1069,13 @@ function cell(p, key){
     const cls = v>0.3?"pos":(v<-0.3?"neg":"muted");
     const s = v>0?`+${v.toFixed(2)}`:v.toFixed(2);
     return `<td class="${cls}">${s}</td>`;
+  }
+  if(key==="pen_saved"){
+    // Abzeichen, kein Score-Bestandteil: die Stichprobe ist zu klein, um zu
+    // rechnen, aber gross genug, um sie zu zeigen.
+    if(p.pen_faced==null) return `<td class="muted">–</td>`;
+    if(!p.pen_faced) return `<td class="muted" title="keinen Elfmeter gegen sich gehabt">0/0</td>`;
+    return `<td title="parierte Elfmeter / Elfmeter gegen sich">${p.pen_saved??0}/${p.pen_faced}</td>`;
   }
   if(key==="xga") return `<td>${(p.xga??0).toFixed(2)}</td>`;
   if(key==="rating"){
@@ -937,7 +1099,7 @@ function cell(p, key){
 function filteredRows(){
   const q = (document.getElementById("search").value||"").toLowerCase();
   return PLAYERS.filter(p => tabMatch(p)
-    && p.name.toLowerCase().includes(q)
+    && (p.name.toLowerCase().includes(q) || (p.pers_label||"").toLowerCase().includes(q))
     && (p.minutes||0) >= MINMIN
     && (!WATCHFILTER || WATCH[p.id])
     && (!U21ONLY || (p.age && p.age<=21)));
@@ -966,7 +1128,17 @@ async function doImport(){
   const st=document.getElementById("status");
   st.innerHTML='<span class="spin"></span> Import läuft…';
   const r=await api.import_export();
-  if(r&&r.ok){ st.textContent=`${r.count} Export-Spieler importiert.`; await loadData(); }
+  if(r&&r.ok){
+    // Mehrere Dateien auf einmal: Zeilen ueber alle Dateien, davon eindeutige
+    // Spieler (wer in zwei Positionslisten steht, zaehlt einmal).
+    const nd = (r.dateien||[]).length;
+    let txt = nd > 1
+      ? `${r.count} Spieler aus ${nd} Dateien importiert (${r.zeilen} Zeilen, Doppelte zusammengeführt).`
+      : `${r.count} Export-Spieler importiert.`;
+    if(r.fehler && r.fehler.length) txt += ` ⚠ ${r.fehler.length} Datei(en) übersprungen: ${r.fehler.join(" · ")}`;
+    st.textContent = txt;
+    await loadData();
+  }
   else st.textContent="⚠ "+((r&&r.error)||"Import abgebrochen");
 }
 
@@ -1087,8 +1259,13 @@ function cardStats(p){
   if(p.is_gk){
     const gk = PLAYERS.filter(q=>q.is_gk);
     const one=(k,inv)=>to99(pctOf(gk.map(q=>+q[k]||0), +p[k]||0, inv));
-    return [{lab:"REF",val:one("goals_prevented")},{lab:"XGA",val:one("xga")},
-            {lab:"PAS",val:one("pass_pct")},{lab:"EIN",val:one("apps")},
+    // Torwart nach dem Nachschärfen: je Schuss statt je Spiel, Note über
+    // Erwartung statt Einsätze. Fehlende Werte (keine Paraden im Export)
+    // stehen neutral, nicht bei null.
+    const gkOne=(k,inv)=>{ const vals=gk.filter(q=>q[k]!=null).map(q=>+q[k]);
+      return to99(p[k]==null ? null : pctOf(vals, +p[k], inv)); };
+    return [{lab:"VER",val:gkOne("gp_shot")},{lab:"PAR",val:gkOne("save_pct")},
+            {lab:"ERW",val:gkOne("note_resid")},{lab:"PAS",val:one("pass_pct")},
             {lab:"GEG",val:one("conceded_p90",true)},{lab:"FRM",val:one("rating")}];
   }
   const co = fieldCohort();
@@ -1107,7 +1284,9 @@ function cardConfigFor(p, label){
   const ovr = p.score!=null ? Math.round(50+45*(p.score/100))
                             : Math.round(stats.reduce((s,x)=>s+x.val,0)/stats.length);
   return {pid:p.id, name:p.name, pos:p.pos_label||(p.is_gk?"TW":"?"),
-          ovr, tier:tierForOvr(ovr), flag:"", img:null, label:label||"aktuell", stats};
+          ovr, tier:tierForOvr(ovr), flag:"", img:null, label:label||"aktuell", stats,
+          // Scouting-Bericht: die sichtbare Persönlichkeit gehört auf die Karte
+          pers:p.pers_label||"", persStufe:p.pers_stufe||"", medien:p.pers_medien||""};
 }
 
 function enrichSeasonRecord(rec, base){
@@ -1177,8 +1356,11 @@ function cardSVG(c){
     <line x1="26" y1="118" x2="314" y2="118" stroke="${t.rule}" stroke-width="1"/>
     ${ghost}${grid}${spokes}${poly}${dots}${labels}
     <line x1="26" y1="374" x2="314" y2="374" stroke="${t.rule}" stroke-width="1"/>
-    <text x="26" y="402" font-size="${nsz}" font-weight="600" fill="${t.txt}">${nm}</text>
-    <text x="26" y="424" font-size="10" font-family="${MONO}" letter-spacing=".6" fill="${t.txt}" opacity=".6">${(c.label||"").slice(0,40)}</text>
+    <text x="26" y="398" font-size="${nsz}" font-weight="600" fill="${t.txt}">${nm}</text>
+    <text x="26" y="416" font-size="10" font-family="${MONO}" letter-spacing=".6" fill="${t.txt}" opacity=".6">${(c.label||"").slice(0,40)}</text>
+    ${c.pers
+      ? `<text x="26" y="432" font-size="9" font-family="${MONO}" letter-spacing=".8" fill="${t.accent}">${esc2((c.pers+(c.medien?" · "+c.medien:"")).toUpperCase().slice(0,46))}</text>`
+      : `<text x="26" y="432" font-size="9" font-family="${MONO}" letter-spacing=".8" fill="${t.txt}" opacity=".4">PERSÖNLICHKEIT: NICHT GESCOUTET</text>`}
     <line x1="26" y1="440" x2="314" y2="440" stroke="${t.rule}" stroke-width="1"/>
     <text x="26" y="458" font-size="8" font-family="${MONO}" letter-spacing="1.8" fill="${t.txt}" opacity=".42">FM COMPANION · MONEYBALL</text>
     ${cross}
@@ -1254,21 +1436,121 @@ function cardEditor(){
 // die Kennzahlen, aus denen der Score entsteht, je mit Perzentil und Rohwert.
 let TACT = null, TACT_SLOT = null, TACT_PID = null, TACT_SQUADS = null;
 
+// Laufender Ladevorgang des Taktikbretts – Schutz gegen Mehrfachstart.
+//
+// render() ruft renderTactic() OHNE await auf, und render() feuert beim Start
+// aus mehreren Stellen (loadData, setTab, setMode, updateControls). TACT wird
+// aber erst NACH dem Await gesetzt: alle diese Aufrufe sahen TACT === null und
+// starteten je eine eigene Kette mit tactic_board() – einem Aufruf, der
+// sekundenlang rechnet. Solange das Brett nur per Klick erreichbar war, fiel
+// das nicht auf; seit es die Startseite ist, stapelten sich die Ketten und die
+// App war beim Öffnen minutenlang blockiert. Wer während des Ladens dazukommt,
+// fährt deshalb auf demselben Promise mit, statt einen neuen zu starten.
+let TACT_LADEN = null;
+
+function ladeTaktik(api){
+  if(TACT_LADEN) return TACT_LADEN;
+  TACT_LADEN = (async () => {
+    const r = await api.tactic_board();
+    if(r && r.kein_kader) return {kaderwahl: true};
+    if(!r || !r.ok) return {fehler: "Kein Board"};
+    TACT = r;
+    if(!TACT_SLOT) TACT_SLOT = TACT.slots[0].key;
+    // Archetypen kommen mit dem Brett mit – kein Nachladen je Position.
+    TACT_ARCH = {};
+    for(const s of TACT.slots) TACT_ARCH[s.key] = s.archetypen_liste || [];
+    return {};
+  })().finally(() => { TACT_LADEN = null; });
+  return TACT_LADEN;
+}
+
 async function renderTactic(){
   const host = document.getElementById("tableHost");
   const api = API();
   if(!api){ host.innerHTML = `<div class="empty"><h2>Nur in der App</h2></div>`; return; }
   if(TACT_SQUADS){ renderSquadPicker(host); return; }
   if(!TACT){
-    host.innerHTML = `<div class="empty"><span class="spin"></span> lade Taktik…</div>`;
-    let r; try{ r = await api.tactic_board(); }catch(e){
-      host.innerHTML = `<div class="empty"><h2>Fehler</h2>${e}</div>`; return; }
-    if(r && r.kein_kader){ await pickSquad(); return; }
-    if(!r || !r.ok){ host.innerHTML = `<div class="empty"><h2>Kein Board</h2></div>`; return; }
-    TACT = r;
-    if(!TACT_SLOT) TACT_SLOT = TACT.slots[0].key;
+    if(!TACT_LADEN)
+      host.innerHTML = `<div class="empty"><span class="spin"></span> lade Taktik…</div>`;
+    let e;
+    try{ e = await ladeTaktik(api); }
+    catch(err){ host.innerHTML = `<div class="empty"><h2>Fehler</h2>${err}</div>`; return; }
+    if(e.kaderwahl){ renderKaderwahl(host); return; }
+    if(e.fehler){ host.innerHTML = `<div class="empty"><h2>${e.fehler}</h2></div>`; return; }
+    if(!TACT) return;
   }
   drawTactic(host);
+}
+
+// Kaderwahl: der Export des eigenen Vereins IST der Kader. Die Kadererkennung
+// im Speicher bleibt als Ausweichweg – sie braucht ein laufendes FM24 und
+// zeigt nur, was gerade geladen ist.
+function renderKaderwahl(host){
+  host.innerHTML = `<div style="padding:6px 0 30px">
+    <div class="dsec">Welcher Kader ist deiner?</div>
+    <div class="muted" style="font-size:12px;margin:8px 0 14px;max-width:70ch">
+      Exportiere in FM deinen Kader (Strg+P) und wähle die Datei. Alle Spieler
+      des häufigsten Vereins darin bilden den Kader; verliehene bleiben
+      draußen. Neue Exporte derselben Datei ersetzen den Kader – so bleibt er
+      der aktuelle Stand.</div>
+    <button onclick="importSquad()">Kader aus Export importieren…</button>
+    <span class="muted" style="font-size:12px;margin-left:10px">oder</span>
+    <button class="linkbtn" onclick="pickSquad()">im Speicher suchen (FM24 muss laufen)</button>
+    <div class="muted" style="font-size:12px;margin:18px 0 6px;max-width:70ch">
+      Nach einem Vereinswechsel ohne eigenen Kader-Export: Verein aus den
+      importierten Scoutinglisten wählen – die eigenen Spieler stehen dort
+      meist mit drin, nur nicht alle.</div>
+    <select id="clubPick" style="min-width:220px"><option value="">Verein aus den Importen…</option></select>
+    <button class="linkbtn" onclick="waehleVerein()">übernehmen</button>
+  </div>`;
+  ladeVereine();
+}
+
+async function ladeVereine(){
+  const api = API(), sel = document.getElementById("clubPick");
+  if(!api || !sel) return;
+  let r; try{ r = await api.export_clubs(8); }catch(e){ return; }
+  if(!r || !r.ok) return;
+  sel.innerHTML = `<option value="">Verein aus den Importen…</option>` + r.vereine.map(v =>
+    `<option value="${escAttr(v.club)}"${v.club===r.eigener?" selected":""}>${esc2(v.club)} (${v.n})</option>`).join("");
+}
+
+async function waehleVerein(){
+  const api = API(); if(!api) return nurInApp();
+  const sel = document.getElementById("clubPick"); if(!sel || !sel.value) return;
+  const st = document.getElementById("status");
+  let r; try{ r = await api.set_own_club(sel.value); }catch(e){ r = {ok:false, error:String(e)}; }
+  if(!r || !r.ok){ st.textContent = "⚠ " + ((r && r.error) || "Verein konnte nicht gesetzt werden"); return; }
+  st.textContent = `Kader: ${r.anzahl} Spieler von ${r.verein}` + (r.hinweis ? ` · ${r.hinweis}` : "");
+  TACT_SQUADS = null; TACT = null; TACT_SLOT = null; TACT_PID = null;
+  renderTactic();
+}
+
+async function importSquad(){
+  const api = API(); if(!api) return nurInApp();
+  const st = document.getElementById("status");
+  let r; try{ r = await api.import_squad(); }catch(e){ r = {ok:false, error:String(e)}; }
+  if(!r || !r.ok){ if(r && r.error) st.textContent = r.error; return; }
+  st.textContent = `Kader importiert: ${r.anzahl} Spieler von ${r.verein}`
+    + (r.verliehen ? ` · ${r.verliehen} verliehene ausgelassen` : "");
+  TACT_SQUADS = null; TACT = null; TACT_SLOT = null; TACT_PID = null;
+  renderTactic();
+}
+
+async function pinSetzen(slotKey, id){
+  const api = API(); if(!api) return nurInApp();
+  const st = document.getElementById("status");
+  let r; try{ r = await api.set_pin(slotKey, id); }catch(e){ r = {ok:false, error:String(e)}; }
+  if(!r || !r.ok){ st.textContent = "⚠ " + ((r && r.error) || "Pin fehlgeschlagen"); return; }
+  st.textContent = id==null ? "Pin gelöst – Position wieder automatisch besetzt."
+                            : "Manuell aufgestellt. Die Automatik füllt die übrigen Plätze.";
+  TACT = null; renderTactic();
+}
+async function pinsLoesen(){
+  const api = API(); if(!api) return nurInApp();
+  await api.clear_pins();
+  document.getElementById("status").textContent = "Alle Pins gelöst – Aufstellung wieder automatisch.";
+  TACT = null; renderTactic();
 }
 
 async function pickSquad(){
@@ -1289,10 +1571,12 @@ function renderSquadPicker(host){
     </div>`).join("");
   host.innerHTML = `<div style="padding:6px 0 30px">
     <div class="dsec">Welcher Kader ist deiner?</div>
-    <div class="muted" style="font-size:12px;margin:8px 0 16px;max-width:70ch">
+    <div class="muted" style="font-size:12px;margin:8px 0 10px;max-width:70ch">
       Football Manager hält mehrere Vereine gleichzeitig im Speicher. Aus den
       Daten geht nicht hervor, welcher davon deiner ist – einmal auswählen,
-      danach merkt sich die App die Spieler-IDs.</div>
+      danach merkt sich die App die Spieler. Verlässlicher ist der Export des
+      eigenen Vereins:
+      <button class="linkbtn" onclick="importSquad()">Kader aus Export importieren…</button></div>
     <div class="gallery">${opt}</div></div>`;
 }
 const esc2 = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
@@ -1304,15 +1588,45 @@ async function chooseSquad(i){
   renderTactic();
 }
 async function resetSquad(){
-  TACT = null; TACT_PID = null; await pickSquad();
+  TACT = null; TACT_PID = null;
+  renderKaderwahl(document.getElementById("tableHost"));
 }
+
+// Formpfeil: Dreieck aus 45°-Diagonalen, kein Emoji und kein Rot – Aufwaerts
+// gruen (--pos), abwaerts violett (--neg), damit es bei Rot-Gruen-Schwaeche
+// unterscheidbar bleibt. Ohne Urteil bleibt die Stelle leer statt "stabil" zu
+// behaupten, was nicht gemessen wurde.
+function formPfeil(f){
+  if(!f || !f.richtung) return "";
+  const hoch = f.richtung > 0;
+  return `<span class="fpfeil" title="Form ${f.form_note.toFixed(2)} gegen `
+    + `Saisonschnitt ${f.saison_note.toFixed(2)} (${f.diff>0?"+":""}${f.diff.toFixed(2)}) `
+    + `aus den letzten ${f.minuten} Minuten">`
+    + `<svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">`
+    + `<path d="${hoch?"M5 2 L9 8 L1 8 Z":"M5 8 L9 2 L1 2 Z"}" `
+    + `fill="${hoch?"var(--pos)":"var(--neg)"}"/></svg></span>`;
+}
+// Vereins-DNA in Tabellenzellen: eine Zahl, beide Dimensionen im Tooltip.
+// Kein Wert (Torhüter, zu wenig Daten) bleibt ein Strich – nicht 0, das wäre
+// eine Aussage.
+function dnaCell(c){
+  if(c.dna==null) return `<span class="muted">–</span>`;
+  return `<span style="font-family:var(--mono)" title="Vereins-DNA ${c.dna}: `
+    + `passstark ${c.dna_pass} · Ballgewinner ${c.dna_ball} `
+    + `(geometrisches Mittel – wer beides kann, liegt vorn)">${c.dna}</span>`;
+}
+const kurzVon = k => { const s = TACT && TACT.slots.find(x=>x.key===k); return s?s.kurz:k; };
 
 function drawTactic(host){
   const slot = TACT.slots.find(s=>s.key===TACT_SLOT) || TACT.slots[0];
   const pitch = TACT.slots.map(s=>{
     const on = s.key===slot.key;
-    const best = s.kandidaten[0];
+    // Auf dem Platz steht, wer in der automatischen Elf gesetzt ist – NICHT
+    // der Beste dieser Position. Borges ist auf beiden Fluegeln der Staerkste,
+    // spielen kann er nur auf einem (siehe tactics.startelf).
+    const best = s.kandidaten.find(k=>k.id===s.startelf_id) || s.kandidaten[0];
     const col = best ? scoreInk(best.score) : "var(--dim)";
+    const f = best && best.form;
     return `<g class="tslot${on?" on":""}" onclick="tactPick('${s.key}')">
       <rect x="${s.x-7}" y="${s.y-5.2}" width="14" height="10.4"
             fill="${on?"var(--accent)":"var(--surface)"}"
@@ -1320,10 +1634,19 @@ function drawTactic(host){
       <text x="${s.x}" y="${s.y-0.9}" text-anchor="middle" font-size="3.1"
             font-family="var(--mono)" font-weight="700"
             fill="${on?"var(--on-accent)":"var(--text)"}">${s.kurz}</text>
+      ${s.gepinnt ? `<rect x="${s.x+5.3}" y="${s.y-4.6}" width="1.3" height="1.3"
+            fill="${on?"var(--on-accent)":"var(--accent)"}"><title>manuell aufgestellt</title></rect>` : ""}
       <text x="${s.x}" y="${s.y+3.4}" text-anchor="middle" font-size="3.6"
             font-weight="700" fill="${on?"var(--on-accent)":col}">${best?best.score:"–"}</text>
+      ${f && f.richtung ? `<path d="${f.richtung>0
+          ? `M${s.x+5} ${s.y-3.4} l1.3 1.3 l-2.6 0 Z`
+          : `M${s.x+5} ${s.y-2.1} l1.3 -1.3 l-2.6 0 Z`}"
+          fill="${on?"var(--on-accent)":(f.richtung>0?"var(--pos)":"var(--neg)")}"/>` : ""}
       ${best ? `<title>${esc2(best.name)} · ${Math.round(best.minutes||0)} Minuten`
-        + ` · Stichprobe ${Math.round(best.verlaesslich*100)} %</title>
+        + ` · Stichprobe ${Math.round(best.verlaesslich*100)} %`
+        + ` · Gesamt ${best.score} = ${gesamtFormel(best)}`
+        + (f ? ` · Form ${f.form_note.toFixed(2)} gegen Saison ${f.saison_note.toFixed(2)}`
+             + ` aus ${f.minuten} Minuten` : ` · noch kein Formurteil`) + `</title>
       <rect x="${s.x-4}" y="${s.y+4.2}" width="8" height="0.5" opacity=".3"
             fill="${on?"var(--on-accent)":"var(--rule)"}"/>
       <rect x="${s.x-4}" y="${s.y+4.2}" width="${(8*(best.verlaesslich||0)).toFixed(2)}"
@@ -1332,21 +1655,35 @@ function drawTactic(host){
   }).join("");
 
   const liste = slot.kandidaten.length ? slot.kandidaten.map(c=>`
-    <tr class="${c.id===TACT_PID?"tsel":""}" onclick="tactPlayer(${c.id})"
+    <tr class="${c.id===TACT_PID?"tsel":""}${c.id===slot.startelf_id?" telf":""}"
+        onclick="tactPlayer(${c.id})"
         oncontextmenu="return tactMenu(event,${c.id})"
         title="Rechtsklick: Ersatz für diesen Spieler suchen">
-      <td class="name">${esc2(c.name)}</td>
+      <td class="name">${esc2(c.name)}${formPfeil(c.form)}${
+        c.id===slot.startelf_id
+          ? (slot.gepinnt
+              ? `<span class="telfmark manuell" title="manuell aufgestellt – Rechtsklick: Pin lösen">manuell</span>`
+              : `<span class="telfmark" title="steht in der automatischen Elf">gesetzt</span>`)
+        : c.gesetzt_auf ? `<span class="tbusy" title="spielt in der automatischen Elf auf einer anderen Position">${esc2(kurzVon(c.gesetzt_auf))}</span>`
+        : ""}</td>
       <td>${c.age?Math.round(c.age):"–"}</td>
       <td>${Math.round(c.minutes||0)}</td>
       <td>${scorePill(c)}</td>
+      <td class="muted" style="font-family:var(--mono)">${c.fit??"–"}</td>
+      <td class="muted" style="font-family:var(--mono)">${c.mb??"–"}</td>
+      <td>${dnaCell(c)}</td>
+      ${persTd(c)}
       <td class="muted" title="${c.verlaesslich<DUENN?"Kleine Stichprobe – die Zahl kann ein Ausreißer sein, heruntergerechnet wird sie aber nicht":"ausreichende Stichprobe"}">${Math.round(c.verlaesslich*100)}%</td>
       <td class="muted" title="${c.stat_quelle==="export"?"Zahlen aus dem FM-Export – der Speicher hatte weniger Minuten":"Zahlen aus dem Speicher"}">${c.stat_quelle==="export"?"Export":c.pos_quelle}</td>
     </tr>`).join("")
-    : `<tr><td colspan="6" class="muted">Kein Kaderspieler ist für diese Position hinterlegt.</td></tr>`;
+    : `<tr><td colspan="10" class="muted">Kein Kaderspieler ist für diese Position hinterlegt.</td></tr>`;
 
   const sel = slot.kandidaten.find(c=>c.id===TACT_PID);
   const detail = sel ? tactDetail(sel) : `<div class="muted" style="font-size:12px">
-      Spieler anklicken, um die Kennzahlen hinter dem Score zu sehen.</div>`;
+      Spieler anklicken, um die Kennzahlen hinter dem Fit zu sehen.
+      Gesamt = Fit · Score · Charakter, geometrisch mit 0,35 / 0,35 / 0,30:
+      passt in die Rolle, ist gut <i>und</i> bringt den Charakter mit. Ohne
+      gescoutete Persönlichkeit zählt nur √(Fit × Score).</div>`;
 
   host.innerHTML = `<div class="tactwrap">
     <div class="tactpitch">
@@ -1361,9 +1698,12 @@ function drawTactic(host){
         ${pitch}
       </svg>
       <div class="muted" style="font-size:10.5px;font-family:var(--mono)">
-        ${TACT.kader} Kaderspieler${TACT.ohne_daten?` · ${TACT.ohne_daten} ohne Statistikdaten`:""}
+        ${TACT.verein?`<b>${esc2(TACT.verein)}</b> · `:""}${TACT.kader} Kaderspieler${TACT.ohne_daten?` · ${TACT.ohne_daten} ohne Statistikdaten`:""}
         · ${TACT.export_positionen} mit Export-Position
-        · <button class="linkbtn" onclick="resetSquad()">Kader ändern</button>
+        · <button class="linkbtn" onclick="resetSquad()">Kader ändern</button>${
+          TACT.pins && Object.keys(TACT.pins).length
+            ? ` · ${Object.keys(TACT.pins).length} manuell aufgestellt
+               <button class="linkbtn" onclick="pinsLoesen()">alle lösen</button>` : ""}
       </div>
     </div>
     <div class="tactpanel">
@@ -1373,7 +1713,12 @@ function drawTactic(host){
       <ul class="taufg">${slot.aufgaben.map(a=>`<li>${esc2(a)}</li>`).join("")}</ul>
       <table class="tcand"><thead><tr>
         <th style="text-align:left">Spieler</th><th>Alter</th><th>Min</th>
-        <th>Score</th><th title="Wie belastbar die Stichprobe ist">Basis</th>
+        <th title="${GESAMT_TIP}">Gesamt</th>
+        <th title="Positions-Fit: wie gut er DIESE Rolle im 4-2-3-1 ausfüllt (Perzentil gegen alle, die sie spielen können)">Fit</th>
+        <th title="Moneyball-Score: wie gut er allgemein ist, stilneutral – dieselbe Zahl wie in der Tabelle">Score</th>
+        <th title="Vereins-DNA: passstark × Ballgewinner">DNA</th>
+        <th title="Persönlichkeit aus dem Spielerprofil – neben dem Score, nicht darin">Charakter</th>
+        <th title="Wie belastbar die Stichprobe ist">Basis</th>
         <th title="Woher die Positionsangabe stammt">Quelle</th>
       </tr></thead><tbody>${liste}</tbody></table>
       ${detail}
@@ -1383,6 +1728,15 @@ function drawTactic(host){
 }
 
 const scoreInk = v => v>=50 ? "var(--pos)" : "var(--neg)";
+
+// Gesamt = Fit^0,35 × Score^0,35 × Charakter^0,30 (tactics.gesamt), in der
+// Ersatzsuche ohne Score Fit^0,7 × Charakter^0,3. Ohne gescoutete
+// Persönlichkeit fällt der Faktor weg. Der Text nennt die Bausteine.
+const gesamtFormel = c => `Fit ${c.fit??"–"}`
+  + (c.mb!==undefined ? ` · Score ${c.mb??"–"}` : "")
+  + ` · Charakter ${c.charakter??"ungescoutet"}`;
+const GESAMT_TIP = "Fit^0,35 × Score^0,35 × Charakter^0,30 – wer alles mitbringt, liegt vorn; "
+  + "ein guter Spieler in der falschen Rolle nicht. Ohne gescoutete Persönlichkeit √(Fit × Score).";
 
 // Score-Plakette für Taktikbrett und Ersatzsuche. Der Wert steht IMMER
 // ungedämpft da – sonst verschwindet der Ersatzspieler, der auf 300 Minuten
@@ -1397,7 +1751,9 @@ const scorePill = c => `<span class="pill${c.verlaesslich<DUENN?" duenn":""}"
     title="${c.verlaesslich<DUENN
       ? "Nur "+Math.round(c.minutes||0)+" Minuten Spielzeit – der Score ist echt, aber wacklig ("
         +Math.round(c.verlaesslich*100)+" % Stichprobe)"
-      : "Stichprobe "+Math.round(c.verlaesslich*100)+" % – belastbar"}"
+      : "Stichprobe "+Math.round(c.verlaesslich*100)+" % – belastbar"}${
+      c.charakter!=null ? " · Charakter "+c.charakter+" fließt ein"
+                        : " · Persönlichkeit ungescoutet, nur Leistung"}"
     style="background:rgba(${c.score>=50?"var(--heat-pos)":"var(--heat-neg)"},${
       (0.14+Math.abs(c.score-50)/50*0.5).toFixed(2)})">${c.score}</span>`;
 
@@ -1414,7 +1770,8 @@ function tactDetail(c){
       <span class="ptrack"><i style="width:${t.pct}%;background:rgba(${col},.85)"></i></span>
       <b>${t.pct}</b><span class="tval">${w}</span></div>`;
   }).join("");
-  return `<div class="dsec">${esc2(c.name)} · Score ${c.score}</div>
+  return `<div class="dsec">${esc2(c.name)} · Gesamt ${c.score}
+      <span class="muted">= ${gesamtFormel(c)}</span></div>
     <div class="muted" style="font-size:11.5px;margin-bottom:6px">
       Balken = Perzentil unter allen Spielern, die diese Position spielen können.
       Rechts der tatsächliche Wert.${c.verlaesslich<DUENN
@@ -1434,6 +1791,10 @@ function tactPlayer(id){ TACT_PID = (TACT_PID===id?null:id); drawTactic(document
 // stärker, oder gleich stark und jünger. Positionsfremde Spieler sind
 // zugelassen – in FM lässt sich umschulen, deshalb kostet das nur Score-Punkte
 // statt auszuschließen (siehe tactics.UMSCHULUNG_KANTEN).
+let REPL_ARCH = null;      // beim Spezialisten: worin er herausragen soll
+let TACT_ARCH = null;      // Archetypen je Position, einmal vom Backend geholt
+let REPL_ALLE = false;     // false = nur Importe seit dem Kader-Import, true = alle
+let REPL_NUR_CHAR = false; // true = Kandidaten ohne gescoutete Persönlichkeit ausblenden
 let REPL = null, REPL_MODE = "aehnlich", REPL_PID = null, REPL_MIN = 180,
     REPL_FOR = null,       // {id, slot} – wofür das Fenster gerade offen ist
     CTX = null;            // offenes Kontextmenü
@@ -1443,6 +1804,9 @@ const REPL_MODI = [
    "Gleiches Niveau (±8 Punkte), sortiert nach Ähnlichkeit der Kennzahlen."],
   ["besser", "Stärker",
    "Mindestens 3 Punkte besser auf dieser Position, sortiert nach Score."],
+  ["spezialist", "Spezialist",
+   "Ragt in einer Teildisziplin heraus (ab 75. Perzentil) und darf dafür im "
+   + "Gesamtscore bis zu 12 Punkte abfallen."],
   ["juenger", "Jünger",
    "Mindestens 2 Jahre jünger und höchstens 5 Punkte schwächer."],
 ];
@@ -1454,8 +1818,24 @@ function tactMenu(ev, id){
   closeCtx();
   const m = document.createElement("div");
   m.className = "ctxmenu";
+  // Archetypen der Position: sie kommen aus dem Backend (tactics.ARCHETYPEN)
+  // und stehen in TACT_ARCH, sobald das Brett geladen wurde.
+  const arch = (TACT_ARCH && TACT_ARCH[TACT_SLOT]) || [];
+  const archBtns = arch.map(a =>
+    `<button class="ctxsub" onclick="closeCtx();openRepl(${id},'spezialist','${a.key}')"`
+    + ` title="${esc2(a.stats.join(', '))}">${esc2(a.label)}</button>`).join("");
+  // Manuell aufstellen: der Pin ueberschreibt die Automatik fuer diesen Slot.
+  // Steht der Spieler hier schon per Pin, bietet das Menue das Loesen an.
+  const pinBtn = (c && slot && c.id===slot.startelf_id && slot.gepinnt)
+    ? `<button onclick="closeCtx();pinSetzen('${slot.key}',null)">Pin lösen – wieder automatisch</button>`
+    : `<button onclick="closeCtx();pinSetzen('${slot?slot.key:TACT_SLOT}',${id})">Hier aufstellen (manuell)</button>`;
   m.innerHTML = `<div class="ctxhead">${esc2(c?c.name:"Spieler")}</div>
-    <button onclick="closeCtx();openRepl(${id})">Ersatz finden…</button>
+    ${pinBtn}
+    <div class="ctxsep"></div>
+    <button onclick="closeCtx();openRepl(${id},'besser')">Bessere Alternative…</button>
+    <button onclick="closeCtx();openRepl(${id},'aehnlich')">Alternative…</button>
+    ${arch.length ? `<div class="ctxsep">Spezialist für…</div>${archBtns}` : ""}
+    <div class="ctxsep"></div>
     <button onclick="closeCtx();tactPlayer(${id})">Kennzahlen anzeigen</button>`;
   document.body.appendChild(m);
   // Erst messen, dann setzen – sonst läuft das Menü am rechten/unteren Rand
@@ -1476,9 +1856,11 @@ function closeCtx(){
   CTX.remove(); CTX = null;
 }
 
-async function openRepl(id){
+async function openRepl(id, modus, archetyp){
   REPL_FOR = {id, slot: TACT_SLOT};
   REPL = null; REPL_PID = null;
+  if(modus) REPL_MODE = modus;
+  REPL_ARCH = archetyp || null;
   document.getElementById("replModal").classList.add("on");
   await loadRepl();
 }
@@ -1491,11 +1873,24 @@ async function loadRepl(){
   REPL = null; drawRepl();
   try{
     REPL = await api.tactic_replacements(REPL_FOR.slot, REPL_FOR.id,
-                                         REPL_MODE, REPL_MIN);
+                                         REPL_MODE, REPL_MIN, REPL_ARCH, REPL_ALLE,
+                                         REPL_NUR_CHAR);
   }catch(e){ REPL = {ok:false, error:String(e)}; }
   drawRepl();
 }
-function setReplMode(m){ if(m===REPL_MODE) return; REPL_MODE=m; REPL_PID=null; loadRepl(); }
+function setReplMode(m, arch){
+  // Der Spezialist braucht immer einen Archetyp; ohne einen ist der Modus
+  // sinnlos, deshalb faellt er dann auf den ersten der Position zurueck.
+  if(m==="spezialist" && !arch){
+    const a = (TACT_ARCH && TACT_ARCH[REPL_FOR && REPL_FOR.slot]) || [];
+    if(!a.length) return;
+    arch = a[0].key;
+  }
+  if(m===REPL_MODE && (arch||null)===REPL_ARCH) return;
+  REPL_MODE=m; REPL_ARCH=(m==="spezialist"?arch:null); REPL_PID=null; loadRepl();
+}
+function setReplAlle(v){ REPL_ALLE = (v==="alle"); REPL_PID=null; loadRepl(); }
+function setReplNurChar(on){ REPL_NUR_CHAR = !!on; REPL_PID=null; loadRepl(); }
 function setReplMin(v){ REPL_MIN=+v; REPL_PID=null; loadRepl(); }
 function replPick(id){ REPL_PID = (REPL_PID===id?null:id); drawRepl(); }
 
@@ -1533,13 +1928,23 @@ function drawRepl(){
           c.stand?" ("+esc2(String(c.stand).slice(0,10))+")":""}">alt</span>` : "");
     const pos = (c.gruppen||[]).slice(0,3).map(g=>g.toUpperCase()).join(" ")
       + ((c.gruppen||[]).length>3 ? "…" : "");
-    const info = [c.club ? esc2(c.club) : "", replVal(c.value)].filter(Boolean).join(" · ");
+    const info = [c.club ? esc2(c.club) : "", replVal(c.value),
+      c.stand ? `<span class="muted" title="Import-Datum dieser Zeile">Stand ${String(c.stand).slice(8,10)}.${String(c.stand).slice(5,7)}.</span>` : ""
+    ].filter(Boolean).join(" · ");
     const det = c.id===REPL_PID
-      ? `<tr class="rdet"><td colspan="8">${replDetail(c)}</td></tr>` : "";
+      ? `<tr class="rdet"><td colspan="10">${replDetail(c)}</td></tr>` : "";
     return `<tr class="${c.id===REPL_PID?"rsel":""}" onclick="replPick(${c.id})">
       <td>${scorePill(c)}</td>
+      <td class="muted" style="font-family:var(--mono)">${c.fit??"–"}</td>
+      <td>${dnaCell(c)}</td>
+      ${persTd(c)}
       <td class="${c.delta_score>0?"pos":c.delta_score<0?"neg":"muted"}">${c.delta_score>0?"+":""}${c.delta_score}</td>
-      <td class="muted">${c.aehnlichkeit==null?"–":c.aehnlichkeit}</td>
+      <td class="${REPL.modus==="spezialist"?"":"muted"}"${
+        REPL.modus==="spezialist"
+          ? ` title="Perzentil in ${esc2(REPL.archetyp_label||"")} – danach ist sortiert"`
+          : ""}>${REPL.modus==="spezialist"
+            ? (c.archetyp_pct==null?"–":c.archetyp_pct)
+            : (c.aehnlichkeit==null?"–":c.aehnlichkeit)}</td>
       <td class="name">${esc2(c.name)}${marken}</td>
       <td class="muted" style="font-family:var(--mono);font-size:10.5px">${pos}</td>
       <td>${c.age==null?"–":Math.round(c.age)}${
@@ -1556,19 +1961,28 @@ function drawRepl(){
       Mindestminuten sinken oder der Scouting-Modus weitere Spieler einliest.</div></div>`;
 
   box.innerHTML = kopf
-    + `<div class="dsub">Zu ersetzen: <b>${esc2(o.name)}</b> · Score ${o.score}
+    + `<div class="dsub">Zu ersetzen: <b>${esc2(o.name)}</b> · Gesamt ${o.score}
+        · Fit ${o.fit??"–"} · Charakter ${o.charakter??"ungescoutet"}
         · ${o.age==null?"Alter unbekannt":Math.round(o.age)+" Jahre"}
         · ${Math.round(o.minutes||0)} Minuten</div>`
     + replSteuerung()
     + `<div class="muted" style="font-size:11.5px;margin:8px 0 2px;max-width:74ch">
-        ${esc2(modus[2])} Positionsfremde Spieler sind dabei – ihr Score ist um
-        den Umschulungsaufwand gemindert.
+        ${esc2(modus[2])} Positionsfremde Spieler sind dabei – ihr Fit ist um
+        den Umschulungsaufwand gemindert. Gesamt = Fit^0,7 × Charakter^0,3;
+        ohne gescoutete Persönlichkeit zählt der Fit allein.
+        Kandidaten: ${REPL.pool||REPL.geprueft} Export-Spieler${REPL.stand
+          ? `, importiert seit ${REPL.stand.slice(8,10)}.${REPL.stand.slice(5,7)}.${REPL.stand.slice(0,4)}` : " aus allen Importen"}.
         <b>${REPL.gefunden}</b> von ${REPL.geprueft} geprüften Spielern passen,
         Perzentile gegen ${REPL.vergleichsbasis} Spieler dieser Position.</div>`
     + (REPL.treffer.length ? `<table class="repl"><thead><tr>
-        <th title="Positionsscore nach Abzug für Umschulung">Score</th>
+        <th title="Fit^0,7 × Charakter^0,3 nach Abzug für Umschulung – ohne gescoutete Persönlichkeit nur der Fit">Gesamt</th>
+        <th title="Positions-Fit nach Abzug für Umschulung – die Ersatzsuche ist eine Slot-Suche">Fit</th>
+        <th title="Vereins-DNA: passstark × Ballgewinner">DNA</th>
+        <th title="Persönlichkeit aus dem Spielerprofil">Charakter</th>
         <th title="Unterschied zum aktuellen Spieler">Δ</th>
-        <th title="Übereinstimmung der Kennzahlen-Perzentile, 100 = deckungsgleich">Ähnl</th>
+        ${REPL.modus==="spezialist"
+          ? `<th title="Wie stark der Spieler in ${esc2(REPL.archetyp_label||"dieser Teildisziplin")} ist (Perzentil)">${esc2(REPL.archetyp_label||"Spezial")}</th>`
+          : `<th title="Übereinstimmung der Kennzahlen-Perzentile, 100 = deckungsgleich">Ähnl</th>`}
         <th style="text-align:left">Spieler</th>
         <th title="Positionen, die er heute schon spielt">Pos</th>
         <th>Alter</th><th>Min</th><th style="text-align:left">Verein / Wert</th>
@@ -1582,10 +1996,26 @@ function replSteuerung(){
     `<button class="${k===REPL_MODE?"on":""}" onclick="setReplMode('${k}')">${l}</button>`).join("");
   const opt = [90,180,270,450].map(v=>
     `<option value="${v}"${v===REPL_MIN?" selected":""}>ab ${v} Min</option>`).join("");
+  // Die Archetypen-Leiste erscheint nur im Spezialisten-Modus – in den anderen
+  // Modi waere sie ohne Wirkung und wuerde nur Platz kosten.
+  const arch = (TACT_ARCH && REPL_FOR && TACT_ARCH[REPL_FOR.slot]) || [];
+  const archSeg = (REPL_MODE==="spezialist" && arch.length)
+    ? `<div class="seg archseg">` + arch.map(a =>
+        `<button class="${a.key===REPL_ARCH?"on":""}"`
+        + ` title="${esc2(a.stats.join(', '))}"`
+        + ` onclick="setReplMode('spezialist','${a.key}')">${esc2(a.label)}</button>`
+      ).join("") + `</div>` : "";
   return `<div class="replhead">
     <div class="seg">${seg}</div>
     <select onchange="setReplMin(this.value)" title="Unter dieser Spielzeit sind die /90-Werte Rauschen">${opt}</select>
-  </div>`;
+    <select onchange="setReplAlle(this.value)" title="Welche Importe als Kandidaten zählen. Aktuell = seit dem letzten Kader-Import (3 Tage Toleranz)">
+      <option value="aktuell"${REPL_ALLE?"":" selected"}>nur aktuelle Importe</option>
+      <option value="alle"${REPL_ALLE?" selected":""}>alle Importe</option>
+    </select>
+    <label class="muted" style="font-size:11.5px;margin-left:8px;cursor:pointer"
+      title="Kandidaten ohne gescoutete Persönlichkeit ausblenden – sonst steht ein Ungescouteter mit nacktem Fit neben einem Gescouteten mit Charakterfaktor">
+      <input type="checkbox" onchange="setReplNurChar(this.checked)"${REPL_NUR_CHAR?" checked":""}> nur mit Persönlichkeit</label>
+  </div>${archSeg}`;
 }
 
 // Gegenüberstellung: je Kennzahl der zu ersetzende Spieler (grau) über dem
@@ -1607,8 +2037,14 @@ function replDetail(c){
   }).join("");
   const hin = c.abzug
     ? `<div class="muted" style="font-size:11.5px;margin-top:8px">
-        Spielt bisher <b>${esc2(c.umschulung)}</b>: Positionsscore
-        ${c.score_pos} minus ${c.abzug} Punkte Umschulung = ${c.score}.</div>` : "";
+        Spielt bisher <b>${esc2(c.umschulung)}</b>: Positions-Fit
+        ${c.score_pos} minus ${c.abzug} Punkte Umschulung = ${c.fit}.</div>` : "";
+  const chr = c.charakter!=null
+    ? `<div class="muted" style="font-size:11.5px;margin-top:4px">
+        Gesamt ${c.score} = Fit ${c.fit} und Charakter ${c.charakter}
+        (Gewicht 0,3, geometrisch).</div>`
+    : `<div class="muted" style="font-size:11.5px;margin-top:4px">
+        Persönlichkeit ungescoutet – Gesamt ist der Fit allein.</div>`;
   const duenn = c.verlaesslich<DUENN
     ? `<div class="muted" style="font-size:11.5px;margin-top:4px">
         Nur ${Math.round(c.minutes||0)} Minuten – der Score wird nicht
@@ -1616,7 +2052,7 @@ function replDetail(c){
   return `<div class="muted" style="font-size:11px;margin-bottom:6px">
       oben <b>${esc2(REPL.original.name)}</b> (grau) · unten
       <b>${esc2(c.name)}</b> · Perzentil unter allen Spielern dieser Position,
-      rechts der Wert</div>${rows}${hin}${duenn}`;
+      rechts der Wert</div>${rows}${hin}${chr}${duenn}`;
 }
 
 document.addEventListener("keydown", e=>{
@@ -1775,6 +2211,16 @@ async function galRename(id,name){ const api=API(); if(api) await api.card_renam
 async function galDelete(id){ const api=API(); if(!api) return;
   await api.card_delete(id); renderGallery(document.getElementById("galHost")); }
 
+// Zeilendeckel. Der Pool hat inzwischen 13.000 Spieler, die mit 19 Spalten
+// eine Viertelmillion Zellen ergeben – innerHTML davon plus Layout blockiert
+// die Oberfläche sekundenlang und fühlt sich wie ein Hänger an. Gezeigt werden
+// die ersten TABLE_MAX nach Sortierung; das ist ohnehin, was man anschaut.
+// Die Hitzefarben werden weiter über ALLE Zeilen skaliert, sonst hinge die
+// Farbe eines Werts davon ab, ob gerade 300 oder 13.000 Zeilen stehen.
+const TABLE_MAX = 300;
+let TABLE_ALLE = false;
+function tableAlle(){ TABLE_ALLE = true; render(); }
+
 function renderTable(rows, C){
   rows = rows.slice().sort((a,b)=>{
     const x=a[sortKey]??0, y=b[sortKey]??0;
@@ -1787,11 +2233,17 @@ function renderTable(rows, C){
     if(vals.length) HEAT[k] = [Math.min(...vals), Math.max(...vals)];
   }
   const th = C.map(([k,l])=>
-    `<th class="${k===sortKey?'active':''}" onclick="sortBy('${k}')">${l}</th>`).join("");
-  const body = rows.map(p=>
+    `<th class="${k===sortKey?'active':''}"${COL_TIPS[k]?` title="${COL_TIPS[k]}"`:""} onclick="sortBy('${k}')">${l}</th>`).join("");
+  const gedeckelt = !TABLE_ALLE && rows.length > TABLE_MAX;
+  const shown = gedeckelt ? rows.slice(0, TABLE_MAX) : rows;
+  const body = shown.map(p=>
     `<tr${p.id!=null?` onclick="openDetail(${p.id})"`:""}>${C.map(([k])=>cell(p,k)).join("")}</tr>`).join("");
+  const rest = gedeckelt ? `<div class="muted" style="font-size:12px;padding:10px 8px 18px">
+      Die ersten ${TABLE_MAX} von ${rows.length} nach Sortierung.
+      <button class="linkbtn" onclick="tableAlle()">alle ${rows.length} anzeigen</button>
+      – oder über Suche, Minuten und Filter eingrenzen.</div>` : "";
   document.getElementById("tableHost").innerHTML =
-    `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
+    `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${rest}`;
 }
 
 function niceStep(raw){
@@ -1874,6 +2326,7 @@ function updateControls(){
 
 function setTab(tab){
   TAB = tab;
+  TABLE_ALLE = false;          // neuer Reiter, neuer Deckel
   document.querySelectorAll("#tabSeg button").forEach(b=>
     b.classList.toggle("on", b.dataset.tab===tab));
   [sortKey, sortDesc] = TABS[tab].sort;
@@ -1903,6 +2356,9 @@ async function loadData(){
   const res = await window.pywebview.api.load_saved(SRC);
   if(res.ok){
     PLAYERS = res.players;
+    // Zustand des Fair-Value-Modells (Minutenschwelle für den Hinweis im
+    // Preislot). Fehlt er, bleibt die geplante Vorgabe stehen.
+    if(res.value_model && res.value_model.threshold) FAIR_MIN_MIN = res.value_model.threshold;
     st.textContent = SRC==="pool"
       ? `Pool: ${res.count} Spieler aus ${res.snapshots} Scans`
       : `${res.count} Spieler aus letztem Snapshot (${res.snapshots} gespeichert)`;
@@ -1913,8 +2369,21 @@ async function loadData(){
 function minMinInput(v){
   MINMIN = +v;
   document.getElementById("minMinVal").textContent = v;
+  // Das Taktikbrett filtert weder nach Suchbegriff noch nach MINMIN –
+  // drawTactic liest beide nie. Ein render() je Reglerposition baute es
+  // trotzdem komplett neu und war (zusammen mit dem Suchfeld) der Ausloeser
+  // fuer die gestapelten Ladeketten. Die Sperre faengt das inzwischen ab,
+  // aber der Neuaufbau bleibt sinnlose Arbeit.
+  if(MODE === "tactic") return;
   render();
 }
+// Wie minMinInput: im Taktikbrett hat die Suche keine Wirkung, also auch
+// keinen Neuaufbau ausloesen.
+function sucheGeaendert(){
+  if(MODE === "tactic") return;
+  render();
+}
+
 async function minMinCommit(v){
   if(window.pywebview) await window.pywebview.api.set_setting("min_minutes", +v);
 }
@@ -1952,8 +2421,9 @@ const DETAIL_METRICS_FIELD = [
   ["dribbles_p90","Dribblings/90"],["duel_pct","ZWK-Quote %"],
   ["header_pct","Kopfball %"],["pass_pct","Pass %"],["rating","Ø-Note"]];
 const DETAIL_METRICS_GK = [
-  ["goals_prevented","Verhindert ges."],["conceded_p90","GEG/90",true],
-  ["xga","xGA (Workload)"],["pass_pct","Pass %"],["rating","Ø-Note"]];
+  ["note_resid","Note über Erwartung"],["gp_shot","Verhindert je 100 Sch."],
+  ["save_pct","Paradenquote %"],["conceded_p90","GEG/90",true],
+  ["pass_pct","Pass %"],["rating","Ø-Note"]];
 
 const cohortFor = p => { const pr=profileOf(p); return PLAYERS.filter(q=>profileOf(q)===pr); };
 
@@ -1970,7 +2440,9 @@ const barColor = r => r>=65?"var(--pos)":(r<=35?"var(--neg)":"var(--blue)");
 function metricBars(p, cohort){
   const mets = p.is_gk ? DETAIL_METRICS_GK : DETAIL_METRICS_FIELD;
   return mets.map(([k,label,inv])=>{
-    const pct = pctOf(cohort.map(q=>+q[k]||0), +p[k]||0, inv);
+    // Fehlende Werte bleiben draußen statt als 0 mitzulaufen – sonst stünde
+    // ein Torwart ohne Paraden-Daten im 5. Perzentil der Paradenquote.
+    const pct = p[k]==null ? null : pctOf(cohort.filter(q=>q[k]!=null).map(q=>+q[k]), +p[k], inv);
     if(pct==null) return `<div class="pbar"><span class="plab">${label}</span><div class="ptrack"></div><b class="muted">–</b></div>`;
     const r=Math.round(pct);
     return `<div class="pbar"${inv?' title="weniger ist besser (invertiert)"':''}>
@@ -1978,6 +2450,51 @@ function metricBars(p, cohort){
       <div class="ptrack"><i style="width:${r}%;background:${barColor(r)}"></i></div>
       <b>${r}</b></div>`;
   }).join("");
+}
+
+// Preislot: Marktwert und geschätzter Fair Value als zwei Balken auf
+// gemeinsamer Skala – der Abstand ist die Aussage, nicht die einzelne Zahl.
+// Fehlt der Marktwert oder trägt das Modell nicht, entfällt der Block
+// vollständig (Abwesenheit statt Platzhalter).
+function preislot(p){
+  if(p.value_m==null || p.fair_value_m==null || p.value_delta_pct==null) return "";
+  const max = Math.max(p.value_m, p.fair_value_m) || 1;
+  const d = p.value_delta_pct;
+  const farbe = d>0 ? "var(--pos)" : d<0 ? "var(--neg)" : "var(--text)";
+  const balken = (label, wert, col) => `<div class="pbar">
+       <span class="plab">${label}</span>
+       <div class="ptrack"><i style="width:${Math.max(1,Math.round(100*wert/max))}%;background:${col}"></i></div>
+       <span class="tval">${fmtMio(wert)}</span></div>`;
+  const wort = d>0 ? "unterbewertet" : d<0 ? "überbewertet" : "marktgerecht";
+  const vz = d>0 ? "+" : d<0 ? "−" : "±";
+  return `<div class="dsec">Preislot</div>
+   <div class="lot">
+     ${balken("Marktwert", p.value_m, "var(--blue)")}
+     ${balken("Fair Value", p.fair_value_m, farbe)}
+     <div class="lotdelta" style="color:${farbe}">${vz}${Math.abs(d).toLocaleString("de-DE")} % ${wort}</div>
+     <div class="lotnote">geschätzt aus Leistung, Alter, Liga und Position</div>
+     ${p.value_reliable ? "" : `<div class="lotwarn">unsichere Stichprobe (&lt; ${FAIR_MIN_MIN} Min.)</div>`}
+   </div>`;
+}
+
+// Persönlichkeit im Drawer: Beschreibung und Medienumgang wörtlich, die zwei
+// Achsen als Balken, darunter die Hinweise. Ohne Scouting-Wissen bleibt nur
+// der Vermerk – Abwesenheit statt Platzhalter.
+function charakterBlock(p){
+  if(p.pers_score==null && !p.pers_medien && !p.foot && !p.info) return "";
+  const stamm = [p.foot ? `starker Fuß: ${esc2(p.foot)}` : "",
+                 p.info ? `Status: ${esc2(infoText(p.info))}` : ""].filter(Boolean).join(" · ");
+  if(p.pers_score==null)
+    return `<div class="dsec">Persönlichkeit</div>
+      <div class="muted" style="font-size:12px">noch nicht gescoutet${p.pers_medien?` · Medienumgang: ${esc2(p.pers_medien)}`:""}${stamm?` · ${stamm}`:""}</div>`;
+  const bar=(label,v)=>`<div class="pbar"><span class="plab">${label}</span>
+      <div class="ptrack"><i style="width:${v}%;background:${persInk(v)}"></i></div><b>${v}</b></div>`;
+  const hin=(p.pers_hinweise||[]).map(h=>`<div class="lotnote">· ${esc2(h)}</div>`).join("");
+  return `<div class="dsec">Persönlichkeit</div>
+    <div style="font-size:12.5px;margin-bottom:4px"><b style="color:${persInk(p.pers_score)}">${esc2(p.pers_label)}</b>
+      <span class="muted">· ${esc2(p.pers_stufe)} ${p.pers_score}${p.pers_medien?` · Medien: ${esc2(p.pers_medien)}`:""}${stamm?` · ${stamm}`:""}</span></div>
+    ${bar("Entwicklung", p.pers_dev)}${bar("Mentalität", p.pers_ment)}${hin}
+    <div class="lotnote">aus der sichtbaren Beschreibung im Spielerprofil – kein Bestandteil des Scores</div>`;
 }
 
 function spark(vals, last){
@@ -2015,6 +2532,8 @@ async function renderDetail(){
    <div class="dhead"><h2>${p.name}</h2>${sc}<button class="xbtn" onclick="closeAll()">✕</button></div>
    <div class="dsub">${p.profile_label||"?"} · ${p.pos_label||"?"} · ${p.age?p.age+" J · ":""}${p.minutes||0} Min${p.value_m!=null?` · <b>${p.value_m} M€</b>`:""}${p.value_score!=null?` · Eff ${p.value_score}`:""} ·
      ${p.league?`${p.league} (K ${p.league_coeff})`:"Liga unbekannt"}${p.exp_at?` · <span title="Export-Stand">Export ${p.exp_at.slice(0,10)}</span>`:""}</div>
+   ${preislot(p)}
+   ${charakterBlock(p)}
    <div class="dsec">Merkliste</div>
    <div class="wbtns">
      ${["beobachten","kaufen","verkaufen"].map(s=>

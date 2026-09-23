@@ -2,7 +2,8 @@
 DIESER Aufstellung?
 
 Grundlage ist die Rollenanalyse des 4-2-3-1 "Highway Star" (offensiv, Tiki-Taka,
-sehr hohe Linie, Gegenpressing). Je Position sind die Aufgaben in messbare
+sehr hohe Linie, Gegenpressing) – seit dem Wechsel zu Manchester United (Sommer,
+2. Saison) unveraendert uebernommen. Je Position sind die Aufgaben in messbare
 Kennzahlen uebersetzt und gewichtet; der Score ist die gewichtete Summe der
 Perzentile INNERHALB der Spieler, die diese Position ueberhaupt spielen koennen.
 
@@ -11,6 +12,8 @@ aus dem Speicher, keine Laufwege und keine Positionsdaten. Aufgaben wie
 "Raum fuer den Aussenverteidiger freilaufen" erzeugen keine einzige Statistik.
 """
 import re
+
+from . import moneyball
 
 # ---------------------------------------------------------------- Positionen
 # Gruppencodes, in die BEIDE Quellen uebersetzt werden: die Positionsmaske aus
@@ -41,53 +44,71 @@ def groups_from_position(text):
     """FM-Positionsstring -> Gruppen, z.B. 'OM (RL), ST (Z)' -> {omr, oml, st}.
     Das ist die AUSSAGEKRAEFTIGERE Quelle: sie nennt alle Positionen, die der
     Spieler spielen kann, waehrend die Speichermaske nur zeigt, wo er zuletzt
-    tatsaechlich stand."""
+    tatsaechlich stand.
+
+    Mehrere Koepfe mit SCHRAEGSTRICH teilen sich die Seitenangabe in der
+    Klammer: 'M/OM (R)' heisst rechtes Mittelfeld UND rechtes Offensivmittel-
+    feld. Ohne die Aufteilung passte kein Zweig und der Spieler kam ohne
+    Gruppe zurueck (gleicher Fehler wie in moneyball.pos_mask_from_string).
+    """
     out = set()
     for teil in (text or "").split(","):
         t = teil.strip()
         if not t:
             continue
-        kopf = re.split(r"[ (]", t)[0].upper()
+        koepfe = re.split(r"[ (]", t)[0].upper()
         m = re.search(r"\(([^)]*)\)", t)
         seiten = (m.group(1) if m else "").upper()
         R, L, Z = "R" in seiten, "L" in seiten, "Z" in seiten
-        if kopf == "TW":
-            out.add("tw")
-        elif kopf in ("V", "FV"):
-            if Z or (kopf == "V" and not seiten):
-                out.add("iv")
-            if R or kopf == "FV" and not seiten:
-                out.add("rv")
-            if L:
-                out.add("lv")
-        elif kopf == "DM":
-            out.add("dm")
-        elif kopf == "M":
-            if Z or not seiten:
-                out.add("zm")
-            if R:
-                out.add("mr")
-            if L:
-                out.add("ml")
-        elif kopf == "OM":
-            if Z or not seiten:
-                out.add("omz")
-            if R:
-                out.add("omr")
-            if L:
-                out.add("oml")
-        elif kopf == "ST":
-            out.add("st")
+        for kopf in koepfe.split("/"):
+            if kopf == "TW":
+                out.add("tw")
+            elif kopf in ("V", "FV"):
+                if Z or (kopf == "V" and not seiten):
+                    out.add("iv")
+                if R or kopf == "FV" and not seiten:
+                    out.add("rv")
+                if L:
+                    out.add("lv")
+            elif kopf == "DM":
+                out.add("dm")
+            elif kopf == "M":
+                if Z or not seiten:
+                    out.add("zm")
+                if R:
+                    out.add("mr")
+                if L:
+                    out.add("ml")
+            elif kopf == "OM":
+                if Z or not seiten:
+                    out.add("omz")
+                if R:
+                    out.add("omr")
+                if L:
+                    out.add("oml")
+            elif kopf == "ST":
+                out.add("st")
     return out
 
 
 def player_groups(p):
-    """Positionsgruppen eines Spielers. Export schlaegt Speichermaske."""
+    """Positionsgruppen eines Spielers. Export schlaegt Speichermaske.
+
+    Das Ergebnis wird am Spieler-Dict gemerkt (`_gruppen`). Grund: slot_dists()
+    laeuft je Position einmal ueber die GANZE Vergleichsmenge und ruft dabei
+    eligible() -> player_groups() auf. Bei elf Positionen und ~47.000 Spielern
+    sind das 515.000 Aufrufe pro Taktikbrett, die alle dasselbe ausrechnen –
+    gemessen 4,2 der 10 Sekunden. Der Unterstrich haelt den Schluessel aus der
+    pywebview-Spiegelung heraus.
+    """
+    gemerkt = p.get("_gruppen")
+    if gemerkt is not None:
+        return gemerkt
     g = groups_from_position(p.get("position"))
-    if g:
-        return g, "export"
-    g = groups_from_mask(p.get("pos_mask"))
-    return g, ("ram" if g else "unbekannt")
+    ergebnis = (g, "export") if g else (
+        (lambda m: (m, "ram" if m else "unbekannt"))(groups_from_mask(p.get("pos_mask"))))
+    p["_gruppen"] = ergebnis
+    return ergebnis
 
 
 # ------------------------------------------------------------- Umschulung
@@ -160,6 +181,12 @@ def umschulung(von, nach):
 # label, Richtung (+1 hoch ist gut / -1 niedrig ist gut), Format
 METRICS = {
     "gp_p90":       ("Verhinderte Tore/90", +1, "2f"),
+    # Torwart, seit dem Nachschaerfen: je Schuss statt je Spiel, dazu der
+    # Teil der Note, den die Gegentore der Mannschaft nicht erklaeren
+    # (Herleitung in moneyball.PROFILES["tw"])
+    "gp_shot":      ("Verhindert je 100 Schüsse", +1, "1f"),
+    "save_pct":     ("Paradenquote %", +1, "pct"),
+    "note_resid":   ("Note über Erwartung", +1, "2f"),
     "pass_pct":     ("Passquote %", +1, "pct"),
     "rating":       ("Ø-Note", +1, "2f"),
     "xg_p90":       ("xG/90", +1, "2f"),
@@ -197,12 +224,17 @@ FORMATION = [
             "Sweeper-Variante situativ, nicht proaktiv",
             "Letzter Mann, wenn das hohe Pressing überspielt wird",
         ],
-        "gewichte": {"gp_p90": 0.50, "pass_pct": 0.30, "rating": 0.20},
+        # Shot-Stopping je Schuss und Note über Erwartung statt "verhinderte
+        # Tore/90": Letztere waren zwischen den Saisonhälften nicht stabil
+        # (r 0,23) und hoben Keeper hinter schwachen Abwehrreihen.
+        "gewichte": {"pass_pct": 0.30, "note_resid": 0.25, "gp_shot": 0.20,
+                     "rating": 0.15, "save_pct": 0.10},
         "blind": [
             "Ob er wirklich ausrollt oder lang schlägt – Passrichtung und "
             "Passlänge fehlen in den Daten komplett.",
-            "Paraden, Herauslaufen und Strafraumbeherrschung gibt es nicht als "
-            "eigene Felder.",
+            "Herauslaufen, Eins-gegen-eins und Strafraumbeherrschung – genau "
+            "das, was der Torwart hinter einer sehr hohen Kette braucht – gibt "
+            "es nicht als eigene Felder; Paraden je Schuss sind die Näherung.",
         ],
     },
     {
@@ -541,6 +573,99 @@ def eligible(p, slot):
     return bool(gs & set(slot["gruppen"])), quelle
 
 
+# ------------------------------------------------- Liga und Teamstaerke
+# Kennzahlen, die mit dem Liga-Koeffizienten skaliert werden: alles, was eine
+# RATE ist. Sechs Dribblings in der Premier League sind mehr wert als sechs in
+# der Ekstraklasa. NICHT skaliert werden:
+#  - Quoten (Pass-, Zweikampf-, Kopfball-, Schussquote): der Gegner ist staerker,
+#    die Quote faellt dadurch von selbst – eine Skalierung zaehlte doppelt.
+#  - 'rating': FM vergibt die Note bereits relativ zum Spielniveau.
+#  - 'loss_rate' und 'finishing': Negativ- bzw. Differenzmasse. Ein schwacher
+#    Wert mal 1.2 wuerde eine schlechte Leistung als noch schlechter ausweisen,
+#    obwohl der Massstab genau umgekehrt laufen muesste.
+SKALIERBAR = {"gp_p90", "xg_p90", "goals_p90", "xa_p90", "keyp_p90", "prog_p90",
+              "dribbles_p90", "rec_p90", "int_p90", "press_p90", "duels_p90"}
+
+
+def _koeff(p):
+    # Der Import steht bewusst OBEN im Modul, nicht hier: _koeff laeuft je
+    # Kennzahl und Spieler, bei einem Taktikbrett millionenfach. Als lokaler
+    # Import kostete allein die Import-Maschinerie 69 % der Laufzeit von
+    # _wert() und machte die Score-Engine 11x langsamer als vorher.
+    # Aus demselben Grund gemerkt wie die Positionsgruppen: je Spieler konstant.
+    k = p.get("_koeff")
+    if k is None:
+        k = p["_koeff"] = moneyball.league_coeff(p.get("league"))
+    return k
+
+
+def _wert(p, key):
+    """Kennzahl eines Spielers fuer die Positionswertung, ligabereinigt.
+
+    Vorher rechnete score_slot mit den Rohwerten: ein Spieler aus der Eredivisie
+    stand mit denselben Dribblings pro 90 gleichauf mit einem aus der Premier
+    League. Der Moneyball-Score kannte den Koeffizienten laengst, der
+    Positions-Fit nicht – deshalb klafften beide Zahlen bei genau den Spielern
+    auseinander, bei denen es darauf ankam.
+    """
+    # Ø-Note ligabereinigt (moneyball.LEAGUE_NOTE_OFFSET), angezeigt wird die
+    # rohe Note – dieselbe Regel wie in der Score-Engine.
+    v = p.get("rating_adj", p.get(key)) if key == "rating" else p.get(key)
+    if v is None:
+        return None
+    return float(v) * _koeff(p) if key in SKALIERBAR else float(v)
+
+
+# Carry-Zuschlag: wer eine schwache Mannschaft traegt, leistet mehr als
+# dieselbe Zahl in einer starken. Bezug ist die Ø-Note des Vereins OHNE den
+# Spieler selbst – sonst hebt er bei kleinen Kadern seinen eigenen Massstab an.
+CARRY_CAP = 4.0            # mehr als +/- 4 Punkte verschiebt der Zuschlag nie
+CARRY_K = 6.0              # Punkte je ganzer Note Unterschied (0.5 Note = 3)
+CARRY_MIN_KADER = 5        # so viele Spieler braucht ein Verein fuer den Schnitt
+
+
+def team_strength(players, min_kader=CARRY_MIN_KADER):
+    """Verein -> (Ø-Note, Spielerzahl) fuer alle Vereine mit genug Spielern.
+
+    Die Datenbasis sind die importierten Export-Spieler, und die sind eine
+    VERZERRTE Stichprobe: gescoutet wurden interessante U27-Spieler, nicht der
+    Durchschnitt eines Kaders. Der Schnitt faellt dadurch zu hoch aus und der
+    Zuschlag entsprechend zu klein – die Richtung stimmt, die Groesse ist
+    konservativ. Vereine unter `min_kader` bekommen gar keinen Wert; sie sind
+    im Ergebnis neutral statt falsch.
+    """
+    summe, anzahl = {}, {}
+    for p in players:
+        c, r = p.get("club"), p.get("rating")
+        if not c or not r:
+            continue
+        summe[c] = summe.get(c, 0.0) + float(r)
+        anzahl[c] = anzahl.get(c, 0) + 1
+    return {c: (summe[c] / anzahl[c], anzahl[c])
+            for c in summe if anzahl[c] >= min_kader}
+
+
+def carry_bonus(p, teams):
+    """Punkte, die der Carry-Zuschlag auf den Positionsscore legt (oder 0).
+
+    Gibt (Bonus, Vereinsschnitt, Kadergroesse) zurueck, damit die Oberflaeche
+    die Herkunft der Zahl zeigen kann statt nur ihr Ergebnis.
+    """
+    if not teams:
+        return 0.0, None, 0
+    club, r = p.get("club"), p.get("rating")
+    eintrag = teams.get(club) if club else None
+    if not eintrag or not r:
+        return 0.0, None, 0
+    schnitt, n = eintrag
+    if n <= 1:
+        return 0.0, None, 0
+    # eigenen Beitrag herausrechnen
+    ohne = (schnitt * n - float(r)) / (n - 1)
+    bonus = (float(r) - ohne) * CARRY_K
+    return max(-CARRY_CAP, min(CARRY_CAP, bonus)), ohne, n - 1
+
+
 def slot_dists(slot, reference, min_minutes=MIN_MINUTES):
     """Perzentil-Verteilungen je Kennzahl dieser Position.
 
@@ -552,33 +677,40 @@ def slot_dists(slot, reference, min_minutes=MIN_MINUTES):
             if (r.get("minutes") or 0) >= min_minutes and eligible(r, slot)[0]]
     dists = {}
     for key in slot["gewichte"]:
-        vals = sorted(float(r[key]) for r in pool if r.get(key) is not None)
+        vals = sorted(v for v in (_wert(r, key) for r in pool) if v is not None)
         if len(vals) >= 8:
             dists[key] = vals
     return dists, len(pool)
 
 
-def score_slot(p, slot, dists):
+def score_slot(p, slot, dists, teams=None):
     """Positionsscore eines Spielers samt Aufschluesselung, oder None, wenn
     die Datengrundlage zu duenn ist.
 
     Bewusst OHNE Positionspruefung: dieselbe Rechnung bewertet auch einen
     positionsfremden Ersatzkandidaten, dessen Abzug erst danach dazukommt.
+
+    teams: Ergebnis von team_strength(). Ist es gesetzt, kommt der Carry-
+    Zuschlag auf den fertigen Score – NICHT auf die einzelnen Kennzahlen, sonst
+    zaehlte er in jeder Perzentilrechnung erneut mit.
     """
     total, wsum, teile = 0.0, 0.0, []
     for key, w in slot["gewichte"].items():
-        v = p.get(key)
+        v = _wert(p, key)
         label, richtung, fmt = METRICS[key]
         if v is None or key not in dists:
-            teile.append({"stat": key, "label": label, "wert": v,
+            teile.append({"stat": key, "label": label, "wert": p.get(key),
                           "pct": None, "gewicht": w, "format": fmt})
             continue
-        pc = _pct(dists[key], float(v))
+        pc = _pct(dists[key], v)
         if richtung < 0:
             pc = 100.0 - pc
         total += w * pc
         wsum += w
-        teile.append({"stat": key, "label": label, "wert": v,
+        # angezeigt wird der ROHWERT, nicht der ligabereinigte: der Nutzer soll
+        # die Zahl aus dem Spiel wiedererkennen. Die Bereinigung steckt im
+        # Perzentil daneben.
+        teile.append({"stat": key, "label": label, "wert": p.get(key),
                       "pct": round(pc), "gewicht": w, "format": fmt})
     if wsum < 0.5:                # zu wenig Datengrundlage
         return None
@@ -595,15 +727,21 @@ def score_slot(p, slot, dists):
     # Ausreisser oben und daneben, dass er auf 200 Minuten beruht.
     m = float(p.get("minutes") or 0)
     verl = m / (m + VERLAESSLICH_MIN) if m else 0.0
-    return {"score": round(roh), "verlaesslich": round(verl, 2),
+    bonus, teamschnitt, teamn = carry_bonus(p, teams)
+    return {"score": max(0, min(100, round(roh + bonus))),
+            "score_roh": round(roh), "carry": round(bonus, 1),
+            "team_schnitt": None if teamschnitt is None else round(teamschnitt, 2),
+            "team_n": teamn, "liga_koeff": round(_koeff(p), 2),
+            "verlaesslich": round(verl, 2),
             "teile": sorted(teile, key=lambda t: -t["gewicht"])}
 
 
-def build_board(squad, reference, min_minutes=MIN_MINUTES):
+def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None):
     """Fuer jede Position die passenden Spieler mit Score und Aufschluesselung.
 
     squad     : Spieler, die bewertet werden (der eigene Kader)
     reference : Vergleichsmenge fuer die Perzentile (Pool + Kohorte)
+    teams      : team_strength() fuer den Carry-Zuschlag, oder None
     """
     out = []
     for slot in FORMATION:
@@ -613,19 +751,232 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES):
             ok, quelle = eligible(p, slot)
             if not ok:
                 continue
-            b = score_slot(p, slot, dists)
+            b = score_slot(p, slot, dists, teams)
             if b is None:
                 continue
             kandidaten.append({
                 "id": p.get("id"), "name": p.get("name"),
                 "age": p.get("age"), "minutes": p.get("minutes"),
                 "rating": p.get("rating"), "pos_quelle": quelle,
+                "club": p.get("club"), "league": p.get("league"),
+                "dna": p.get("dna"), "dna_pass": p.get("dna_pass"),
+                "dna_ball": p.get("dna_ball"),
+                "mb": p.get("mb"),            # Moneyball-Score, vom Aufrufer gesetzt
+                # Persoenlichkeit (sichtbare Beschreibung) neben dem Score
+                "pers_score": p.get("pers_score"), "pers_label": p.get("pers_label"),
+                "pers_stufe": p.get("pers_stufe"), "pers_medien": p.get("pers_medien"),
+                "pers_hinweise": p.get("pers_hinweise") or [],
+                "foot": p.get("foot"), "info": p.get("info"),
+                "archetypen": {k: _archetyp_pct(b["teile"], stats)
+                               for k, stats in
+                               ARCHETYPEN.get(slot["key"], {}).items()},
                 "stat_quelle": p.get("stat_quelle")} | b)
         kandidaten.sort(key=lambda k: -k["score"])
         out.append({k: slot[k] for k in
                     ("key", "label", "kurz", "rolle", "duty", "x", "y",
                      "aufgaben", "blind")} | {
             "kandidaten": kandidaten, "vergleichsbasis": basis})
+    return out
+
+
+def startelf(board, pins=None):
+    """Beste Elf: jede Position einmal, jeder Spieler einmal.
+
+    Der beste Spieler je Position ist NICHT die Loesung: Borges ist auf beiden
+    Fluegeln der Staerkste, Correia auf beiden Aussenbahnen. Ohne Zuordnung
+    stuende derselbe Mann doppelt auf dem Platz und die zweite Position waere
+    scheinbar besetzt.
+
+    pins: {slot_key: player_id} – manuell gesetzte Spieler. Sie stehen fest,
+    die Automatik fuellt die uebrigen Plaetze um sie herum. Ein Pin greift nur,
+    wenn der Spieler auf dieser Position Kandidat ist und nicht schon auf einem
+    anderen Pin steht; sonst wird er still ignoriert (z.B. nach einem Import,
+    in dem er nicht mehr im Kader ist).
+
+    Drei Schritte: erst gierig nach Score vergeben, dann paarweise tauschen
+    und freie Spieler einwechseln, solange ein Zug die Summe verbessert – nur unter den automatisch
+    vergebenen Plaetzen, die Pins bleiben unangetastet. Bei elf Plaetzen ist
+    das in Millisekunden optimal genug und bleibt nachvollziehbar – anders als
+    eine ausgewachsene Ungarische Methode, die hier niemand nachrechnen koennte.
+    """
+    punkte = {s["key"]: {k["id"]: k for k in s["kandidaten"]} for s in board}
+    elf, belegt = {}, set()
+    for skey, pid in (pins or {}).items():
+        k = punkte.get(skey, {}).get(pid)
+        if k is None or pid in belegt:
+            continue
+        elf[skey] = k
+        belegt.add(pid)
+    fest = set(elf)
+
+    paare = sorted(((k["score"], s["key"], k["id"], k)
+                    for s in board for k in s["kandidaten"]),
+                   key=lambda t: -t[0])
+    for score, skey, pid, k in paare:
+        if skey in elf or pid in belegt:
+            continue
+        elf[skey] = k
+        belegt.add(pid)
+
+    verbessert = True
+    while verbessert:
+        verbessert = False
+        keys = [k for k in elf if k not in fest]
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                a, b = keys[i], keys[j]
+                pa, pb = elf[a], elf[b]
+                na, nb = punkte[a].get(pb["id"]), punkte[b].get(pa["id"])
+                if na is None or nb is None:
+                    continue
+                if na["score"] + nb["score"] > pa["score"] + pb["score"]:
+                    elf[a], elf[b] = na, nb
+                    verbessert = True
+        # Einwechseln: ein FREIER Spieler, der auf einem Platz besser ist als
+        # der gesetzte. Der Tausch oben bewegt nur Spieler, die schon stehen –
+        # nach "de Ligt von der Sechs in die Innenverteidigung, Timber dafuer
+        # auf die Sechs" blieb Timber (61) dort stehen, obwohl Mainoo (73) und
+        # Wharton (72) auf der Bank sassen. Jeder Zug erhoeht die Summe, die
+        # Schleife endet also.
+        belegt = {k["id"] for k in elf.values()}
+        for a in keys:
+            frei = [k for k in punkte[a].values() if k["id"] not in belegt]
+            if not frei:
+                continue
+            bester = max(frei, key=lambda k: k["score"])
+            if bester["score"] > elf[a]["score"]:
+                belegt.discard(elf[a]["id"])
+                elf[a] = bester
+                belegt.add(bester["id"])
+                verbessert = True
+    return elf
+
+
+# ---------------------------------------------------------- Gesamtzahl
+# Drei Achsen, geometrisch gemittelt: Fit (passt in die Rolle), Score (ist
+# gut) und Charakter (bringt die Persoenlichkeit mit). Geometrisch wie bei
+# der DNA – wer alles mitbringt, liegt vorn, ein Ausreisser nach unten zieht
+# spuerbar. Der Charakter ist bewusst NICHT im Fit und nicht im Score: der
+# Fit ist ein Perzentil gegen Tausende Vergleichsspieler ohne Persoenlichkeit
+# und waere damit nicht mehr vergleichbar, und der Score misst Leistung.
+#
+# 0,30 ist "relativ grosser Einfluss": bei Fit 80 / Score 80 liegen zwischen
+# "Ausgewogen" (50) und "Modellbuerger" (100) 16 Punkte, der Carry-Zuschlag
+# darf hoechstens 4 bewegen. Ohne gescoutete Persoenlichkeit faellt der
+# Faktor weg – keine Daten heisst unbekannt, nicht schlecht; die Ersatzsuche
+# kann Ungescoutete auf Wunsch ausblenden.
+CHAR_GEWICHT = 0.30
+
+
+def gesamt(fit, mb=None, charakter=None):
+    """Gesamtzahl 0-100 aus Fit, Moneyball-Score und Charakter.
+
+    Leistung = sqrt(Fit x Score), ohne Score der Fit allein (Ersatzsuche).
+    Gesamt = Leistung^(1-CHAR_GEWICHT) x Charakter^CHAR_GEWICHT, ohne
+    Charakter die Leistung selbst. Rueckgabe None nur ohne Fit.
+    """
+    if fit is None:
+        return None
+    leistung = (float(fit) * float(mb)) ** 0.5 if mb is not None else float(fit)
+    if charakter is None:
+        return round(leistung)
+    c = max(1.0, float(charakter))
+    return round(max(0.0, min(100.0, leistung ** (1 - CHAR_GEWICHT) * c ** CHAR_GEWICHT)))
+
+
+# ---------------------------------------------------------- Ligavergleich
+# Wo steht die eigene Elf im Vergleich zur Liga? Je Position der eigene
+# Stammspieler (aus der automatischen Elf, jeder Spieler nur einmal) gegen den
+# jeweils BESTEN vorhandenen Spieler jedes anderen Vereins. Verglichen wird die
+# LEISTUNG = sqrt(Fit x Score) ohne Charakterfaktor – es geht um Staerke auf
+# dem Platz, nicht um die Kaderplanung.
+#
+# Zwei Einschraenkungen, die in die Ausgabe gehoeren statt in eine Fussnote:
+#  - Die Datenbasis sind Scoutinglisten, keine Kader. Je Verein stehen oft nur
+#    4-13 Spieler in den Daten, bei den Torhuetern eine Handvoll fuer die ganze
+#    Liga. Jede Zeile nennt deshalb, wie viele Vereine ueberhaupt Daten haben.
+#  - Bei den anderen Vereinen zaehlt derselbe Spieler auf mehreren Positionen
+#    (ihr bester Fluegel links UND rechts), bei der eigenen Elf nicht. Der
+#    Vergleich ist damit leicht ZU STRENG gegen den eigenen Verein – fuer die
+#    Frage "wo muss ich nachlegen" die richtige Richtung des Fehlers.
+LIGA_POSITIONEN = [
+    ("tw", "Torwart", ["tw"]), ("lv", "Linksverteidiger", ["lv"]),
+    ("iv", "Innenverteidiger", ["ivl", "ivr"]), ("rv", "Rechtsverteidiger", ["rv"]),
+    ("dm", "Doppelsechs", ["dml", "dmr"]), ("aml", "Linksaußen", ["aml"]),
+    ("amc", "Zehner", ["amc"]), ("amr", "Rechtsaußen", ["amr"]),
+    ("st", "Sturmspitze", ["st"]),
+]
+
+
+def liga_vergleich(elf, pool, referenz, liga, verein, teams=None,
+                   min_minutes=450):
+    """Je Position: eigene Elf gegen die Liga.
+
+    elf      : {slot_key: Kandidat aus dem Brett} mit 'fit', 'mb', 'name', 'minutes'
+    pool     : angereicherte Spieler MIT Moneyball-Score ('score'), alle Ligen
+    referenz : Vergleichsmenge fuer die Perzentile – dieselbe wie im Brett
+    liga     : Name der Liga, verein: eigener Verein (wird aus dem Pool genommen)
+
+    Doppelt besetzte Positionen (Innenverteidiger, Doppelsechs) vergleichen das
+    Mittel der beiden Stammspieler mit dem Mittel der zwei Besten je Verein;
+    Vereine mit nur einem Spieler in den Daten zaehlen dort mit diesem einen.
+    """
+    slots = {s["key"]: s for s in FORMATION}
+    out = []
+    for key, label, skeys in LIGA_POSITIONEN:
+        slot = slots[skeys[0]]
+        dists, _ = slot_dists(slot, referenz)
+        je_verein, alle = {}, []
+        for p in pool:
+            if p.get("league") != liga or p.get("club") == verein:
+                continue
+            if (p.get("minutes") or 0) < min_minutes or p.get("score") is None:
+                continue
+            if not eligible(p, slot)[0]:
+                continue
+            b = score_slot(p, slot, dists, teams)
+            if b is None:
+                continue
+            wert = gesamt(b["score"], p["score"], None)
+            eintrag = {"name": p.get("name"), "club": p.get("club"), "leistung": wert,
+                       "fit": b["score"], "score": p["score"], "age": p.get("age"),
+                       "minutes": p.get("minutes"), "value": p.get("value")}
+            je_verein.setdefault(p["club"], []).append(eintrag)
+            alle.append(eintrag)
+        n_slots = len(skeys)
+        vereine = []
+        for club, sp in je_verein.items():
+            sp.sort(key=lambda e: -e["leistung"])
+            beste = sp[:n_slots]
+            vereine.append({"club": club, "spieler": beste,
+                            "wert": round(sum(e["leistung"] for e in beste) / len(beste), 1)})
+        eigene = []
+        for sk in skeys:
+            k = elf.get(sk)
+            if k is None:
+                continue
+            eigene.append({"name": k.get("name"), "fit": k.get("fit"), "score": k.get("mb"),
+                           "leistung": gesamt(k.get("fit"), k.get("mb"), None),
+                           "minutes": k.get("minutes"), "charakter": k.get("charakter")})
+        eig = [e["leistung"] for e in eigene if e["leistung"] is not None]
+        eigen_wert = round(sum(eig) / len(eig), 1) if eig else None
+        vereine.sort(key=lambda v: -v["wert"])
+        rang = (1 + sum(1 for v in vereine if v["wert"] > eigen_wert)
+                if eigen_wert is not None else None)
+        werte = sorted((v["wert"] for v in vereine), reverse=True)
+        top4 = werte[3] if len(werte) >= 4 else (werte[-1] if werte else None)
+        median = werte[len(werte) // 2] if werte else None
+        einzel = sorted(e["leistung"] for e in alle)
+        pz = (round(100 * sum(1 for w in einzel if w < eigen_wert) / len(einzel))
+              if (einzel and eigen_wert is not None) else None)
+        out.append({"key": key, "label": label, "rolle": slot["rolle"],
+                    "x": slot["x"] if n_slots == 1 else 50, "y": slot["y"],
+                    "eigene": eigene, "wert": eigen_wert, "rang": rang,
+                    "vereine_mit_daten": len(vereine) + 1, "liga_spieler": len(alle),
+                    "top4": top4, "median": median, "beste": werte[0] if werte else None,
+                    "abstand_top4": (None if (top4 is None or eigen_wert is None)
+                                     else round(eigen_wert - top4, 1)),
+                    "perzentil": pz, "vereine": vereine})
     return out
 
 
@@ -641,14 +992,88 @@ GROUP_LABEL = {
 # Wonach gesucht wird. Die Schwellen sind absichtlich grob: der Score ist ein
 # Perzentilmass, Unterschiede unter ein paar Punkten sind Rauschen.
 MODI = {
-    "aehnlich": "Ähnliches Profil, gleiches Niveau",
-    "besser":   "Stärker auf dieser Position",
-    "juenger":  "Gleiches Niveau, aber jünger",
+    "aehnlich":   "Ähnliches Profil, gleiches Niveau",
+    "besser":     "Stärker auf dieser Position",
+    "juenger":    "Gleiches Niveau, aber jünger",
+    "spezialist": "Kann eine Sache besonders gut",
 }
 TOL_GLEICH = 8             # +/- Punkte, die noch als "gleiches Niveau" gelten
 MIN_BESSER = 3             # so viel muss "besser" mindestens besser sein
 JUENGER_UM = 2             # Jahre, die "juenger" mindestens juenger ist
 JUENGER_TOLERANZ = 5       # so weit darf er dabei im Score abfallen
+SPEZ_MIN_PCT = 75          # so stark muss der Spezialist in SEINER Sache sein
+SPEZ_TOLERANZ = 12         # so weit darf er dafuer im Gesamtscore abfallen
+
+# ------------------------------------------------------------- Archetypen
+# "Wer kann EINE Sache richtig gut?" – eine Teilmenge der Positionsgewichte,
+# getrennt bewertet. Bewusst nur Kennzahlen, die im jeweiligen Slot ohnehin
+# gewichtet sind: fuer alles andere baut slot_dists gar keine Verteilung, der
+# Archetyp haette dann keine Datengrundlage.
+#
+# Der Sinn: Borges deckt auf dem Fluegel alles ab, aber wenn er fehlt, will man
+# vielleicht gezielt einen Vorbereiter statt eines Abschliessers – oder
+# umgekehrt, je nachdem, wer sonst noch auf dem Platz steht.
+ARCHETYPEN = {
+    "tw":  {"paraden": ["gp_shot", "save_pct"], "fussball": ["pass_pct"]},
+    "lv":  {"offensiv": ["xa_p90", "keyp_p90", "dribbles_p90"],
+            "defensiv": ["duel_pct", "duels_p90", "rec_p90"]},
+    "rv":  {"offensiv": ["xa_p90", "keyp_p90", "dribbles_p90"],
+            "defensiv": ["duel_pct", "duels_p90", "rec_p90"]},
+    "ivl": {"aufbau": ["prog_p90", "pass_pct"], "kopfball": ["header_pct"],
+            "zweikampf": ["duel_pct", "duels_p90", "int_p90"]},
+    "ivr": {"aufbau": ["prog_p90", "pass_pct"], "kopfball": ["header_pct"],
+            "zweikampf": ["duel_pct", "duels_p90", "int_p90"]},
+    "dml": {"aufbau": ["prog_p90", "pass_pct"],
+            "zerstoerer": ["int_p90", "duel_pct", "duels_p90"],
+            "pressing": ["press_p90"]},
+    "dmr": {"aufbau": ["prog_p90", "pass_pct"],
+            "zerstoerer": ["int_p90", "duel_pct", "duels_p90"],
+            "pressing": ["press_p90"]},
+    "aml": {"creator": ["xa_p90", "keyp_p90"],
+            "finisher": ["xg_p90", "goals_p90"], "dribbler": ["dribbles_p90"]},
+    "amr": {"creator": ["xa_p90", "keyp_p90"],
+            "finisher": ["xg_p90", "goals_p90"], "dribbler": ["dribbles_p90"]},
+    "amc": {"creator": ["xa_p90", "keyp_p90"], "finisher": ["xg_p90"],
+            "dribbler": ["dribbles_p90"]},
+    "st":  {"finisher": ["xg_p90", "goals_p90", "finishing"],
+            "zuarbeiter": ["xa_p90"], "pressing": ["press_p90", "duel_pct"]},
+}
+ARCHETYP_LABEL = {
+    "paraden": "Paradenstark", "fussball": "Fußballspielend",
+    "offensiv": "Offensivdrang", "defensiv": "Defensiv sicher",
+    "aufbau": "Spielaufbau", "kopfball": "Kopfballstark",
+    "zweikampf": "Zweikampfstark", "zerstoerer": "Ballgewinner",
+    "pressing": "Pressingstark", "creator": "Vorbereiter",
+    "finisher": "Abschließer", "dribbler": "Dribbler",
+    "zuarbeiter": "Zuarbeiter",
+}
+# Jeder Archetyp braucht eine deutsche Beschriftung – fehlt sie, stand vorher
+# der rohe Schluessel ("zuarbeiter") als Knopftext in der Oberflaeche. Lieber
+# beim Import auffliegen als still im Kontextmenue.
+_ohne_label = {k for m in ARCHETYPEN.values() for k in m} - set(ARCHETYP_LABEL)
+assert not _ohne_label, f"Archetyp ohne Beschriftung: {sorted(_ohne_label)}"
+
+
+def archetypen_fuer(slot_key):
+    """Verfuegbare Archetypen einer Position, fertig fuer das Kontextmenue."""
+    return [{"key": k, "label": ARCHETYP_LABEL.get(k, k),
+             "stats": [METRICS[s][0] for s in stats]}
+            for k, stats in ARCHETYPEN.get(slot_key, {}).items()]
+
+
+def _archetyp_pct(teile, stats):
+    """Wie stark ist der Spieler in genau diesen Kennzahlen? (0-100)
+
+    Gemittelt wird ueber die Perzentile, gewichtet wie im Positionsscore –
+    sonst zoege eine 5-%-Nebenkennzahl den Archetyp genauso stark wie die
+    Hauptkennzahl. Fehlt jeder Wert, kommt None zurueck.
+    """
+    pw = [(t["pct"], t["gewicht"]) for t in teile
+          if t["stat"] in stats and t["pct"] is not None]
+    if not pw:
+        return None
+    gsum = sum(w for _, w in pw)
+    return round(sum(p * w for p, w in pw) / gsum) if gsum else None
 
 
 def _aehnlichkeit(teile_a, teile_b):
@@ -673,7 +1098,8 @@ def _aehnlichkeit(teile_a, teile_b):
 
 def find_replacements(slot, original, kandidaten, reference,
                       modus="aehnlich", min_minutes=MIN_MINUTES, limit=30,
-                      max_umschulung=MAX_UMSCHULUNG, kader_ids=()):
+                      max_umschulung=MAX_UMSCHULUNG, kader_ids=(),
+                      archetyp=None, teams=None, nur_charakter=False):
     """Ersatz fuer einen Spieler auf einer bestimmten Position.
 
     Bewertet wird JEDER Kandidat nach den Gewichten DIESER Position – auch
@@ -688,24 +1114,43 @@ def find_replacements(slot, original, kandidaten, reference,
                  bei build_board, sonst sind die Scores nicht vergleichbar
     kader_ids  : eigene Spieler; sie werden nicht ausgeschlossen, sondern nur
                  markiert – wer intern ersetzen kann, ist die guenstigste Loesung
+    nur_charakter : Kandidaten ohne gescoutete Persoenlichkeit auslassen
+
+    Verglichen und sortiert wird die GESAMTZAHL (siehe gesamt()): Fit nach
+    Umschulungsabzug, dazu der Charakterfaktor. Der reine Fit bleibt als
+    'fit' im Treffer, damit sichtbar ist, woher ein Abstand kommt.
     """
     dists, basis = slot_dists(slot, reference, min_minutes)
-    ob = score_slot(original, slot, dists)
+    ob = score_slot(original, slot, dists, teams)
     if ob is None:
         return {"ok": False, "error": "Für diesen Spieler reichen die Daten "
                                       "auf dieser Position nicht aus."}
-    ziel, alter = ob["score"], original.get("age")
+    spez_stats = None
+    if modus == "spezialist":
+        spez_stats = ARCHETYPEN.get(slot["key"], {}).get(archetyp)
+        if not spez_stats:
+            return {"ok": False,
+                    "error": f"Für diese Position gibt es keinen Archetyp "
+                             f"„{archetyp}“."}
+    ziel_fit, alter = ob["score"], original.get("age")
+    ziel = gesamt(ziel_fit, None, original.get("pers_score"))
     if modus == "juenger" and alter is None:
         return {"ok": False, "error": "Von diesem Spieler ist kein Geburtsdatum "
                                       "bekannt – ohne Alter keine Suche nach "
                                       "jüngeren Alternativen."}
     kader_ids = set(kader_ids or ())
     eigen = original.get("id")
+    # Auch ueber die EID ausschliessen: derselbe Spieler taucht im RAM je
+    # Wettbewerb mit eigener player_id auf und stuende sonst als sein eigener
+    # Ersatz in der Liste.
+    eigen_eid = original.get("eid")
 
     treffer, geprueft = [], 0
     for p in kandidaten:
         pid = p.get("id")
         if pid is None or pid == eigen or not p.get("name"):
+            continue
+        if eigen_eid and p.get("eid") == eigen_eid:
             continue
         if (p.get("minutes") or 0) < min_minutes:
             continue
@@ -714,16 +1159,28 @@ def find_replacements(slot, original, kandidaten, reference,
         if kosten is None or kosten > max_umschulung:
             continue
         geprueft += 1
-        b = score_slot(p, slot, dists)
+        b = score_slot(p, slot, dists, teams)
         if b is None:
             continue
-        score = max(0, min(100, round(b["score"] - kosten)))
+        if nur_charakter and p.get("pers_score") is None:
+            continue
+        fit = max(0, min(100, round(b["score"] - kosten)))
+        score = gesamt(fit, None, p.get("pers_score"))
         a = p.get("age")
+        spez = None
         if modus == "besser":
             if score < ziel + MIN_BESSER:
                 continue
         elif modus == "juenger":
             if a is None or a > alter - JUENGER_UM or score < ziel - JUENGER_TOLERANZ:
+                continue
+        elif modus == "spezialist":
+            # Der Spezialist darf im Gesamtbild schwaecher sein – dafuer muss er
+            # in seiner Sache deutlich herausragen. Ohne die Untergrenze beim
+            # Gesamtscore stuenden sonst Totalausfaelle mit einer guten
+            # Einzelkennzahl ganz oben.
+            spez = _archetyp_pct(b["teile"], spez_stats)
+            if spez is None or spez < SPEZ_MIN_PCT or score < ziel - SPEZ_TOLERANZ:
                 continue
         else:                     # aehnlich
             if abs(score - ziel) > TOL_GLEICH:
@@ -738,9 +1195,18 @@ def find_replacements(slot, original, kandidaten, reference,
             "value": p.get("value"), "stale": bool(p.get("stale")),
             "stand": p.get("taken_at"), "gruppen": sorted(gruppen),
             "im_kader": pid in kader_ids, "pos_quelle": quelle,
-            "score": score, "score_pos": b["score"], "abzug": round(kosten),
+            "score": score, "fit": fit, "score_pos": b["score"],
+            "charakter": p.get("pers_score"), "abzug": round(kosten),
             "umschulung": None if not kosten else GROUP_LABEL.get(von, von),
-            "aehnlichkeit": aehn,
+            "aehnlichkeit": aehn, "archetyp_pct": spez,
+            "dna": p.get("dna"), "dna_pass": p.get("dna_pass"),
+            "dna_ball": p.get("dna_ball"),
+            "pers_score": p.get("pers_score"), "pers_label": p.get("pers_label"),
+            "pers_stufe": p.get("pers_stufe"), "pers_medien": p.get("pers_medien"),
+            "pers_hinweise": p.get("pers_hinweise") or [],
+            "foot": p.get("foot"), "info": p.get("info"), "wage": p.get("wage"),
+            "carry": b["carry"], "liga_koeff": b["liga_koeff"],
+            "team_schnitt": b["team_schnitt"],
             "delta_score": score - ziel,
             "delta_age": None if (a is None or alter is None) else round(a - alter, 1),
             "verlaesslich": b["verlaesslich"], "teile": b["teile"],
@@ -750,14 +1216,24 @@ def find_replacements(slot, original, kandidaten, reference,
         treffer.sort(key=lambda t: (-t["aehnlichkeit"], -t["score"]))
     elif modus == "juenger":
         treffer.sort(key=lambda t: (-t["score"], t["age"]))
+    elif modus == "spezialist":
+        treffer.sort(key=lambda t: (-t["archetyp_pct"], -t["score"]))
     else:
         treffer.sort(key=lambda t: -t["score"])
 
     return {"ok": True, "modus": modus, "modus_label": MODI.get(modus, modus),
+            "archetyp": archetyp,
+            "archetyp_label": ARCHETYP_LABEL.get(archetyp) if archetyp else None,
             "slot": {k: slot[k] for k in ("key", "label", "rolle", "duty")},
             "original": {"id": eigen, "name": original.get("name"),
                          "age": alter, "minutes": original.get("minutes"),
-                         "score": ziel, "teile": ob["teile"]},
+                         "score": ziel, "fit": ziel_fit,
+                         "charakter": original.get("pers_score"),
+                         "teile": ob["teile"],
+                         "carry": ob["carry"], "liga_koeff": ob["liga_koeff"],
+                         "archetyp_pct": (_archetyp_pct(ob["teile"], spez_stats)
+                                          if spez_stats else None)},
             "treffer": treffer[:limit], "geprueft": geprueft,
             "gefunden": len(treffer), "vergleichsbasis": basis,
-            "min_minutes": min_minutes}
+            "min_minutes": min_minutes, "char_gewicht": CHAR_GEWICHT,
+            "nur_charakter": bool(nur_charakter)}

@@ -18,7 +18,10 @@ python -m pip install -r requirements.txt
 python app.py          # startet das Dashboard (FM24 muss laufen)
 ```
 
-Der Auto-Scan läuft im Hintergrund; „Kader scannen" erzwingt einen Durchlauf.
+Der Auto-Scan ist standardmäßig aus – der HTML-Export gilt als vollständiger,
+aktueller Stand, der RAM-Scan ergänzt ihn nur. „Kader scannen" erzwingt einen
+Durchlauf; wer den Speicher laufend mitlesen will, schaltet den Auto-Scan in
+der Oberfläche ein.
 Über „Import" lassen sich FM-HTML-Exporte (Strg+P) einlesen – nur daraus
 kommen Marktwert, Verein und Liga, die im Speicher nicht als Wert vorliegen.
 
