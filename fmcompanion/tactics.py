@@ -1339,13 +1339,23 @@ def meldeliste(kader, start, seit=None, ref_year=None):
     nicht = zaehl["braucht_platz"]
     kader_max = PL_MAX_KADER - max(0, PL_MIN_HEIMISCH - heim)
     ueber_21 = heim + nicht + zaehl["unbekannt"]
-    # CL Liste A: nur "(15–21)" zaehlt sicher als UEFA-ausgebildet
-    ueber = [p for p in kader if p["pl_status"] != "u21"]
-    hg = [p.get("homegrown") or "" for p in ueber if p["pl_status"] == "heimisch"]
-    verein = sum(1 for h in hg if "Verein" in h and "15" in h)
-    land = sum(1 for h in hg if "Land" in h and "15" in h)
-    pruefen = sum(1 for h in hg if "0–21" in h or "0-21" in h)
+    # CL Liste A: nur "(15–21)" zaehlt SICHER als UEFA-ausgebildet; "(0–21)"
+    # kann es sein (Mainoo erfuellt das Fenster ab 15, FM zeigt trotzdem
+    # "0–21"). Daraus eine sichere Untergrenze und eine Obergrenze.
+    heimische = [p for p in kader if p["pl_status"] == "heimisch"]
+
+    def art(p, wo, fenster):
+        h = (p.get("homegrown") or "").replace("-", "–")   # FM schreibt Halbgeviertstrich
+        return wo in h and fenster in h
+
+    verein = sum(1 for p in heimische if art(p, "Verein", "15–21"))
+    land = sum(1 for p in heimische if art(p, "Land", "15–21"))
+    offen = [p for p in heimische if art(p, "", "0–21")]
+    pruefen = len(offen)
     lokal = min(verein + min(land, CL_MAX_LAND), CL_MAX_LOKAL)
+    lokal_max = min(verein + sum(1 for p in offen if art(p, "Verein", "0–21"))
+                    + min(land + sum(1 for p in offen if art(p, "Land", "0–21")),
+                          CL_MAX_LAND), CL_MAX_LOKAL)
     return {
         "saisonstart": start, "u21_ab_jahrgang": start - 21 if start else None,
         "pl": {"nicht_heimisch": nicht, "max_nicht_heimisch": PL_MAX_NICHT_HEIMISCH,
@@ -1355,11 +1365,17 @@ def meldeliste(kader, start, seit=None, ref_year=None):
                "text": (f"PL: {nicht}/{PL_MAX_NICHT_HEIMISCH} Nicht-Heimische über 21, "
                         f"{heim} Heimische")},
         "cl": {"verein_15": verein, "land_15": land, "pruefen_0_21": pruefen,
+               "pruefen_namen": [p.get("name") for p in offen],
+               # sichere Untergrenze; bis zu liste_a_bis, falls die "(0–21)"-
+               # Spieler fuer die UEFA als ausgebildet zaehlen
                "liste_a_max": PL_MAX_NICHT_HEIMISCH + lokal,
-               "text": (f"CL Liste A: bis zu {PL_MAX_NICHT_HEIMISCH + lokal} Plätze "
-                        f"(Richtwert)" + (f", {pruefen} × „(0–21)“ im "
-                                          f"Registrierungsbildschirm prüfen"
-                                          if pruefen else ""))},
+               "liste_a_bis": PL_MAX_NICHT_HEIMISCH + lokal_max,
+               "text": (f"CL Liste A: sicher {PL_MAX_NICHT_HEIMISCH + lokal}, bis zu "
+                        f"{PL_MAX_NICHT_HEIMISCH + lokal_max} Plätze – "
+                        f"{', '.join(p.get('name') or '?' for p in offen)} („0–21“) "
+                        f"im Registrierungsbildschirm prüfen"
+                        if lokal_max > lokal else
+                        f"CL Liste A: {PL_MAX_NICHT_HEIMISCH + lokal} Plätze (Richtwert)")},
         "grenzfaelle": [p.get("name") for p in kader if p["pl_grenzfall"]],
         "spieler": [{"id": p.get("id"), "eid": p.get("eid"), "name": p.get("name"),
                      "age": p.get("age"), "birth_year": p.get("birth_year"),
