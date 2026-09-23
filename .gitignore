@@ -20,6 +20,8 @@ fmcompanion.db
 fmcompanion.db-shm
 fmcompanion.db-wal
 *.db-journal
+# Sicherungskopien der DB (im Explorer kopiert: "fmcompanion - Kopie.db" …)
+sicherung/
 
 # --- FM-Exporte und Messdaten ----------------------------------------------
 # HTML-Exporte aus dem Spiel (Kaderlisten, Scouting) und Rohdumps der
