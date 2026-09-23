@@ -279,6 +279,13 @@
      Grün = unterbewertet (Kauf), Violett = überbewertet – kein Rot
      (Regel 2). Dünne Stichprobe: gedämpft, ungefärbt, „?" am Wort. */
   td.fair{font-size:11.5px}
+  /* Nicht gewichtet (D13): Kopf gestrichelt wie jede dünne Datenbasis, Zelle
+     neutral – Rauschen bekommt weder Hitze noch Grün/Violett */
+  th.ngw{color:var(--dim);text-decoration:underline dashed var(--dim);text-underline-offset:3px}
+  td.ngwz{color:var(--text)}
+  .ngwkopf{margin:10px 0 2px;font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;
+    text-transform:uppercase;color:var(--dim)}
+  .pbar.ngwbar .plab,.pbar.ngwbar b{color:var(--dim)}
   td.fair .fw{font-weight:600}
   td.fair .fz{font-family:var(--mono);font-size:10.5px;color:var(--muted);
     margin-left:9px;display:inline-block;min-width:78px}
@@ -1067,17 +1074,19 @@ let WATCHFILTER = false;   // nur Merkliste-Spieler zeigen
 let U21ONLY = false;       // nur Spieler bis 21 (Talente)
 let SIG_MIN = 900;         // Mindest-Minuten fuer Signale (Glueck/Pech raus)
 let sortKey = "score", sortDesc = true, maxDuels = 1;
-let xKey = "finishing", yKey = "goals_p90";
+// Standard: xG/90 gegen Tore/90 – der Abstand zur Diagonalen zeigt Glück oder
+// Pech, ohne es zur Achse zu machen (D13; vorher x = Tore über xG).
+let xKey = "xg_p90", yKey = "goals_p90";
 
 // Kennzahlen fuer die Chart-Achsen (Moneyball: Effizienz & Produktion pro 90)
 const METRICS_FIELD = [
   ["score","Moneyball-Score"],
   ["dna","Vereins-DNA"],
-  ["finishing","xG-Überperformance"], ["goals_p90","Tore/90"], ["xg_p90","xG/90"],
+  ["finishing","Tore − xG · nicht gewichtet"], ["goals_p90","Tore/90"], ["xg_p90","xG/90"],
   ["xa_p90","xA/90"], ["assists_p90","Vorlagen/90"], ["rating","Ø-Note"],
   ["attack_p90","Angriff/90"], ["shots_p90","Schüsse/90"],
-  ["shot_acc","Trefferquote %"], ["dribbles_p90","Dribblings/90"],
-  ["duels_p90","Zweikämpfe/90"], ["duel_pct","Zweikampfquote %"],
+  ["shot_acc","Schussgenauigkeit % · im Fit nicht gewichtet"], ["dribbles_p90","Dribblings/90"],
+  ["duels_p90","Gewonnene Zweikämpfe/90"], ["duel_pct","Zweikampfquote % · nicht gewichtet"],
   ["press_p90","Pressing/90"], ["press_pct","Pressing-Quote %"],
   ["prog_p90","Progr. Pässe/90"], ["int_p90","Abgefangen/90"],
   ["keyp_p90","Schlüsselpässe/90"], ["loss_p90","Ballverluste/90"],
@@ -1089,9 +1098,9 @@ const METRICS_FIELD = [
 ];
 const METRICS_GK = [
   ["score","Moneyball-Score"],
-  ["note_resid","Note über Erwartung"], ["gp_shot","Verhindert je 100 Schüsse"],
-  ["save_pct","Paradenquote %"], ["sot_faced","Schüsse aufs Tor"],
-  ["goals_prevented","Goals Prevented"], ["xga","xGA"], ["conceded","Gegentore"],
+  ["note_resid","Note über Erwartung"], ["gp_shot","Verhindert je 100 Schüsse · nicht gewichtet"],
+  ["save_pct","Paradenquote % · nicht gewichtet"], ["sot_faced","Schüsse aufs Tor"],
+  ["goals_prevented","Verhinderte Tore · nicht gewichtet"], ["xga","xGA"], ["conceded","Gegentore"],
   ["conceded_p90","Gegentore/90"], ["rating","Ø-Note"], ["pass_pct","Pass %"],
   ["pers_score","Charakter"], ["apps","Einsätze"], ["minutes","Minuten"],
 ];
@@ -1126,15 +1135,31 @@ const ALL_COLS=[NAME,POS,C_AGE,MIN,C_SC,C_DNA,C_TAL,C_PERS,C_VAL,C_VEFF,C_FAIR,C
 // und meldet den tatsächlich benutzten Wert über load_saved zurück.
 let FAIR_MIN_MIN = 450;
 
+// Nicht gewichtet (D13): Diese Größen wiederholen sich zwischen zwei
+// Saisonhälften nicht (Split-Half des Datenanalysten). Sie bleiben als
+// Information sichtbar, aber nirgends als Stärke – keine Hitzefarbe, kein
+// Grün/Violett, im Spielerbogen eine eigene graue Gruppe, nicht auf Karten.
+// shot_acc fehlt bewusst: im Positions-Fit Rauschen, im Stürmer-Score aber
+// gewollt mit 10 % (Analyst: Stichproben widersprechen sich) – dort normal zeigen.
+const NICHT_GEWICHTET = {duel_pct:1, finishing:1, gp_shot:1, save_pct:1, goals_prevented:1};
+const NGW_GRUND = "wiederholt sich zwischen zwei Saisonhälften nicht (Split-Half) – nicht in der Bewertung";
+
 // Erklärungen für Spaltenköpfe – nur wo die Überschrift allein zu knapp ist.
 const COL_TIPS = {
   value_delta_pct: "Marktwert gegen den Schätzwert aus Leistung, Alter, Liga und Position – als Urteil, dahinter Markt → Fair in Mio. "
     + "Unterbewertet = die Leistung ist mehr wert, als der Markt verlangt. Das Modell liegt typisch um Faktor 3,7 daneben; "
     + "es trennt nur Extremfälle, deshalb gibt es „leicht“ und „deutlich“. Torhüter: kein Wert. Sortiert nach dem Abstand in %.",
   pers_score: "Persönlichkeit aus dem Spielerprofil, übersetzt in Entwicklung und Mentalität (0–100). Steht neben dem Score, nicht darin. Sortiert nach der Zahl.",
-  note_resid: "Ø-Note minus dem, was die Gegentore/90 der Mannschaft erwarten lassen (Note = 7,65 − 0,68 × GT/90). Der eigene Anteil des Torwarts – über Saisonhälften stabil.",
-  gp_shot: "Verhinderte Tore (xGA − Gegentore) je 100 Schüsse aufs Tor – je Schuss statt je Spiel, damit der Keeper der Schießbude keinen Volumenvorteil hat.",
-  save_pct: "Paraden ÷ (Paraden + Gegentore), aus den drei Paraden-Spalten des Exports gerechnet – FMs eigene Par % ist im Export kaputt.",
+  note_resid: "Ø-Note minus Erwartung aus Gegentoren und Schüssen aufs Tor je 90 (7,44 − 0,68 × GT/90 + 0,04 × SoT/90). "
+    + "Der eigene Anteil des Torwarts – für die Bewertung zur Mitte gezogen, weil er erst nach ~1700 Minuten zur Hälfte Signal ist.",
+  gp_shot: "Verhinderte Tore (xGA − Gegentore) je 100 Schüsse aufs Tor. Nicht gewichtet: " + NGW_GRUND
+    + ". Shot-Stopping lässt sich mit den Exportdaten nicht messen.",
+  save_pct: "Paraden ÷ (Paraden + Gegentore), aus den drei Paraden-Spalten des Exports. Nicht gewichtet: " + NGW_GRUND + ".",
+  goals_prevented: "Verhinderte Tore gesamt (xGA − Gegentore) – Glück, kein Können. Nicht gewichtet: " + NGW_GRUND + ".",
+  duel_pct: "Zweikampfquote. Nicht gewichtet: " + NGW_GRUND + ". Stabil ist die Zahl gewonnener Zweikämpfe.",
+  finishing: "Tore minus xG – Glück oder Pech, keine Fähigkeit. Nicht gewichtet: " + NGW_GRUND
+    + ". Die Signale nutzen es gerade deshalb: Wer weit über xG trifft, fällt meist zurück.",
+  shot_acc: "Schussgenauigkeit. Im Positions-Fit nicht gewichtet: " + NGW_GRUND + ". Im Stürmer-Score zählt sie noch mit 10 %.",
   sot_faced: "Schüsse aufs Tor gegen ihn = Paraden + Gegentore. Die Stichprobe hinter den Quoten.",
 };
 
@@ -1249,7 +1274,7 @@ function toggleTheme(){
 // Excel-Heat: Metrik-Zellen relativ zur Spalte einfaerben (0=weniger ist besser)
 const HEAT_COLS = {goals:0,assists:0,xg:0,xa:0,shots_on:0,dribbles:0,duels:0,
   prog_passes:0,press_win:0,interceptions:0,clearances:0,headers_won:0,apps:0,
-  pass_pct:0,duel_pct:0,header_pct:0,shot_acc:0,xga:0,
+  pass_pct:0,header_pct:0,shot_acc:0,xga:0,   // duel_pct: nicht gewichtet (D13)
   losses:1,fouls:1,conceded:1};
 let HEAT = {};
 function heatStyle(v,lo,hi,invert){
@@ -1339,10 +1364,11 @@ function cell(p, key){
   }
   if(key==="reason") return `<td class="reason">${p.reason||""}</td>`;
   if(key==="finishing" || key==="goals_prevented"){
+    // Neutral: Über-/Unterperformance gegen xG ist Glück oder Pech (D13) –
+    // kein Grün für „trifft besser", kein Violett für „trifft schlechter".
     const v = p[key] ?? 0;
-    const cls = v>0.3?"pos":(v<-0.3?"neg":"muted");
     const s = v>0?`+${v.toFixed(2)}`:v.toFixed(2);
-    return `<td class="${cls}">${s}</td>`;
+    return `<td class="ngwz">${s}</td>`;
   }
   if(key==="pen_saved"){
     // Abzeichen, kein Score-Bestandteil: die Stichprobe ist zu klein, um zu
@@ -1484,7 +1510,8 @@ async function renderSignals(){
   const tbl = (title, hint, rows, kind) => {
     if(!rows.length) return `<div class="dsec">${title}</div>
       <div class="muted" style="padding:6px 0 16px">Keine Kandidaten über ${SIG_MIN} Min.</div>`;
-    const head = SIG_COLS.map(([k,l])=>`<th>${l}</th>`).join("");
+    const head = SIG_COLS.map(([k,l])=>`<th${NICHT_GEWICHTET[k]?' class="ngw"':''}${
+      COL_TIPS[k]?` title="${COL_TIPS[k]}"`:""}>${l}</th>`).join("");
     const trs = rows.map(p=>{
       PLAYERS_BY_ID[p.id]=p;   // fuer Detail/Watchlist verfuegbar machen
       return `<tr class="sigrow ${kind}" onclick="openSignalDetail(${p.id})">${SIG_COLS.map(([k])=>
@@ -1495,9 +1522,9 @@ async function renderSignals(){
   };
   body.innerHTML =
     tbl(`<span class="sigdot buy"></span> Kaufen – Pechvögel (${s.buy.length})`,
-        "viele Chancen (xG/90-P ≥ 60), aber Tore < xG − 0.8 → günstig", s.buy, "pos")
-    + tbl(`<span class="sigdot sell"></span> Verkaufen – Überperformer (${s.sell.length})`,
-        "Tore > xG + 1.5 → Wert am Peak", s.sell, "neg")
+        "viele Chancen (xG/90-P ≥ 60), aber Tore < xG − 0.8 – Pech wiederholt sich nicht → günstig", s.buy, "pos")
+    + tbl(`<span class="sigdot sell"></span> Verkaufen – über xG getroffen (${s.sell.length})`,
+        "Tore > xG + 1.5 – Glück wiederholt sich nicht → Wert am Peak", s.sell, "neg")
     + `<div class="muted" style="font-size:11.5px;margin-top:10px">
         Basis: Pool (neuester Stand je Spieler), ${s.eligible} von ${s.total} Feldspielern über ${SIG_MIN} Min.</div>`;
 }
@@ -1538,9 +1565,12 @@ function cardStats(p){
     // stehen neutral, nicht bei null.
     const gkOne=(k,inv)=>{ const vals=gk.filter(q=>q[k]!=null).map(q=>+q[k]);
       return to99(p[k]==null ? null : pctOf(vals, +p[k], inv)); };
-    return [{lab:"VER",val:gkOne("gp_shot")},{lab:"PAR",val:gkOne("save_pct")},
-            {lab:"ERW",val:gkOne("note_resid")},{lab:"PAS",val:one("pass_pct")},
-            {lab:"GEG",val:one("conceded_p90",true)},{lab:"FRM",val:one("rating")}];
+    // Vier Achsen statt sechs (D13): Paraden je Schuss (VER) und Paradenquote
+    // (PAR) wiederholen sich nicht – Shot-Stopping ist mit den Exportdaten
+    // nicht messbar. Die Karte zeigt nur, was trägt: Note über Erwartung,
+    // Gegentore/90, Passquote (Mitspielender TW) und die Ø-Note.
+    return [{lab:"ERW",val:gkOne("note_resid")},{lab:"GEG",val:one("conceded_p90",true)},
+            {lab:"PAS",val:one("pass_pct")},{lab:"FRM",val:one("rating")}];
   }
   const co = fieldCohort();
   const avg=(...ks)=>ks.reduce((s,k)=>s+(pctlIn(co,k,+p[k]||0)??50),0)/ks.length;
@@ -1549,7 +1579,8 @@ function cardStats(p){
           {lab:"KRE",val:to99(avg("xa_p90","assists_p90","keyp_p90"))},
           {lab:"TEC",val:to99(one("dribbles_p90"))},
           {lab:"PAS",val:to99(avg("pass_pct","prog_p90"))},
-          {lab:"DEF",val:to99(avg("duels_p90","duel_pct"))},
+          // gewonnene Zweikämpfe + Abgefangenes statt Zweikampfquote (D13)
+          {lab:"DEF",val:to99(avg("duels_p90","int_p90"))},
           {lab:"FRM",val:to99(one("rating"))}];
 }
 
@@ -2911,7 +2942,7 @@ function renderTable(rows, C){
     if(vals.length) HEAT[k] = [Math.min(...vals), Math.max(...vals)];
   }
   const th = C.map(([k,l])=>
-    `<th class="${k===sortKey?'active':''}"${COL_TIPS[k]?` title="${COL_TIPS[k]}"`:""} onclick="sortBy('${k}')">${l}</th>`).join("");
+    `<th class="${k===sortKey?'active':''}${NICHT_GEWICHTET[k]?' ngw':''}"${COL_TIPS[k]?` title="${COL_TIPS[k]}"`:""} onclick="sortBy('${k}')">${l}</th>`).join("");
   const gedeckelt = !TABLE_ALLE && rows.length > TABLE_MAX;
   const shown = gedeckelt ? rows.slice(0, TABLE_MAX) : rows;
   const body = shown.map(p=>
@@ -2985,7 +3016,7 @@ function renderChart(rows){
 
 function populateAxes(){
   const mx = metricsFor();
-  if(!mx.some(m=>m[0]===xKey)) xKey = TABS[TAB].gk ? "xga" : "finishing";
+  if(!mx.some(m=>m[0]===xKey)) xKey = TABS[TAB].gk ? "xga" : "xg_p90";
   if(!mx.some(m=>m[0]===yKey)) yKey = TABS[TAB].gk ? "goals_prevented" : "goals_p90";
   const opts = mx.map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
   const xs=document.getElementById("xAxis"), ys=document.getElementById("yAxis");
@@ -3097,12 +3128,13 @@ const DETAIL_METRICS_FIELD = [
   ["xa_p90","xA/90"],["shots_p90","Schüsse/90"],["press_p90","Pressing/90"],
   ["prog_p90","Progr. Pässe/90"],["int_p90","Abgefangen/90"],
   ["keyp_p90","Schlüsselp./90"],["loss_p90","Ballsicherheit",true],
-  ["dribbles_p90","Dribblings/90"],["duel_pct","ZWK-Quote %"],
-  ["header_pct","Kopfball %"],["pass_pct","Pass %"],["rating","Ø-Note"]];
+  ["dribbles_p90","Dribblings/90"],["duels_p90","Gew. Zweikämpfe/90"],
+  ["header_pct","Kopfball %"],["pass_pct","Pass %"],["rating","Ø-Note"],
+  ["duel_pct","ZWK-Quote %"]];
 const DETAIL_METRICS_GK = [
-  ["note_resid","Note über Erwartung"],["gp_shot","Verhindert je 100 Sch."],
-  ["save_pct","Paradenquote %"],["conceded_p90","GEG/90",true],
-  ["pass_pct","Pass %"],["rating","Ø-Note"]];
+  ["note_resid","Note über Erwartung"],["conceded_p90","GEG/90",true],
+  ["pass_pct","Pass %"],["rating","Ø-Note"],
+  ["gp_shot","Verhindert je 100 Sch."],["save_pct","Paradenquote %"]];
 
 const cohortFor = p => { const pr=profileOf(p); return PLAYERS.filter(q=>profileOf(q)===pr); };
 
@@ -3117,18 +3149,22 @@ function pctOf(vals, v, invert){
 const barColor = r => r>=65?"var(--pos)":(r<=35?"var(--neg)":"var(--blue)");
 
 function metricBars(p, cohort){
-  const mets = p.is_gk ? DETAIL_METRICS_GK : DETAIL_METRICS_FIELD;
-  return mets.map(([k,label,inv])=>{
+  const alle = p.is_gk ? DETAIL_METRICS_GK : DETAIL_METRICS_FIELD;
+  // Rauschgrößen (D13) stehen getrennt und grau darunter – Information, keine Stärke
+  const zeige = (mets, grau) => mets.map(([k,label,inv])=>{
     // Fehlende Werte bleiben draußen statt als 0 mitzulaufen – sonst stünde
     // ein Torwart ohne Paraden-Daten im 5. Perzentil der Paradenquote.
     const pct = p[k]==null ? null : pctOf(cohort.filter(q=>q[k]!=null).map(q=>+q[k]), +p[k], inv);
     if(pct==null) return `<div class="pbar"><span class="plab">${label}</span><div class="ptrack"></div><b class="muted">–</b></div>`;
     const r=Math.round(pct);
-    return `<div class="pbar"${inv?' title="weniger ist besser (invertiert)"':''}>
+    return `<div class="pbar${grau?" ngwbar":""}"${grau ? ` title="${NGW_GRUND}"` : inv?' title="weniger ist besser (invertiert)"':''}>
       <span class="plab">${label}</span>
-      <div class="ptrack"><i style="width:${r}%;background:${barColor(r)}"></i></div>
+      <div class="ptrack"><i style="width:${r}%;background:${grau?"var(--dim)":barColor(r)}"></i></div>
       <b>${r}</b></div>`;
   }).join("");
+  const rausch = alle.filter(m=>NICHT_GEWICHTET[m[0]]);
+  return zeige(alle.filter(m=>!NICHT_GEWICHTET[m[0]]), false)
+    + (rausch.length ? `<div class="ngwkopf" title="${NGW_GRUND}">Nicht gewichtet · wiederholt sich nicht</div>${zeige(rausch, true)}` : "");
 }
 
 // Preislot: Marktwert und geschätzter Fair Value als zwei Balken auf
