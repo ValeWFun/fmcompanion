@@ -210,7 +210,13 @@ METRICS = {
 # x/y in Prozent des Spielfelds (0/0 = links oben, eigenes Tor unten).
 # Gewichte aus der Rollenanalyse, nach der Gegenpruefung korrigiert:
 #  - keine Kennzahl doppelt fuer dieselbe Dimension (pass_pct UND loss_p90)
-#  - Quoten immer mit Volumen gepaart (duel_pct + duels_p90)
+#  - nur Kennzahlen, die sich zwischen zwei Saisonhaelften wiederholen
+#    (Split-Half des Datenanalysten, 23.09.2026, 3 Saisons, ohne Saudi-
+#    Ligen): Zweikampfquote (r 0,01–0,10), Tore ueber xG (0,12), Schuss-
+#    genauigkeit (0,26) und beim Torwart Paraden bzw. verhinderte Tore je
+#    Schuss (0,07–0,19) sind Rauschen und NICHT gewichtet. Die Zweikampf-
+#    Dimension tragen die gewonnenen Zweikaempfe/90 (Menge x Quote in einer
+#    Zahl, r 0,52–0,74).
 #  - Ballverluste als Rate je Aktion, nicht je 90 Minuten
 #  - kein prog_p90 beim Torwart (misst dort lange Baelle = das Gegenteil)
 FORMATION = [
@@ -224,17 +230,24 @@ FORMATION = [
             "Sweeper-Variante situativ, nicht proaktiv",
             "Letzter Mann, wenn das hohe Pressing überspielt wird",
         ],
-        # Shot-Stopping je Schuss und Note über Erwartung statt "verhinderte
-        # Tore/90": Letztere waren zwischen den Saisonhälften nicht stabil
-        # (r 0,23) und hoben Keeper hinter schwachen Abwehrreihen.
-        "gewichte": {"pass_pct": 0.30, "note_resid": 0.25, "gp_shot": 0.20,
-                     "rating": 0.15, "save_pct": 0.10},
+        # Nur was sich wiederholt: Passquote (Split-Half r 0,84), Note über
+        # Erwartung (0,58 mit der Gerade R1) und Ø-Note (0,71). Shot-Stopping
+        # – verhindert je Schuss, Paradenquote – ist in den Exportdaten
+        # Rauschen (0,07/0,19) und fliegt raus; Slot-Score r 0,63 -> 0,70.
+        # note_resid kommt aus moneyball.enrich BEREITS zur Mitte geschrumpft
+        # (NUE_SHRINK_MIN): bewusste Ausnahme, sonst schrumpft kein Slot –
+        # bei 40 % Gewicht und Reliabilitaet 0,35 nach 900 Minuten noetig
+        # (vom Nutzer als Teil des Gewichtungspakets freigegeben).
+        "gewichte": {"pass_pct": 0.30, "note_resid": 0.40, "rating": 0.30},
         "blind": [
             "Ob er wirklich ausrollt oder lang schlägt – Passrichtung und "
             "Passlänge fehlen in den Daten komplett.",
             "Herauslaufen, Eins-gegen-eins und Strafraumbeherrschung – genau "
             "das, was der Torwart hinter einer sehr hohen Kette braucht – gibt "
-            "es nicht als eigene Felder; Paraden je Schuss sind die Näherung.",
+            "es nicht als eigene Felder.",
+            "Shot-Stopping lässt sich mit den Exportdaten nicht messen: Paraden "
+            "und verhinderte Tore je Schuss wiederholen sich zwischen zwei "
+            "Saisonhälften nicht.",
         ],
     },
     {
@@ -248,8 +261,8 @@ FORMATION = [
             "Nach Ballverlust in die 2-2-Restverteidigung zurück",
         ],
         "gewichte": {"xa_p90": 0.20, "keyp_p90": 0.15, "dribbles_p90": 0.15,
-                     "prog_p90": 0.15, "rec_p90": 0.10, "duel_pct": 0.10,
-                     "duels_p90": 0.05, "loss_rate": 0.10},
+                     "prog_p90": 0.15, "rec_p90": 0.10, "duels_p90": 0.15,
+                     "loss_rate": 0.10},
         "blind": [
             "Ob geflankt oder zurückgelegt wurde – Hereingaben sind kein eigenes Feld.",
             "Schlüsselpässe und xA enthalten Standards: wer Ecken tritt, sieht "
@@ -267,12 +280,13 @@ FORMATION = [
             "Kopfballverteidigung im Strafraum, weil Flanken bewusst zugelassen werden",
         ],
         "gewichte": {"pass_pct": 0.20, "prog_p90": 0.20, "header_pct": 0.15,
-                     "int_p90": 0.10, "duel_pct": 0.10, "duels_p90": 0.05,
+                     "int_p90": 0.10, "duels_p90": 0.15,
                      "rec_p90": 0.05, "loss_rate": 0.15},
         "blind": [
             "Ob der Ball diagonal auf die hochstehenden Außenverteidiger kam.",
             "Innenverteidiger führen im Schnitt nur rund anderthalb Bodenduelle "
-            "pro Spiel – die Zweikampfquote ist entsprechend wacklig.",
+            "pro Spiel – die Zweikampfquote ist dabei Zufall und zählt nicht; "
+            "gewertet werden die gewonnenen Zweikämpfe.",
         ],
     },
     {
@@ -285,11 +299,12 @@ FORMATION = [
             "Kopfballverteidigung im Strafraum",
         ],
         "gewichte": {"pass_pct": 0.20, "prog_p90": 0.20, "header_pct": 0.15,
-                     "int_p90": 0.10, "duel_pct": 0.10, "duels_p90": 0.05,
+                     "int_p90": 0.10, "duels_p90": 0.15,
                      "rec_p90": 0.05, "loss_rate": 0.15},
         "blind": [
             "Ob der Ball diagonal auf die hochstehenden Außenverteidiger kam.",
-            "Zu kleine Zweikampf-Grundmenge für eine belastbare Quote.",
+            "Zu kleine Zweikampf-Grundmenge für eine Quote – gewertet werden "
+            "die gewonnenen Zweikämpfe.",
         ],
     },
     {
@@ -302,8 +317,8 @@ FORMATION = [
             "Nach Ballverlust in die 2-2-Restverteidigung zurück",
         ],
         "gewichte": {"xa_p90": 0.20, "keyp_p90": 0.15, "dribbles_p90": 0.15,
-                     "prog_p90": 0.15, "rec_p90": 0.10, "duel_pct": 0.10,
-                     "duels_p90": 0.05, "loss_rate": 0.10},
+                     "prog_p90": 0.15, "rec_p90": 0.10, "duels_p90": 0.15,
+                     "loss_rate": 0.10},
         "blind": [
             "Ob geflankt oder zurückgelegt wurde.",
             "Standards verfälschen Schlüsselpässe und xA.",
@@ -321,7 +336,7 @@ FORMATION = [
         ],
         "gewichte": {"rec_p90": 0.20, "pass_pct": 0.15, "loss_rate": 0.20,
                      "prog_p90": 0.10, "int_p90": 0.10, "press_p90": 0.10,
-                     "duel_pct": 0.08, "duels_p90": 0.07},
+                     "duels_p90": 0.15},
         "blind": [
             "Die Rolle ist bewusst konservativ – wer den Tiefenpass aus der Sechs "
             "will, braucht eine andere Rolle, nicht einen anderen Spieler.",
@@ -339,7 +354,7 @@ FORMATION = [
         ],
         "gewichte": {"rec_p90": 0.20, "pass_pct": 0.15, "loss_rate": 0.20,
                      "prog_p90": 0.10, "int_p90": 0.10, "press_p90": 0.10,
-                     "duel_pct": 0.08, "duels_p90": 0.07},
+                     "duels_p90": 0.15},
         "blind": [
             "Konservative Rolle – Tiefenpässe sind hier nicht vorgesehen.",
             "Pressingwerte sind teamabhängig.",
@@ -413,13 +428,17 @@ FORMATION = [
             "prallen, das wären Zielspieler oder hängende Spitze",
             "Chancen verwerten bei wenigen Kontakten",
         ],
-        "gewichte": {"xg_p90": 0.28, "goals_p90": 0.20, "finishing": 0.12,
-                     "xa_p90": 0.10, "press_p90": 0.10, "shot_acc": 0.07,
-                     "duel_pct": 0.08, "duels_p90": 0.05},
+        # xG/90 ist die stabilste Torgroesse (Split-Half 0,65) und sagt die
+        # Tore der naechsten Haelfte besser vorher als die Tore selbst (0,59
+        # gegen 0,50); Slot-Score r 0,59 -> 0,66.
+        "gewichte": {"xg_p90": 0.45, "goals_p90": 0.25, "xa_p90": 0.10,
+                     "press_p90": 0.10, "duels_p90": 0.10},
         "blind": [
             "Das Anlaufen: der Stoßstürmer hat keinen eingebauten Pressing"
             "auftrag – wenn das wichtig ist, wäre der Pressende Stürmer die Rolle.",
             "Läufe ohne Ball, die Räume öffnen, tauchen in keiner Zahl auf.",
+            "Tore über xG und Schussgenauigkeit zählen nicht: Beides wiederholt "
+            "sich zwischen zwei Saisonhälften nicht.",
         ],
     },
 ]
@@ -609,8 +628,15 @@ def _wert(p, key):
     auseinander, bei denen es darauf ankam.
     """
     # Ø-Note ligabereinigt (moneyball.LEAGUE_NOTE_OFFSET), angezeigt wird die
-    # rohe Note – dieselbe Regel wie in der Score-Engine.
-    v = p.get("rating_adj", p.get(key)) if key == "rating" else p.get(key)
+    # rohe Note – dieselbe Regel wie in der Score-Engine. Die Note ueber
+    # Erwartung geht GESCHRUMPFT ein (moneyball.NUE_SHRINK_MIN) – die einzige
+    # Slot-Kennzahl mit Shrinkage, bewusst (siehe FORMATION, Torwart).
+    if key == "rating":
+        v = p.get("rating_adj", p.get(key))
+    elif key == "note_resid":
+        v = p.get("note_resid_s")
+    else:
+        v = p.get(key)
     if v is None:
         return None
     return float(v) * _koeff(p) if key in SKALIERBAR else float(v)
@@ -1071,20 +1097,20 @@ SPEZ_TOLERANZ = 12         # so weit darf er dafuer im Gesamtscore abfallen
 # vielleicht gezielt einen Vorbereiter statt eines Abschliessers – oder
 # umgekehrt, je nachdem, wer sonst noch auf dem Platz steht.
 ARCHETYPEN = {
-    "tw":  {"paraden": ["gp_shot", "save_pct"], "fussball": ["pass_pct"]},
+    "tw":  {"fussball": ["pass_pct"]},
     "lv":  {"offensiv": ["xa_p90", "keyp_p90", "dribbles_p90"],
-            "defensiv": ["duel_pct", "duels_p90", "rec_p90"]},
+            "defensiv": ["duels_p90", "rec_p90"]},
     "rv":  {"offensiv": ["xa_p90", "keyp_p90", "dribbles_p90"],
-            "defensiv": ["duel_pct", "duels_p90", "rec_p90"]},
+            "defensiv": ["duels_p90", "rec_p90"]},
     "ivl": {"aufbau": ["prog_p90", "pass_pct"], "kopfball": ["header_pct"],
-            "zweikampf": ["duel_pct", "duels_p90", "int_p90"]},
+            "zweikampf": ["duels_p90", "int_p90"]},
     "ivr": {"aufbau": ["prog_p90", "pass_pct"], "kopfball": ["header_pct"],
-            "zweikampf": ["duel_pct", "duels_p90", "int_p90"]},
+            "zweikampf": ["duels_p90", "int_p90"]},
     "dml": {"aufbau": ["prog_p90", "pass_pct"],
-            "zerstoerer": ["int_p90", "duel_pct", "duels_p90"],
+            "zerstoerer": ["int_p90", "duels_p90"],
             "pressing": ["press_p90"]},
     "dmr": {"aufbau": ["prog_p90", "pass_pct"],
-            "zerstoerer": ["int_p90", "duel_pct", "duels_p90"],
+            "zerstoerer": ["int_p90", "duels_p90"],
             "pressing": ["press_p90"]},
     "aml": {"creator": ["xa_p90", "keyp_p90"],
             "finisher": ["xg_p90", "goals_p90"], "dribbler": ["dribbles_p90"]},
@@ -1092,11 +1118,11 @@ ARCHETYPEN = {
             "finisher": ["xg_p90", "goals_p90"], "dribbler": ["dribbles_p90"]},
     "amc": {"creator": ["xa_p90", "keyp_p90"], "finisher": ["xg_p90"],
             "dribbler": ["dribbles_p90"]},
-    "st":  {"finisher": ["xg_p90", "goals_p90", "finishing"],
-            "zuarbeiter": ["xa_p90"], "pressing": ["press_p90", "duel_pct"]},
+    "st":  {"finisher": ["xg_p90", "goals_p90"],
+            "zuarbeiter": ["xa_p90"], "pressing": ["press_p90", "duels_p90"]},
 }
 ARCHETYP_LABEL = {
-    "paraden": "Paradenstark", "fussball": "Fußballspielend",
+    "fussball": "Fußballspielend",
     "offensiv": "Offensivdrang", "defensiv": "Defensiv sicher",
     "aufbau": "Spielaufbau", "kopfball": "Kopfballstark",
     "zweikampf": "Zweikampfstark", "zerstoerer": "Ballgewinner",
@@ -1109,6 +1135,13 @@ ARCHETYP_LABEL = {
 # beim Import auffliegen als still im Kontextmenue.
 _ohne_label = {k for m in ARCHETYPEN.values() for k in m} - set(ARCHETYP_LABEL)
 assert not _ohne_label, f"Archetyp ohne Beschriftung: {sorted(_ohne_label)}"
+# Ein Archetyp auf einer Kennzahl, die der Slot nicht gewichtet, hat keine
+# Verteilung und liefe still leer (so waere es "Paradenstark" nach dem
+# Streichen der Paradenwerte ergangen).
+_ungewichtet = {(slot["key"], a, k) for slot in FORMATION
+                for a, ks in ARCHETYPEN.get(slot["key"], {}).items()
+                for k in ks if k not in slot["gewichte"]}
+assert not _ungewichtet, f"Archetyp auf ungewichteter Kennzahl: {sorted(_ungewichtet)}"
 
 
 # ---------------------------------------------------------- Starker Fuss

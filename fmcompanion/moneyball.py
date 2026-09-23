@@ -266,20 +266,34 @@ def enrich(players, ref_year=None, ref_day=None):
         held = p.get("saves_held")
         p["held_pct"] = (round(100.0 * int(held) / saves, 1)
                          if (saves and held is not None) else None)
-        # Verhinderte Tore je 100 Schuesse: dasselbe wie gp_p90, aber je
-        # Schuss statt je Spiel – ein Torwart hinter einer schwachen Abwehr
-        # bekommt so keinen Volumenvorteil.
+        # Verhinderte Tore je 100 Schuesse und Paradenquote: nur noch zur
+        # Anzeige. Beides wiederholt sich zwischen zwei Saisonhaelften nicht
+        # (Split-Half r 0,07 bzw. 0,19) und steht in keiner Gewichtung.
         gp_tot = (xga - conc) if (aus_export and p.get("xga") is not None) else None
         p["gp_total"] = None if gp_tot is None else round(gp_tot, 2)
         p["gp_shot"] = round(100.0 * gp_tot / sot, 1) if (gp_tot is not None and sot) else None
-        # Note ueber Erwartung: die Ø-Note eines Torwarts haengt zu 62 % an den
-        # Gegentoren je 90 seiner Mannschaft (79 Export-Keeper ab 1350 Min:
-        # Note = 7,65 - 0,68 x GT/90, R² 0,62). Was darueber hinausgeht, ist
-        # sein eigener Anteil – und der ist ueber die Saisonhaelften stabil
-        # (r 0,77), waehrend "verhinderte Tore/90" es nicht sind (r 0,23).
-        p["note_resid"] = (round(p["rating_adj"] - (GK_NOTE_A - GK_NOTE_B * p["conceded_p90"]), 2)
-                           if (p["is_gk"] and aus_export and p["rating"] > 0 and m >= 90
-                               and 0.0 < p["conceded_p90"] < 4.0) else None)
+        # Note ueber Erwartung (NüE): die Ø-Note eines Torwarts haengt stark an
+        # den Gegentoren seiner Mannschaft (Gerade R1, siehe GK_NOTE_A). Was
+        # darueber hinausgeht, ist sein eigener Anteil – ueber Saisonhaelften
+        # stabil (Split-Half r 0,58), waehrend Paraden und verhinderte Tore es
+        # nicht sind (0,02–0,19). Die Schuesse aufs Tor/90 halten die NüE
+        # neutral gegenueber dem Beschuss (FM belohnt Paraden kaum). Gerechnet
+        # wird bewusst mit den Anzeigewerten (conceded_p90 und rating_adj auf
+        # 2 Stellen gerundet) – wie im Abnahmeskript des Datenanalysten; die
+        # Abweichung zur ungerundeten Gerade bleibt unter 0,004.
+        if (p["is_gk"] and aus_export and p["rating"] > 0 and m >= 90
+                and 0.0 < p["conceded_p90"] < 4.0):
+            sot90 = (sot or 0) * 90.0 / m
+            erw = GK_NOTE_A - GK_NOTE_B * p["conceded_p90"] + GK_NOTE_C * sot90
+            p["note_resid"] = round(p["rating_adj"] - erw, 3)
+            # Fuers Rechnen zur Mitte geschrumpft, m/(m+1700) – in Profil UND
+            # Slot (tactics._wert), bewusste Ausnahme: alle anderen Slot-
+            # Kennzahlen gehen roh ein, beim Torwart mit 40 % NüE und
+            # Reliabilitaet 0,35 nach 900 Minuten ginge das nicht gut.
+            # Angezeigt wird weiter der rohe Wert (note_resid).
+            p["note_resid_s"] = round(p["note_resid"] * m / (m + NUE_SHRINK_MIN), 3)
+        else:
+            p["note_resid"] = p["note_resid_s"] = None
         p["err_p90"] = None if p.get("errors") is None else _p90(p.get("errors"), m)
         # Persoenlichkeit und Medienumgang (sichtbare Beschreibungen, keine
         # verdeckten Werte – siehe charakter.py)
@@ -314,8 +328,10 @@ RANKINGS = {
     "Kreativität (xA/90)": ("xa_p90", True),
     "Vorlagen/90": ("assists_p90", True),
     "Offensive Beteiligung/90": ("attack_p90", True),
-    "Ballgewinner (Zweikämpfe/90)": ("duels_p90", True),
-    "Zweikampfquote %": ("duel_pct", True),
+    # Zweikampf-Bestenliste ueber die gewonnenen Duelle/90 (Split-Half IV
+    # r 0,75). Die "Zweikampfquote %" stand hier auch – eine Rauschgroesse
+    # (r 0,01–0,10) gehoert nicht als Bestenliste heraus.
+    "Gewonnene Zweikämpfe/90": ("duels_p90", True),
     "Pressing-Monster (/90)": ("press_p90", True),
     "Progressive Pässe/90": ("prog_p90", True),
     "Schlüsselpässe/90": ("keyp_p90", True),
@@ -401,21 +417,21 @@ LEAGUE_COEFFS = {
     "Österreichs 1. Liga": 0.55, "Sky Bet League One": 0.55,
 }
 SHRINK_MIN = 180     # Shrinkage-Prior: ~2 Spiele
-# Torwart: Erwartungsgerade der Ø-Note aus den Gegentoren/90 (Export-Keeper
-# ab 1350 Minuten, n = 79, R² 0,62). Steckt in enrich() -> note_resid.
-GK_NOTE_A = 7.652
-GK_NOTE_B = 0.681
-# Torwart: Stabilisierungspunkt fuer Quoten je Schuss. Aus der Split-Half-
-# Pruefung (38 Keeper, je Haelfte ~74 Schuesse aufs Tor, r = 0,23 fuer
-# verhinderte Tore): K = n(1-r)/r = 253. Heisst: erst nach ~250 Schuessen
-# wiegt das Gesehene so viel wie das Vorwissen – eine ganze Saison (~170)
-# bekommt gut 40 % Gewicht. Das ist nicht Vorsicht, sondern die gemessene
-# Verlaesslichkeit der Kennzahl.
-K_SOT = 250
-# Eiskaelte (Tore ueber xG) braucht mehr Beweise als Volumen: drei Tore ueber
-# Erwartung in 300 Minuten sind Rauschen, zehn in 3000 ein Muster. Deshalb
-# ~6 Spiele Prior statt 2.
-FIN_SHRINK_MIN = 540
+# Torwart: Erwartungsgerade der Ø-Note ("R1"), steckt in enrich() ->
+# note_resid (Note ueber Erwartung, NüE):
+#     Note_erw = GK_NOTE_A − GK_NOTE_B · Gegentore/90 + GK_NOTE_C · Schuesse aufs Tor/90
+# Geschaetzt vom Datenanalysten (Auftrag 3, 23.09.2026) auf 159 Keeper-Saisons
+# ab 1350 Minuten, OHNE saudische Ligen und Kalenderjahr-Ligen, R² 0,69;
+# gerundet 7,442 / 0,681 / 0,039. Die fruehere Gerade (7,652 − 0,681·GT/90)
+# war mit fuenf saudischen Keepern geschaetzt und zu steil: sie hob Keeper
+# hinter loechrigen Abwehrreihen (NüE gegen Schuesse/90 r +0,26, mit R1 −0,01).
+GK_NOTE_A = 7.442012
+GK_NOTE_B = 0.681315
+GK_NOTE_C = 0.039018
+# Stabilisierungspunkt der NüE: nach ~1700 Minuten ist sie zur Haelfte Signal
+# (Split-Half, 111 Keeper-Saisons; Reliabilitaet 0,35 nach 900, 0,64 nach
+# 3060 Minuten). Geschrumpft wird in Profil UND Slot, siehe enrich().
+NUE_SHRINK_MIN = 1700
 
 
 def league_coeff(league):
@@ -459,17 +475,17 @@ def note_offset(league):
 # Paesse = Feld M+102, beide per Kader-Export 7/7 verifiziert) – gebraucht
 # werden sie jetzt von Fit und DNA. Format: (metrik, label, gewicht, invertiert)
 PROFILES = {
-    # Stuermer: Tore = Chancen x Kaltschnaeuzigkeit, beides einzeln gewichtet,
-    # die Tore selbst bleiben als Ergebnis drin. Ein Profil nur auf xG setzte
-    # den eiskalten Abschliesser mit dem Chancentod gleich – beim Stuermer ist
-    # die Abweichung von xG keine Stoerung, sondern die Faehigkeit, um die es
-    # geht (Guessand 31 Tore auf 20.6 xG ueber 3900 Minuten). Dazu Schuss-
-    # genauigkeit, Zuarbeit, Zweikampf fuer den Wandspieler, Schussauswahl.
-    # 25 % Chancen / 20 % Tore / 25 % Eiskaelte / 10 % Zuarbeit / 10 % Note /
-    # 5 % Zweikampf / 5 % Schussauswahl
-    "st":  [("xg_adj", "npxG/90", .25, False),
-            ("goals_adj", "npTore/90", .20, False),
-            ("fin_adj", "Eiskälte (npTore − npxG)/90", .15, False),
+    # Stuermer: Chancen (npxG) tragen, die Tore selbst bleiben als Ergebnis
+    # drin. "Eiskaelte" (Tore ueber xG) ist gestrichen: Die Annahme, beim
+    # Stuermer sei die Abweichung von xG die Faehigkeit, haelt in diesem
+    # Savegame nicht – sie wiederholt sich zwischen zwei Saisonhaelften nicht
+    # (Split-Half r 0,06–0,09, nach Vereinswechsel negativ), und xG/90 sagt die
+    # Tore der naechsten Haelfte besser vorher als die Tore selbst. Den kleinen
+    # echten Abschluss-Anteil tragen die npTore/90 mit. Profil r 0,61 -> 0,69.
+    # 35 % Chancen / 25 % Tore / 10 % Schussgenauigkeit / 10 % Zuarbeit /
+    # 10 % Note / 5 % Zweikampf / 5 % Schussauswahl
+    "st":  [("xg_adj", "npxG/90", .35, False),
+            ("goals_adj", "npTore/90", .25, False),
             ("shot_acc", "Schussgenauigkeit %", .10, False),
             ("xa_adj", "xA/90", .10, False),
             ("rating", "Ø-Note", .10, False),
@@ -509,24 +525,24 @@ PROFILES = {
             ("rec_adj", "Ballgewinne/90", .05, False),
             ("block_adj", "Blocks/90", .05, False),
             ("loss_p90", "Ballsicherheit", .10, True)],
-    # Innenverteidiger: Zweikampf und Kopfball je als Volumen UND Quote (die
-    # Quote allein belohnt den, der Duellen ausweicht), Abfangen, Klaerungen,
-    # Ballgewinne als proaktives Verteidigen, Fehler vor Gegentoren invertiert
-    # (die modernste IV-Kennzahl, vorher komplett ignoriert), Progression mit
-    # kleinem Gewicht – der IV, der den Ball nicht nach vorn bringt, ist heute
-    # ein Mangel, kein Stil.
+    # Innenverteidiger: Zweikampf als gewonnene Duelle/90 (Menge x Quote in
+    # einer Zahl), Kopfball als Volumen UND Quote (111 Versuche je Halbserie
+    # tragen eine Quote, ~36 Bodenduelle nicht), Abfangen, Klaerungen,
+    # Ballgewinne als proaktives Verteidigen, Progression mit kleinem Gewicht.
+    # Zweikampfquote (Split-Half r 0,03) und Fehler vor Gegentoren (0,17) sind
+    # Rauschen und gestrichen; ihr Gewicht geht an die gewonnenen Duelle und
+    # an die Note (Variante A des Datenanalysten, Profil r 0,53 -> 0,59, sagt
+    # die Note der naechsten Haelfte am besten vorher).
     # 25 % Zweikampf / 20 % Kopfball / 25 % Abfangen+Klaeren+Ballgewinne /
-    # 10 % Fehler / 5 % Progression / 10 % Note / 5 % Ball
-    "iv":  [("duelwon_adj", "Gewonnene Zweikämpfe/90", .15, False),
-            ("duel_pct", "ZWK-Quote", .10, False),
+    # 5 % Progression / 20 % Note / 5 % Ball
+    "iv":  [("duelwon_adj", "Gewonnene Zweikämpfe/90", .25, False),
             ("headwon_adj", "Gewonnene Kopfbälle/90", .10, False),
             ("header_pct", "Kopfball %", .10, False),
             ("intercept_adj", "Abgefangen/90", .10, False),
             ("clear_adj", "Klärungen/90", .10, False),
             ("rec_adj", "Ballgewinne/90", .05, False),
-            ("err_adj", "Fehler vor Gegentoren/90", .10, True),
             ("prog_adj", "Progressive Pässe/90", .05, False),
-            ("rating", "Ø-Note", .10, False),
+            ("rating", "Ø-Note", .20, False),
             ("loss_p90", "Ballsicherheit", .05, True)],
     # Aussenverteidiger: Kreation als Prozess (xA + Schluesselpaesse), Flanken
     # als Volumen und Quote (der zentrale AV-Output, vorher Gewicht null),
@@ -549,26 +565,22 @@ PROFILES = {
             ("rating", "Ø-Note", .10, False),
             ("goals_adj", "npTore/90", .05, False),
             ("loss_p90", "Ballsicherheit", .05, True)],
-    # Torhueter – nachgeschaerft im Sommer der 2. Saison, nachdem die "guten"
-    # Keeper der Tabelle selten gute Spiele machten. Die Split-Half-Pruefung
-    # (38 Keeper, erste gegen zweite Saisonhaelfte) zeigte, warum: das alte
-    # Hauptmass "verhinderte Tore/90" (60 % Gewicht) hat zwischen den
-    # Haelften nur r = 0,23 – es war Glueck, kein Koennen. Stabil sind die
-    # Ø-Note (0,87), die Gegentore/90 (0,73) und vor allem der Teil der Note,
-    # den die Gegentore NICHT erklaeren (0,77) – der eigene Anteil des
-    # Torwarts. Fehler vor Gegentoren: r = 0,14, zu selten zum Rechnen.
+    # Torhueter – zweimal nachgeschaerft. Im Sommer der 2. Saison flog
+    # "verhinderte Tore/90" raus (Glueck, kein Koennen). Die Split-Half-
+    # Pruefung des Datenanalysten (23.09.2026, 111 Keeper-Saisons ueber drei
+    # Saisons, ohne saudische Ligen) zeigte dann: auch der Ersatz "je Schuss"
+    # und die Paradenquote wiederholen sich nicht (r 0,07 / 0,19), ebenso die
+    # Fehler vor Gegentoren (−0,12). Die frueher genannten 0,87 (Note) und
+    # 0,77 (NüE) enthielten fuenf saudische Keeper; ohne sie 0,71–0,79 bzw.
+    # 0,50–0,58. Shot-Stopping laesst sich mit den Exportdaten nicht messen.
     #
-    # Deshalb jetzt: Note und Note-ueber-Erwartung tragen, das Shot-Stopping
-    # kommt JE SCHUSS statt je Spiel (kein Volumenvorteil fuer den Keeper
-    # der Schiessbude) und wird mit K_SOT = 250 Schuessen hart zur Mitte
-    # gezogen, die Paradenquote genauso. 'Par %' und 'xSv %' aus dem Export
-    # bleiben draussen (kaputt), Zu-Null-Spiele auch (Team).
-    "tw":  [("rating", "Ø-Note", .30, False),
-            ("note_resid", "Note über Erwartung (Gegentore/90)", .25, False),
-            ("gp_shot", "Verhindert je 100 Schüsse", .20, False),
-            ("save_pct", "Paradenquote %", .10, False),
-            ("conceded_adj", "Gegentore/90", .10, True),
-            ("err_adj", "Fehler vor Gegentoren/90", .05, True)],
+    # Deshalb tragen nur Note, Note ueber Erwartung (NüE, Gerade R1,
+    # geschrumpft – siehe enrich) und die Gegentore/90 (stabil, aber zum
+    # grossen Teil Abwehr). Profil r 0,48 -> 0,67. 'Par %' und 'xSv %' aus
+    # dem Export bleiben draussen (kaputt), Zu-Null-Spiele auch (Team).
+    "tw":  [("rating", "Ø-Note", .45, False),
+            ("note_resid", "Note über Erwartung", .40, False),
+            ("conceded_adj", "Gegentore/90", .15, True)],
 }
 # Gewichte muessen je Profil 1.0 ergeben – sonst liegen die Scores der
 # Profile auf verschiedenen Skalen und "72" hiesse beim Sechser etwas anderes
@@ -601,8 +613,9 @@ def _profile(p):
 # auf dem Profilschnitt (Perzentil ~50) statt bei 0 – keine Daten heisst
 # "unbekannt", nicht "schlecht".
 QUOTE_PRIOR_K = 20
-QUOTEN = {"duel_pct": ("duels", "duels_total"),
-          "header_pct": ("headers_won", "headers_total"),
+# (Zweikampfquote, Paradenquote und verhinderte Tore je Schuss stehen in
+# keinem Profil mehr – Split-Half-Rauschen – und brauchen keinen Prior.)
+QUOTEN = {"header_pct": ("headers_won", "headers_total"),
           "pass_pct": ("pass_ok", "pass_try"),
           # Anteil der Tore aus der Distanz (invertiert im Fluegel-Profil):
           # Fernschusstore sind niedrige xG, ein hoher Anteil heisst
@@ -614,11 +627,7 @@ QUOTEN = {"duel_pct": ("duels", "duels_total"),
           # Flankenquote (Aussenverteidiger); nur aus dem Export bekannt
           "cross_pct": ("crosses_ok", "crosses_try"),
           # Schussgenauigkeit (Stuermer): Schuesse aufs Tor / Schuesse gesamt
-          "shot_acc": ("shots_on", "shots_total"),
-          # Torwart: Paraden je Schuss aufs Tor und verhinderte Tore je Schuss
-          # (mal 100 = "je 100 Schuesse"). Beide mit K_SOT statt 20, siehe dort.
-          "save_pct": ("saves", "sot_faced"),
-          "gp_shot": ("gp_total", "sot_faced")}
+          "shot_acc": ("shots_on", "shots_total")}
 
 
 def _quote(won, total, prior, k=QUOTE_PRIOR_K):
@@ -668,7 +677,6 @@ def _score_metrics(p, coeff, priors=None):
     # Gegentor ist in jeder Liga derselbe Fehler – mal 1.2 waere er in der
     # Premier League "schlimmer", das ist genau verkehrt herum.
     sh0 = m / (m + SHRINK_MIN) if m else 0.0
-    sh_fin = m / (m + FIN_SHRINK_MIN) if m else 0.0
     def adj(v):
         return _p90(v or 0, m) * sh
     np_goals = (p.get("goals") or 0) - (p.get("pen_goals") or 0)
@@ -682,7 +690,6 @@ def _score_metrics(p, coeff, priors=None):
         "intercept_adj": adj(p.get("interceptions")),
         "prog_adj": adj(p.get("prog_passes")),
         "clear_adj": adj(p.get("clearances")),
-        "gp_adj": adj((p.get("xga") or 0) - (p.get("conceded") or 0)),
         # Gegentore/90 nur, wenn die Zahl aus dem Export stammt – der RAM
         # liefert fuer Torhueter Unsinn (siehe enrich, note_resid).
         "conceded_adj": (None if p.get("note_resid") is None
@@ -720,7 +727,6 @@ def _score_metrics(p, coeff, priors=None):
         # Ballverluste: bewusst OHNE Shrinkage/Liga-Koeffizient (beides wuerde
         # eine Negativ-Rate faelschlich Richtung "gut" druecken); invertiert.
         "loss_p90": _p90(p.get("losses") or 0, m),
-        "duel_pct": _quote(p.get("duels"), p.get("duels_total"), pri("duel_pct")),
         "header_pct": _quote(p.get("headers_won"), p.get("headers_total"), pri("header_pct")),
         "pass_pct": _quote(p.get("pass_ok"), p.get("pass_try"), pri("pass_pct")),
         # Ballverluste je 100 Aktionen (enrich): fairer als /90 fuer Spieler,
@@ -730,22 +736,9 @@ def _score_metrics(p, coeff, priors=None):
         "press_pct": _quote(p.get("press_win"), p.get("press_try"), pri("press_pct")),
         "cross_pct": _quote(p.get("crosses_ok"), p.get("crosses_try"), pri("cross_pct")),
         "shot_acc": _quote(p.get("shots_on"), p.get("shots_total"), pri("shot_acc")),
-        # Torwart: Quoten je Schuss, hart geschrumpft (K_SOT); Note ueber
-        # Erwartung mit dem Eiskaelte-Prior (~6 Spiele) zur Null gezogen –
-        # +0,3 nach 200 Minuten ist noch kein Urteil.
-        "save_pct": _quote(p.get("saves"), p.get("sot_faced"), pri("save_pct"), K_SOT),
-        # Ohne bekannte Schusszahl keine Quote: _quote wuerde sonst den
-        # Zaehler auf null Schuesse legen und aus 11 verhinderten Toren eines
-        # alten Imports ein 99. Perzentil machen (Christensen).
-        "gp_shot": (None if p.get("sot_faced") is None
-                    else _quote(p.get("gp_total"), p.get("sot_faced"), pri("gp_shot"), K_SOT)),
-        "note_resid": (None if p.get("note_resid") is None
-                       else float(p["note_resid"]) * sh_fin),
-        # Eiskaelte: npTore ueber npxG je 90 – die Faehigkeit, aus einer Chance
-        # mehr zu machen, als sie hergibt. Staerker geschrumpft (sh_fin) und
-        # OHNE Liga-Koeffizient: ein Tor ueber Erwartung ist ueberall dasselbe,
-        # und Unterperformance mal 1.2 waere in der Premier League "schlimmer".
-        "fin_adj": _p90(np_goals - npxg, m) * sh_fin,
+        # Torwart: Note ueber Erwartung, in enrich() schon zur Mitte
+        # geschrumpft (NUE_SHRINK_MIN) – hier nicht noch einmal.
+        "note_resid": p.get("note_resid_s"),
         # ligabereinigt (LEAGUE_NOTE_OFFSET); angezeigt wird weiter die rohe Note
         "rating": p.get("rating_adj") if p.get("rating_adj") is not None else (p.get("rating") or 0),
     }
