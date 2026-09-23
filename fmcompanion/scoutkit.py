@@ -10,6 +10,9 @@ Regeln:
   jeder versteckte Schreibpfad in db.py scheitert laut mit "attempt to write a
   readonly database", statt still zu schreiben. (CREATE ... IF NOT EXISTS auf
   bestehendem Schema läuft bei mode=ro als No-op durch.)
+- Das Kit migriert nie. Hat die DB ein älteres Schema als der Code erwartet,
+  bricht oeffnen() mit einer verständlichen Meldung ab: FM Companion einmal
+  starten und schließen (das migriert), dann das Kit neu öffnen.
 - Das Kit schreibt auch keine Dateien und kennt keine festen Savegame-Pfade.
   Es gibt Daten zurück; der Aufrufer entscheidet, was er speichert.
 - Die Rechenlogik wird nicht dupliziert: Kader, Pool-Stand, Bezugsjahr und
@@ -72,7 +75,18 @@ def oeffnen(pfad=None):
                            check_same_thread=False, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA query_only=ON")
-    return Kit(conn)
+    try:
+        return Kit(conn)
+    except sqlite3.OperationalError as e:
+        conn.close()
+        if "readonly" in str(e):
+            # Fehlt eine Spalte, will db._init_export sie per ALTER TABLE anlegen –
+            # auf der ro-Verbindung scheitert das mit einer kryptischen Meldung.
+            raise RuntimeError(
+                "Die Datenbank hat noch das alte Schema, der Code erwartet ein "
+                "neueres. FM Companion einmal starten und wieder schließen, dann "
+                "das Kit neu öffnen. Das Kit selbst migriert nie.") from e
+        raise
 
 
 class Kit:
