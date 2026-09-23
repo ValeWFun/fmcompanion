@@ -645,15 +645,16 @@ class Api:
 
     def _import_squad_file(self, path):
         """Datei einlesen, Spieler speichern, Kader daraus setzen."""
+        import os
         try:
-            players = importer.parse_export(path)
+            players, felder = importer.parse_export_felder(path)
         except Exception as e:
             return {"ok": False, "error": f"Import fehlgeschlagen: {e}"}
         if not players:
             return {"ok": False, "error": importer.diagnose(path)
                     or "Keine Spieler in der Datei gefunden."}
         conn = self._db()
-        db.save_export(conn, players)
+        db.save_export(conn, players, felder, datei=os.path.basename(path))
         return self._squad_from_players(conn, players)
 
     def import_squad(self):
@@ -1047,32 +1048,39 @@ class Api:
                 for t, (k, d) in moneyball.RANKINGS.items()]
 
     def _import_files(self, paths):
-        """Mehrere FM-Exporte einlesen und als EIN Import speichern.
+        """Mehrere FM-Exporte einlesen, als EIN Import-Lauf.
 
-        Zusammengefuehrt wird nach EID: ein Spieler, der in zwei Positions-
-        listen steht (Sechser UND Achter), zaehlt einmal, die spaetere Datei
-        gewinnt. Gespeichert wird einmal fuer alle – so bekommt der Wertverlauf
-        je Import-Lauf eine Zeile pro Spieler, nicht eine je Datei. Eine
-        kaputte Datei bricht den Lauf nicht ab, sie wird gemeldet.
+        Alle Dateien teilen sich einen Zeitpunkt – der Wertverlauf bekommt je
+        Lauf eine Zeile pro Spieler, nicht eine je Datei. Gespeichert wird
+        dagegen Datei fuer Datei: jede aendert nur die Felder, die sie
+        enthaelt (db.save_export), und landet einzeln in der Import-Historie.
+        Ein Spieler in zwei Positionslisten (Sechser UND Achter) zaehlt
+        einmal, bei gleichen Feldern gewinnt die spaetere Datei. Eine kaputte
+        Datei bricht den Lauf nicht ab, sie wird gemeldet.
         """
         import os
-        gesamt, dateien, fehler = {}, [], []
+        from datetime import datetime as _dt
+        geparst, dateien, fehler = [], [], []
         for pfad in paths:
             name = os.path.basename(pfad)
             try:
-                players = importer.parse_export(pfad)
+                players, felder = importer.parse_export_felder(pfad)
             except Exception as e:
                 fehler.append(f"{name}: {e}")
                 continue
             if not players:
                 fehler.append(f"{name}: {importer.diagnose(pfad) or 'keine Spieler gefunden'}")
                 continue
-            for p in players:
-                gesamt[p["eid"]] = p
-            dateien.append({"datei": name, "spieler": len(players)})
-        if not gesamt:
+            geparst.append((name, players, felder))
+            dateien.append({"datei": name, "spieler": len(players),
+                            "felder": len(felder)})
+        if not geparst:
             return {"ok": False, "error": "; ".join(fehler) or "Keine Spieler gefunden."}
-        n = db.save_export(self._db(), list(gesamt.values()))
+        conn = self._db()
+        ts = _dt.now().isoformat(timespec="seconds")
+        for name, players, felder in geparst:
+            db.save_export(conn, players, felder, datei=name, ts=ts)
+        n = len({p["eid"] for _, players, _ in geparst for p in players})
         return {"ok": True, "count": n, "dateien": dateien,
                 "zeilen": sum(d["spieler"] for d in dateien), "fehler": fehler}
 

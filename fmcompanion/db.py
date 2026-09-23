@@ -208,13 +208,21 @@ EXPORT_COLS = ["name", "position", "age", "club", "league", "nation",
 # Spalten, die Text tragen – alles andere ist REAL
 EXPORT_TEXT = {"name", "position", "club", "league", "nation",
                "personality", "media", "foot", "info"}
+# Felder, die ein leerer Wert NICHT ueberschreibt. "Scouting erforderlich"
+# heisst nicht, dass die Persoenlichkeit weg ist, sondern dass der EIGENE
+# Verein sie gerade nicht kennt – das Scouting-Wissen haengt am Verein. Nach
+# dem Wechsel von Benfica zu Manchester United haette sonst der erste Import
+# jede bei Benfica gesehene Beschreibung geloescht.
+BEHALTEN_WENN_LEER = {"personality", "media"}
+# Name der Uebernahme des Altbestands in export_importe
+BESTAND_DATEI = "Bestand vor Import-Historie"
 
 
 def _init_export(conn):
     cols = ", ".join(
         f"{c} {'TEXT' if c in EXPORT_TEXT else 'REAL'}" for c in EXPORT_COLS)
     conn.execute(f"""CREATE TABLE IF NOT EXISTS export_players (
-        eid INTEGER PRIMARY KEY, imported_at TEXT, {cols})""")
+        eid INTEGER PRIMARY KEY, imported_at TEXT, pers_stand TEXT, {cols})""")
     # Wertverlauf: je Import eine Zeile (nicht ueberschreiben)
     conn.execute("""CREATE TABLE IF NOT EXISTS export_history (
         eid INTEGER NOT NULL, imported_at TEXT NOT NULL,
@@ -222,30 +230,225 @@ def _init_export(conn):
         PRIMARY KEY (eid, imported_at))""")
     have = {r["name"] for r in
             conn.execute("PRAGMA table_info(export_players)").fetchall()}
-    for c in EXPORT_COLS:                     # bestehende DBs nachziehen
+    # bestehende DBs nachziehen. pers_stand: wann die Persoenlichkeit zuletzt
+    # in einem Export sichtbar war – sie bleibt stehen, wenn spaetere Exporte
+    # "Scouting erforderlich" zeigen, und aendert sich bei jungen Spielern.
+    for c, typ in ([("pers_stand", "TEXT")]
+                   + [(c, "TEXT" if c in EXPORT_TEXT else "REAL") for c in EXPORT_COLS]):
         if c not in have:
-            typ = "TEXT" if c in EXPORT_TEXT else "REAL"
             conn.execute(f"ALTER TABLE export_players ADD COLUMN {c} {typ}")
     conn.commit()
 
 
-def save_export(conn, players):
-    """Upsert der Export-Spieler nach EID + eine Verlaufszeile je Import."""
+def _init_historie(conn):
+    """Import-Historie: jede Datei vollstaendig und einzeln.
+
+    export_players haelt nur den zusammengefuehrten AKTUELLEN Stand, und der
+    Winter-Import ersetzt darin die vollen Vorsaisonzahlen durch die der
+    Halbserie. export_history hebt nur Wert, Gehalt, Alter und Note auf. Wer
+    Halbserie gegen Vorsaison pruefen will (Split-Half, Torwartprofil), braucht
+    aber jede Kennzahl beider Staende – deshalb hier je Datei eine Zeile in
+    export_importe (mit den Feldern, die sie enthielt) und je Spieler eine in
+    export_stand. Nicht Teil von _init_export: die App legt die Tabellen beim
+    Start NICHT an, erst ein Import oder bestand_sichern().
+    """
+    cols = ", ".join(
+        f"{c} {'TEXT' if c in EXPORT_TEXT else 'REAL'}" for c in EXPORT_COLS)
+    conn.execute("""CREATE TABLE IF NOT EXISTS export_importe (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        imported_at TEXT NOT NULL,
+        datei TEXT,
+        felder TEXT NOT NULL,
+        anzahl INTEGER)""")
+    conn.execute(f"""CREATE TABLE IF NOT EXISTS export_stand (
+        import_id INTEGER NOT NULL, eid INTEGER NOT NULL, {cols},
+        PRIMARY KEY (import_id, eid))""")
+    have = {r["name"] for r in
+            conn.execute("PRAGMA table_info(export_stand)").fetchall()}
+    for c in EXPORT_COLS:
+        if c not in have:
+            typ = "TEXT" if c in EXPORT_TEXT else "REAL"
+            conn.execute(f"ALTER TABLE export_stand ADD COLUMN {c} {typ}")
+    conn.commit()
+
+
+def _hat_tabelle(conn, name):
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                        (name,)).fetchone() is not None
+
+
+def _zusammenfuehren(alt, neu, felder, ts):
+    """Eine Export-Zeile in den bisherigen Stand eines Spielers einarbeiten.
+
+    Die EINZIGE Stelle mit den Import-Regeln – save_export schreibt damit,
+    export_stand_bis rechnet damit zurueck. Regeln:
+    - Nur Felder, die die Datei enthielt, aendern sich (auch auf leer).
+    - Ausnahme BEHALTEN_WENN_LEER: eine bekannte Persoenlichkeit bleibt.
+    - imported_at ist der Stand der STATISTIK (Pool "aktuell", Ersatzsuche)
+      und rueckt nur vor, wenn die Datei Minuten enthaelt. Sonst machte eine
+      Shortlist mit blossen Marktwerten Vorsaisonzahlen zu aktuellen.
+    """
+    zeile = (dict(alt) if alt else
+             dict({c: None for c in EXPORT_COLS}, eid=int(neu["eid"]),
+                  imported_at=None, pers_stand=None))
+    for f in felder:
+        v = neu.get(f)
+        if v is None and f in BEHALTEN_WENN_LEER:
+            continue
+        zeile[f] = v
+    if "personality" in felder and neu.get("personality") is not None:
+        zeile["pers_stand"] = ts
+    if "minutes" in felder or not zeile.get("imported_at"):
+        zeile["imported_at"] = ts
+    return zeile
+
+
+def _jetzt():
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def bestand_sichern(conn):
+    """Einmalig: den heutigen export_players-Stand als Anfang der Historie.
+
+    Ohne diesen Schritt kennt die Historie nur Importe ab ihrer Einfuehrung –
+    die vollen Summer3-Saisonzahlen waeren mit dem ersten Winter-Import weg.
+    Je bisherigem Import-Zeitpunkt entsteht ein Eintrag in export_importe mit
+    Datei BESTAND_DATEI. Schreibt nur in die neuen Tabellen und in die neue
+    Spalte pers_stand; die Werte in export_players bleiben unberuehrt.
+
+    -> Zahl der uebernommenen Spieler; 0, wenn die Historie schon Eintraege hat.
+    """
     _init_export(conn)
-    from datetime import datetime as _dt
-    ts = _dt.now().isoformat(timespec="seconds")
-    cols = ["eid", "imported_at"] + EXPORT_COLS
-    ph = ", ".join("?" * len(cols))
-    rows = [[p["eid"], ts] + [p.get(c) for c in EXPORT_COLS] for p in players]
+    _init_historie(conn)
+    if conn.execute("SELECT 1 FROM export_importe LIMIT 1").fetchone():
+        return 0
+    cols = ", ".join(EXPORT_COLS)
+    felder = ",".join(EXPORT_COLS)
+    n = 0
+    zeiten = [r["imported_at"] for r in conn.execute(
+        "SELECT DISTINCT imported_at FROM export_players "
+        "WHERE imported_at IS NOT NULL ORDER BY imported_at").fetchall()]
+    for ts in zeiten:
+        anzahl = conn.execute("SELECT COUNT(*) AS n FROM export_players "
+                              "WHERE imported_at = ?", (ts,)).fetchone()["n"]
+        iid = conn.execute(
+            "INSERT INTO export_importe (imported_at, datei, felder, anzahl) "
+            "VALUES (?, ?, ?, ?)", (ts, BESTAND_DATEI, felder, anzahl)).lastrowid
+        conn.execute(f"INSERT INTO export_stand (import_id, eid, {cols}) "
+                     f"SELECT ?, eid, {cols} FROM export_players WHERE imported_at = ?",
+                     (iid, ts))
+        n += anzahl
+    # Bisher ueberschrieb jeder Import die Persoenlichkeit – was heute da
+    # steht, war also beim letzten Import des Spielers sichtbar.
+    conn.execute("UPDATE export_players SET pers_stand = imported_at "
+                 "WHERE personality IS NOT NULL AND pers_stand IS NULL")
+    conn.commit()
+    return n
+
+
+def save_export(conn, players, felder=None, datei=None, ts=None):
+    """Export-Spieler nach EID zusammenfuehren und die Datei festhalten.
+
+    felder: die Felder, die die Datei wirklich enthaelt
+    (importer.parse_export_felder). Nur sie aendern sich, alles andere bleibt
+    stehen – frueher setzte INSERT OR REPLACE bei einer schmalen Shortlist
+    jede fehlende Kennzahl lautlos auf NULL. None heisst "alle Felder".
+    ts: Zeitpunkt des Import-Laufs; mehrere Dateien eines Laufs teilen ihn.
+
+    Die Datei landet zusaetzlich vollstaendig in export_stand (siehe
+    _init_historie). Ist die Historie noch leer, wird VOR dem ersten Schreiben
+    der Altbestand uebernommen (bestand_sichern) – sonst waere genau der
+    Stand verloren, den dieser Import ueberschreibt.
+    """
+    _init_export(conn)
+    _init_historie(conn)
+    if not conn.execute("SELECT 1 FROM export_importe LIMIT 1").fetchone():
+        bestand_sichern(conn)
+    ts = ts or _jetzt()
+    felder = [c for c in EXPORT_COLS if felder is None or c in felder]
+    players = [p for p in players if p.get("eid") is not None]
+    eids = [int(p["eid"]) for p in players]
+
+    alt = {}
+    for i in range(0, len(eids), 500):
+        teil = eids[i:i + 500]
+        for r in conn.execute(
+                f"SELECT * FROM export_players WHERE eid IN ({','.join('?' * len(teil))})",
+                teil).fetchall():
+            alt[r["eid"]] = dict(r)
+    zeilen = [_zusammenfuehren(alt.get(int(p["eid"])), p, felder, ts) for p in players]
+
+    # UPSERT statt REPLACE: Spalten, die dieser Code nicht kennt, bleiben stehen
+    cols = ["eid", "imported_at", "pers_stand"] + EXPORT_COLS
+    setzen = ", ".join(f"{c} = excluded.{c}" for c in cols[1:])
     conn.executemany(
-        f"INSERT OR REPLACE INTO export_players ({', '.join(cols)}) VALUES ({ph})", rows)
+        f"INSERT INTO export_players ({', '.join(cols)}) "
+        f"VALUES ({', '.join('?' * len(cols))}) "
+        f"ON CONFLICT(eid) DO UPDATE SET {setzen}",
+        [[z.get(c) for c in cols] for z in zeilen])
+    # Wertverlauf wie bisher, aber mit dem zusammengefuehrten Stand
     conn.executemany(
         "INSERT OR REPLACE INTO export_history (eid, imported_at, value, wage, age, rating) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        [[p["eid"], ts, p.get("value"), p.get("wage"), p.get("age"), p.get("rating")]
+        [[z["eid"], ts, z.get("value"), z.get("wage"), z.get("age"), z.get("rating")]
+         for z in zeilen])
+    # Historie: die Datei so, wie sie war – fehlende Felder bleiben NULL
+    iid = conn.execute(
+        "INSERT INTO export_importe (imported_at, datei, felder, anzahl) "
+        "VALUES (?, ?, ?, ?)", (ts, datei, ",".join(felder), len(players))).lastrowid
+    conn.executemany(
+        f"INSERT OR REPLACE INTO export_stand (import_id, eid, {', '.join(EXPORT_COLS)}) "
+        f"VALUES ({', '.join('?' * (len(EXPORT_COLS) + 2))})",
+        [[iid, int(p["eid"])] + [p.get(c) if c in felder else None for c in EXPORT_COLS]
          for p in players])
     conn.commit()
-    return len(rows)
+    return len(players)
+
+
+def export_importe(conn):
+    """Alle Import-Eintraege, aelteste zuerst: id, imported_at, datei, felder, anzahl."""
+    if not _hat_tabelle(conn, "export_importe"):
+        return []
+    rows = conn.execute("SELECT * FROM export_importe ORDER BY imported_at, id").fetchall()
+    return [dict(r, felder=r["felder"].split(",")) for r in rows]
+
+
+def export_verlauf(conn, eid):
+    """Alle Staende eines Spielers, aeltester zuerst – je Datei eine Zeile mit
+    imported_at, datei und felder. Nicht enthaltene Felder sind None."""
+    if not _hat_tabelle(conn, "export_stand"):
+        return []
+    rows = conn.execute(
+        "SELECT i.imported_at, i.datei, i.felder, s.* FROM export_stand s "
+        "JOIN export_importe i ON i.id = s.import_id WHERE s.eid = ? "
+        "ORDER BY i.imported_at, i.id", (int(eid),)).fetchall()
+    return [dict(r, felder=r["felder"].split(",")) for r in rows]
+
+
+def export_stand_bis(conn, bis):
+    """Der zusammengefuehrte Export-Stand, wie er zum Zeitpunkt `bis` war.
+
+    Dieselbe Form wie load_export() – die Zeilen lassen sich genauso anreichern
+    und bewerten. `bis` ist ein ISO-Zeitpunkt; ein reines Datum
+    ("2026-09-23") meint dessen Tagesbeginn, Importe dieses Tages zaehlen also
+    nicht mehr mit. Beispiel Winter: export_stand_bis(conn, <Tag des
+    Winter-Imports>) ist die Vorsaison, load_export(conn) die Halbserie.
+    """
+    if not _hat_tabelle(conn, "export_importe"):
+        return []
+    stand = {}
+    for imp in conn.execute(
+            "SELECT id, imported_at, felder FROM export_importe "
+            "WHERE imported_at <= ? ORDER BY imported_at, id", (bis,)).fetchall():
+        felder = imp["felder"].split(",")
+        for r in conn.execute("SELECT * FROM export_stand WHERE import_id = ?",
+                              (imp["id"],)).fetchall():
+            e = int(r["eid"])
+            stand[e] = _zusammenfuehren(stand.get(e), dict(r), felder,
+                                        imp["imported_at"])
+    for z in stand.values():
+        z.pop("import_id", None)
+    return list(stand.values())
 
 
 def export_value_history(conn, eid):
