@@ -1425,7 +1425,7 @@ class Api:
                 "teile": b["teile"], "verlaesslich": b["verlaesslich"],
                 "carry": b["carry"]}, anfrage_id=anfrage))
         return {"ok": True,
-                "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "duty")},
+                "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz", "duty")},
                 "vergleichsbasis": basis, "char_gewicht": tactics.CHAR_GEWICHT,
                 "spieler": spieler}
 

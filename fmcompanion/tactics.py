@@ -216,7 +216,7 @@ METRICS = {
 FORMATION = [
     {
         "key": "tw", "label": "Torwart", "kurz": "TW",
-        "rolle": "Mitspielender Torwart", "duty": "Verteidigend",
+        "rolle": "Mitspielender Torwart", "rolle_kurz": "MTW", "duty": "Verteidigen",
         "x": 50, "y": 91, "gruppen": ["tw"],
         "aufgaben": [
             "Jeden Angriff flach eröffnen, auch unter Druck",
@@ -239,7 +239,7 @@ FORMATION = [
     },
     {
         "key": "lv", "label": "Linksverteidiger", "kurz": "LV",
-        "rolle": "Außenverteidiger", "duty": "Angreifend",
+        "rolle": "Außenverteidiger", "rolle_kurz": "AV", "duty": "Angriff",
         "x": 16, "y": 68, "gruppen": ["lv"],
         "aufgaben": [
             "Die gesamte Breite der Mannschaft herstellen – die Flügel ziehen "
@@ -258,7 +258,7 @@ FORMATION = [
     },
     {
         "key": "ivl", "label": "Innenverteidiger links", "kurz": "IV",
-        "rolle": "Ballspielender Verteidiger", "duty": "Verteidigend",
+        "rolle": "Ballspielender Verteidiger", "rolle_kurz": "BsV", "duty": "Verteidigen",
         "x": 37, "y": 78, "gruppen": ["iv"],
         "aufgaben": [
             "Spielaufbau unter Druck, weil aus der Abwehr herausgespielt wird",
@@ -277,7 +277,7 @@ FORMATION = [
     },
     {
         "key": "ivr", "label": "Innenverteidiger rechts", "kurz": "IV",
-        "rolle": "Ballspielender Verteidiger", "duty": "Verteidigend",
+        "rolle": "Ballspielender Verteidiger", "rolle_kurz": "BsV", "duty": "Verteidigen",
         "x": 63, "y": 78, "gruppen": ["iv"],
         "aufgaben": [
             "Spielaufbau unter Druck, weil aus der Abwehr herausgespielt wird",
@@ -294,7 +294,7 @@ FORMATION = [
     },
     {
         "key": "rv", "label": "Rechtsverteidiger", "kurz": "RV",
-        "rolle": "Außenverteidiger", "duty": "Angreifend",
+        "rolle": "Außenverteidiger", "rolle_kurz": "AV", "duty": "Angriff",
         "x": 84, "y": 68, "gruppen": ["rv"],
         "aufgaben": [
             "Die gesamte Breite der Mannschaft herstellen",
@@ -311,7 +311,7 @@ FORMATION = [
     },
     {
         "key": "dml", "label": "Sechser links", "kurz": "DM",
-        "rolle": "Defensiver Mittelfeldspieler", "duty": "Unterstützend",
+        "rolle": "Defensiver Mittelfeldspieler", "rolle_kurz": "DM", "duty": "Unterstützen",
         "x": 38, "y": 55, "gruppen": ["dm", "zm"],
         "aufgaben": [
             "Abschirmen und zirkulieren – NICHT zwischen die Innenverteidiger "
@@ -330,7 +330,7 @@ FORMATION = [
     },
     {
         "key": "dmr", "label": "Sechser rechts", "kurz": "DM",
-        "rolle": "Defensiver Mittelfeldspieler", "duty": "Unterstützend",
+        "rolle": "Defensiver Mittelfeldspieler", "rolle_kurz": "DM", "duty": "Unterstützen",
         "x": 62, "y": 55, "gruppen": ["dm", "zm"],
         "aufgaben": [
             "Abschirmen und zirkulieren",
@@ -347,12 +347,12 @@ FORMATION = [
     },
     {
         "key": "aml", "label": "Linksaußen", "kurz": "IAS",
-        "rolle": "Inverser Außenstürmer", "duty": "Unterstützend",
+        "rolle": "Inverser Außenstürmer", "rolle_kurz": "IAS", "duty": "Unterstützen",
         "x": 18, "y": 33, "gruppen": ["oml", "ml"],
         "aufgaben": [
             "Auf den starken Fuß nach innen ziehen und SELBST abschließen – das "
             "ist der Kern der Rolle, nicht bloß Vorbereiten",
-            "Entgegenkommen und zwischen den Linien kombinieren (Unterstützend)",
+            "Entgegenkommen und zwischen den Linien kombinieren (Unterstützen)",
             "Die Linie für den Außenverteidiger räumen, sie aber halten, wenn "
             "der nicht aufgerückt ist",
         ],
@@ -368,7 +368,7 @@ FORMATION = [
     },
     {
         "key": "amc", "label": "Zehner", "kurz": "OM",
-        "rolle": "Offensiver Mittelfeldspieler", "duty": "Angreifend",
+        "rolle": "Offensiver Mittelfeldspieler", "rolle_kurz": "OM", "duty": "Angriff",
         "x": 50, "y": 36, "gruppen": ["omz"],
         "aufgaben": [
             "Verbindung zwischen Doppelsechs und Sturm",
@@ -387,7 +387,7 @@ FORMATION = [
     },
     {
         "key": "amr", "label": "Rechtsaußen", "kurz": "IAS",
-        "rolle": "Inverser Außenstürmer", "duty": "Unterstützend",
+        "rolle": "Inverser Außenstürmer", "rolle_kurz": "IAS", "duty": "Unterstützen",
         "x": 82, "y": 33, "gruppen": ["omr", "mr"],
         "aufgaben": [
             "Auf den starken Fuß nach innen ziehen und selbst abschließen",
@@ -404,7 +404,7 @@ FORMATION = [
     },
     {
         "key": "st", "label": "Sturmspitze", "kurz": "ST",
-        "rolle": "Sturmspitze", "duty": "Angreifend",
+        "rolle": "Stoßstürmer", "rolle_kurz": "StS", "duty": "Angriff",
         "x": 50, "y": 15, "gruppen": ["st"],
         "aufgaben": [
             "Die letzte Linie besetzen und auf der Schulter des Verteidigers in "
@@ -417,7 +417,7 @@ FORMATION = [
                      "xa_p90": 0.10, "press_p90": 0.10, "shot_acc": 0.07,
                      "duel_pct": 0.08, "duels_p90": 0.05},
         "blind": [
-            "Das Anlaufen: die Sturmspitze hat keinen eingebauten Pressing"
+            "Das Anlaufen: der Stoßstürmer hat keinen eingebauten Pressing"
             "auftrag – wenn das wichtig ist, wäre der Pressende Stürmer die Rolle.",
             "Läufe ohne Ball, die Räume öffnen, tauchen in keiner Zahl auf.",
         ],
@@ -780,7 +780,7 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None):
                 "stat_quelle": p.get("stat_quelle")} | b)
         kandidaten.sort(key=lambda k: -k["score"])
         out.append({k: slot[k] for k in
-                    ("key", "label", "kurz", "rolle", "duty", "x", "y",
+                    ("key", "label", "kurz", "rolle", "rolle_kurz", "duty", "x", "y",
                      "aufgaben", "blind")} | {
             "kandidaten": kandidaten, "vergleichsbasis": basis})
     return out
@@ -1026,6 +1026,7 @@ def _positionsvergleich(elf, pool, referenz, gehoert_dazu, teams=None,
         pz = (round(100 * sum(1 for w in einzel if w < eigen_wert) / len(einzel))
               if (einzel and eigen_wert is not None) else None)
         out.append({"key": key, "label": label, "rolle": slot["rolle"],
+                    "rolle_kurz": slot["rolle_kurz"],
                     "x": slot["x"] if n_slots == 1 else 50, "y": slot["y"],
                     "eigene": eigene, "wert": eigen_wert, "rang": rang,
                     "vereine_mit_daten": len(vereine) + 1, "liga_spieler": len(alle),
@@ -1285,7 +1286,7 @@ def find_replacements(slot, original, kandidaten, reference,
     return {"ok": True, "modus": modus, "modus_label": MODI.get(modus, modus),
             "archetyp": archetyp,
             "archetyp_label": ARCHETYP_LABEL.get(archetyp) if archetyp else None,
-            "slot": {k: slot[k] for k in ("key", "label", "rolle", "duty")},
+            "slot": {k: slot[k] for k in ("key", "label", "rolle", "rolle_kurz", "duty")},
             "original": {"id": eigen, "name": original.get("name"),
                          "age": alter, "minutes": original.get("minutes"),
                          "score": ziel, "fit": ziel_fit,
