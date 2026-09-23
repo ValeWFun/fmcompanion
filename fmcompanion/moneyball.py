@@ -323,8 +323,11 @@ RANKINGS = {
     "Höchste Ø-Note": ("rating", True),
     "Torhüter: Note über Erwartung": ("note_resid", True),
     "Beste Torjäger (xG/90)": ("xg_p90", True),
-    "Eiskalt (Tore über xG)": ("finishing", True),
-    "Ladehemmung (Tore unter xG)": ("finishing", False),
+    # Tore minus xG wiederholt sich zwischen zwei Saisonhaelften nicht (Split-
+    # Half r 0,12) – keine Qualitaet, sondern Glueck oder Pech. Als Liste fuer
+    # Sell-High/Buy-Low nuetzlich, deshalb ohne Qualitaetsbehauptung benannt.
+    "Über xG getroffen (Glück?)": ("finishing", True),
+    "Unter xG geblieben (Pech?)": ("finishing", False),
     "Kreativität (xA/90)": ("xa_p90", True),
     "Vorlagen/90": ("assists_p90", True),
     "Offensive Beteiligung/90": ("attack_p90", True),
@@ -364,7 +367,7 @@ def enrich_export(players):
 
 EXPORT_RANKINGS = {
     "Schnäppchen (Leistung/Wert)": ("value_score", True),
-    "Eiskalt (Tore über xG)": ("finishing", True),
+    "Über xG getroffen (Glück?)": ("finishing", True),
     "Beste Torjäger (xG/90)": ("xg_p90", True),
     "Kreativität (xA/90)": ("xa_p90", True),
     "Höchste Ø-Note": ("rating", True),
