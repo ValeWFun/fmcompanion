@@ -277,7 +277,10 @@ def enrich(players, ref_year=None, ref_day=None):
         # darueber hinausgeht, ist sein eigener Anteil – ueber Saisonhaelften
         # stabil (Split-Half r 0,58), waehrend Paraden und verhinderte Tore es
         # nicht sind (0,02–0,19). Die Schuesse aufs Tor/90 halten die NüE
-        # neutral gegenueber dem Beschuss (FM belohnt Paraden kaum).
+        # neutral gegenueber dem Beschuss (FM belohnt Paraden kaum). Gerechnet
+        # wird bewusst mit den Anzeigewerten (conceded_p90 und rating_adj auf
+        # 2 Stellen gerundet) – wie im Abnahmeskript des Datenanalysten; die
+        # Abweichung zur ungerundeten Gerade bleibt unter 0,004.
         if (p["is_gk"] and aus_export and p["rating"] > 0 and m >= 90
                 and 0.0 < p["conceded_p90"] < 4.0):
             sot90 = (sot or 0) * 90.0 / m
