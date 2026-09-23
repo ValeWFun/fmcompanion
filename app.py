@@ -1330,6 +1330,7 @@ class Api:
                  "name": r.get("name"), "club": r.get("club"),
                  "league": r.get("league"), "position": r.get("position"),
                  "age": r.get("age"), "foot": r.get("foot"),
+                 "fuss_passung": tactics.fuss_passung(r.get("foot"), slot_key),
                  "minutes": r.get("minutes"), "rating": r.get("rating"),
                  "stand": r.get("imported_at"), "im_kader": e in eids,
                  "charakter": r.get("pers_score"),

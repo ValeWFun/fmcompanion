@@ -1111,6 +1111,44 @@ _ohne_label = {k for m in ARCHETYPEN.values() for k in m} - set(ARCHETYP_LABEL)
 assert not _ohne_label, f"Archetyp ohne Beschriftung: {sorted(_ohne_label)}"
 
 
+# ---------------------------------------------------------- Starker Fuss
+# Der Inverse Aussenstuermer zieht nach innen und schliesst selbst ab: links
+# gehoert ein Rechtsfuss hin, rechts ein Linksfuss. Bei den Innenverteidigern
+# ist die Seite nur ein Hinweis (der linke haelt Ball und Winkel am besten mit
+# links). Der Fuss wird SICHTBAR gemacht, geht aber BEWUSST NICHT in Fit oder
+# Score ein: die Statistik weiss nichts davon, und ein Linksfuss auf dem linken
+# Fluegel kann trotzdem gut sein – das Urteil bleibt beim Nutzer.
+# Slot -> (Strenge, gewuenschte Seite)
+FUSS_REGEL = {"aml": ("streng", "Rechts"), "amr": ("streng", "Links"),
+              "ivl": ("hinweis", "Links"), "ivr": ("hinweis", "Rechts")}
+
+
+def fuss_passung(foot, slot_key):
+    """Passt der starke Fuss zur Rolle? -> {"passung", "deutlich", "text"} oder None.
+
+    foot: Export-Wert ("Rechts", "Links", "Nur Rechts", "Nur Links", "Beide").
+    None bei Slots ohne Regel und bei unbekanntem Fuss. passung: "passt",
+    "gegen die Rolle" (nur bei strenger Regel) oder "neutral" (Hinweis-Slots
+    kennen kein "gegen die Rolle"). deutlich: der Fuss ist ausschliesslich die
+    falsche Seite ("Nur Links" auf dem linken Fluegel).
+    """
+    regel = FUSS_REGEL.get(slot_key)
+    fuss = (foot or "").strip()
+    if regel is None or not fuss:
+        return None
+    strenge, seite = regel
+    passt = fuss.lower() == "beide" or seite in fuss
+    if passt:
+        return {"passung": "passt", "deutlich": False, "text": "Fuß passt zur Rolle"}
+    if strenge == "hinweis":
+        return {"passung": "neutral", "deutlich": False, "text": "Fuß neutral"}
+    deutlich = fuss.lower().startswith("nur")
+    text = "Fuß gegen die Rolle"
+    if deutlich:
+        text += f" (nur {fuss.split()[-1]})"
+    return {"passung": "gegen die Rolle", "deutlich": deutlich, "text": text}
+
+
 def archetypen_fuer(slot_key):
     """Verfuegbare Archetypen einer Position, fertig fuer das Kontextmenue."""
     return [{"key": k, "label": ARCHETYP_LABEL.get(k, k),
@@ -1262,6 +1300,7 @@ def find_replacements(slot, original, kandidaten, reference,
             "pers_stufe": p.get("pers_stufe"), "pers_medien": p.get("pers_medien"),
             "pers_hinweise": p.get("pers_hinweise") or [],
             "foot": p.get("foot"), "info": p.get("info"), "wage": p.get("wage"),
+            "fuss_passung": fuss_passung(p.get("foot"), slot["key"]),
             "pers_stand": p.get("pers_stand"),
             "transfer_fee": p.get("transfer_fee"), "homegrown": p.get("homegrown"),
             "homegrown_stand": p.get("homegrown_stand"),
