@@ -111,8 +111,10 @@
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   :focus-visible:not(:focus-visible){outline:none}
   ::selection{background:var(--accent);color:var(--on-accent)}
-  /* Fließtext bricht ohne Schusterjungen um. */
-  p,li,.dsub,.empty,.muted{text-wrap:pretty}
+  /* Fließtext bricht ohne Schusterjungen um. Nur die Stil-Eigenschaft: die
+     Kurzform text-wrap setzt auch den Umbruch-Modus zurück und hob damit das
+     nowrap jeder Tabellenzelle mit .muted auf (POS-Spalte dreizeilig). */
+  p,li,.dsub,.empty,.muted{text-wrap-style:pretty}
 
   /* Absprung ins Datenfeld: liegt außerhalb des Bildes, bis er Fokus bekommt. */
   .skip{position:fixed;left:-999px;top:0;z-index:60;background:var(--accent);
@@ -267,18 +269,38 @@
   .pos{color:var(--pos)} .neg{color:var(--neg)} .muted{color:var(--muted)}
   .cur{color:var(--accent);font-weight:700}
 
-  /* Fair ±% – Abstand des Marktwerts zum leistungsbasierten Schätzwert.
-     Grün = unterbewertet (Kauf-Signal), Violett = überbewertet; kein Rot
-     (Regel 2). Die Fläche kommt wie bei .pill als Inline-Stil aus cell(),
-     hier steht nur die Schrift. Unsichere Stichprobe bleibt ungefärbt und
-     gedämpft, fehlender Wert steht als „–" in --dim. */
-  td.fair{font-family:var(--mono);font-size:11.5px}
+  /* Fair Value – das Urteil in Worten, dahinter Markt → Fair in Mio.
+     Das nackte „+208 %" wurde fünfmal verkehrt herum gelesen; ein Wort hat
+     keine Richtung, die man umdrehen kann, und die zwei Beträge machen es
+     nachprüfbar. Die Farbe hängt am Urteil (fair_urteil, fünf Stufen aus der
+     Modellstreuung), nicht am Vorzeichen: „deutlich" trägt die volle
+     Tönung, „leicht" eine schwache, „marktgerecht" bleibt ungefärbt.
+     Grün = unterbewertet (Kauf), Violett = überbewertet – kein Rot
+     (Regel 2). Dünne Stichprobe: gedämpft, ungefärbt, „?" am Wort. */
+  td.fair{font-size:11.5px}
+  td.fair .fw{font-weight:600}
+  td.fair .fz{font-family:var(--mono);font-size:10.5px;color:var(--muted);
+    margin-left:9px;display:inline-block;min-width:78px}
+  .u-dunter{background:rgba(var(--heat-pos),.34)}
+  .u-lunter{background:rgba(var(--heat-pos),.12)}
+  .u-lueber{background:rgba(var(--heat-neg),.12)}
+  .u-dueber{background:rgba(var(--heat-neg),.34)}
+  .u-lunter .fw,.urteil.u-lunter{color:var(--pos)}
+  .u-lueber .fw,.urteil.u-lueber{color:var(--neg)}
+  .u-dunter .fw,.u-dueber .fw{font-weight:700}
+  .u-markt .fw{font-weight:400;color:var(--muted)}
+  td.fair.unsicher{background:none}
+  td.fair.unsicher .fw{font-weight:400;color:var(--muted)}
+  td.fair.leer{color:var(--dim)}
+  /* Das Urteil als Marke außerhalb der Tabelle (Preislot, Slot-Vergleich) */
+  .urteil{display:inline-block;padding:1px 6px;font-size:12px;font-weight:600;
+    white-space:nowrap}
+  .urteil.u-markt{color:var(--muted);font-weight:400;padding-left:0}
+  .urteil.unsicher{background:none;color:var(--muted);font-weight:400;padding-left:0}
   /* Charakter: das Wort in Stufenfarbe (Inline-Stil aus persTd), knapp
      gehalten, damit die Spalte nicht die Tabelle sprengt. */
   td.pers{font-size:11.5px;white-space:nowrap;max-width:132px;overflow:hidden;text-overflow:ellipsis}
   td.pers.leer{color:var(--dim)}
-  td.fair.unsicher{color:var(--muted)}
-  td.fair.leer{color:var(--dim)}
 
   /* Kennzahl-Plakette. Die Fläche kommt als Inline-Stil aus cell(); hier
      steht nur, wie sie aussieht, nicht welche Farbe sie hat. */
@@ -382,6 +404,9 @@
   .lotdelta{font-family:var(--mono);font-size:13px;font-weight:700;margin:8px 0 2px}
   .lotnote{color:var(--muted);font-size:11.5px}
   .lotwarn{color:var(--dim);font-size:11.5px;margin-top:2px}
+  /* Eigengewächs (D2): nur anzeigen, nicht bewerten – die Meldelisten-Logik
+     kommt mit D4 aus dem Backend */
+  .dhg{font-family:var(--mono);font-size:11px;margin:-6px 0 12px;color:var(--text)}
   .sparkrow{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12.5px}
   .sparkrow .plab{width:70px;color:var(--muted)}
   .sparkrow svg{background:var(--surface2)}
@@ -428,6 +453,207 @@
   .legend{display:flex;gap:12px;margin:8px 0 14px;font-size:12.5px;flex-wrap:wrap}
   .legend .dotc{display:inline-block;width:10px;height:10px;margin-right:5px;
     vertical-align:-1px}
+
+  /* ---------- Slot-Vergleich ----------
+     Die häufigste Frage im Scouting: „Wie steht Spieler X auf Position Y
+     gegen unsere Leute?" Spalten = Stamm, Backup, bis zu drei Kandidaten;
+     Zeilen = Leistung, Kennzahlen der Rolle, Preis, Profil. Der Stamm ist
+     die Messlatte: seine Spalte ist hinterlegt, jede andere trägt den
+     Abstand zu ihm (Δ in Perzentilpunkten). Die Positionskachel im Kopf ist
+     das einzige Möbel mit 45°-Anschnitt (Regel 1) und trägt die
+     Positionsfarbe (Regel 4). */
+  /* Breite folgt dem Inhalt: feste Spalten, damit Balken bei zwei Spielern
+     nicht über die halbe Fensterbreite laufen */
+  .cmpbox.slotcmp{width:auto;min-width:760px;max-width:96vw;max-height:92vh;
+    padding:0 22px 16px}
+  /* Kein Innenabstand oben: der mitlaufende Spaltenkopf (sticky) haftet an
+     der Oberkante – sonst scrollen Zeilen im Abstand darüber sichtbar weg */
+  .cmhead{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:18px}
+  .cmtile{background:var(--grp,var(--accent));color:var(--on-accent);flex:none;
+    font-family:var(--display);font-size:16px;font-weight:700;line-height:1;
+    font-variation-settings:"wght" 700,"wdth" 80;letter-spacing:.07em;
+    padding:11px 20px 10px 13px;
+    clip-path:polygon(0 0,calc(100% - var(--chamfer)) 0,100% var(--chamfer),100% 100%,0 100%)}
+  .cmtitel{flex:1;min-width:280px}
+  .cmtitel h2{margin:0}
+  .cmtitel .dsub{margin:3px 0 0}
+  .cmhead select{min-width:200px}
+  table.cmx{width:auto;border-collapse:separate;border-spacing:0;table-layout:fixed;
+    margin-top:12px;font-variant-numeric:tabular-nums lining-nums}
+  table.cmx col.lab{width:184px}
+  table.cmx col.sp{width:188px}
+  table.cmx th,table.cmx td{text-align:left;white-space:normal;vertical-align:top;
+    padding:6px 10px;border-bottom:1px solid var(--rule);cursor:default}
+  table.cmx thead th{text-transform:none;letter-spacing:0;font-family:var(--sans);
+    font-size:12.5px;font-weight:400;color:var(--text);vertical-align:bottom;
+    padding:4px 10px 9px;border-bottom:1.5px solid var(--border);position:sticky;top:0}
+  table.cmx tbody tr,table.cmx tbody tr:nth-child(even),table.cmx tbody tr:hover,
+  table.cmx tbody tr:hover td:first-child{background:transparent;cursor:default}
+  table.cmx tbody td:first-child{color:var(--muted);font-size:12px;
+    background:var(--surface);line-height:1.35}
+  table.cmx td:first-child small{display:block;font-family:var(--mono);font-size:10px;
+    color:var(--dim);letter-spacing:.02em}
+  /* Die Messlatte: Spalte des Stammspielers durchgehend hinterlegt */
+  table.cmx .stamm{background:var(--surface2)}
+  table.cmx thead th.stamm{background:var(--surface2)}
+  table.cmx tr.cmsec td{white-space:nowrap;overflow:visible;
+    font-family:var(--mono);font-size:10px;text-transform:uppercase;
+    letter-spacing:.14em;color:var(--muted);padding:16px 10px 5px;
+    border-bottom:1px solid var(--border);background:var(--surface)}
+  table.cmx tr.cmsec td.stamm{background:var(--surface2)}
+  /* Spaltenkopf: Rolle, Name, Eckdaten */
+  .cmrolle{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:700;
+    letter-spacing:.12em;text-transform:uppercase;padding:2px 6px;margin-bottom:6px;
+    color:var(--muted);border:1px solid var(--border)}
+  th.stamm .cmrolle{background:var(--text);color:var(--surface);border-color:var(--text)}
+  .cmrolle em{font-style:normal;font-weight:500;opacity:.75;margin-left:5px}
+  .cmname{display:block;background:none;border:0;clip-path:none;padding:0;
+    font-family:var(--display);font-size:16.5px;font-weight:600;letter-spacing:0;
+    font-variation-settings:"wght" 600,"wdth" 86;text-transform:none;color:var(--text);
+    text-align:left;line-height:1.15;cursor:pointer}
+  .cmname:hover{color:var(--accent);filter:none}
+  .cmmeta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.45}
+  .cmx .cmweg{position:absolute;top:2px;right:4px;background:none;border:0;clip-path:none;
+    padding:2px 4px;color:var(--dim);font-size:12px;letter-spacing:0}
+  .cmx .cmweg:hover{color:var(--text);filter:none}
+  /* Kennzahl: Balken = Perzentil, Zahl, Abstand zum Stamm; darunter der Rohwert */
+  .cmkpi{display:flex;align-items:center;gap:7px}
+  .cmkpi .cmtrack{flex:1;height:7px;background:var(--surface2);overflow:hidden}
+  td.stamm .cmkpi .cmtrack{background:var(--surface)}
+  .cmkpi .cmtrack i{display:block;height:100%}
+  .cmkpi b{width:24px;text-align:right;font-family:var(--mono);font-size:11.5px}
+  .cmd{width:30px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+  .cmd.pos{color:var(--pos)} .cmd.neg{color:var(--neg)}
+  .cmraw{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:1px}
+  .cmwert{font-family:var(--mono);font-size:12px}
+  .cmbilanz{font-size:12px}
+  .cmbilanz b{font-family:var(--mono);font-size:13px}
+  .cmleer{color:var(--dim)}
+  /* Kandidat ohne Bewertung („fehlt" aus dem Backend): Grund lesbar, kein Rot */
+  .cmfehlt{font-size:11px;color:var(--muted);line-height:1.35;margin-top:3px;
+    white-space:normal;max-width:170px}
+  /* Kandidat hinzufügen: Suchfeld im Kopf der letzten Spalte */
+  table.cmx th.cmadd{vertical-align:bottom}
+  .cmadd .cmrolle{border-style:dashed}
+  .cmadd input{width:100%;min-width:0;font-size:12px;padding:5px 7px}
+  /* rechtsbündig: die Suchspalte ist die letzte, links ist Platz */
+  .cmsugg{position:absolute;z-index:5;right:0;margin-top:2px;width:250px;background:var(--surface);
+    border:1px solid var(--border);box-shadow:var(--lift);max-height:300px;overflow-y:auto}
+  .cmsugg button{display:flex;justify-content:space-between;gap:10px;width:100%;
+    background:none;border:0;clip-path:none;padding:7px 10px;text-align:left;
+    font-family:var(--sans);font-size:12.5px;font-weight:400;letter-spacing:0;
+    text-transform:none;color:var(--text)}
+  .cmsugg button span{color:var(--muted);font-family:var(--mono);font-size:10.5px;
+    white-space:nowrap}
+  .cmsugg button:hover,.cmsugg button.on{background:var(--accent);color:var(--on-accent);filter:none}
+  .cmsugg button:hover span,.cmsugg button.on span{color:var(--on-accent)}
+  .cmfuss{color:var(--muted);font-size:11.5px;margin-top:12px;line-height:1.5;max-width:120ch}
+  /* Vergleichsleiste: der Knopf nennt die Position, auf der verglichen wird */
+  .comparebar .cmpos{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  /* Der Vergleich lässt sich aus der Ersatzsuche heraus öffnen und muss dann
+     über ihr liegen – beide Fenster teilen sich sonst z-index 22. */
+  #cmpModal{z-index:23}
+  .tcmp{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:11.5px}
+  /* Umschalter unter „mein team": Brett | Ligavergleich */
+  .tactnav{padding:14px 16px 0}
+  /* Meldeliste am Brett (D4): eine Zeile unter dem Platz */
+  .tmelde{font-family:var(--mono);font-size:10.5px;color:var(--text);margin-top:4px}
+  .tmelde .tmlab{color:var(--muted);text-transform:uppercase;letter-spacing:.11em;font-size:9.5px;margin-right:4px}
+  .tmelde.riss{color:var(--neg)}
+  .tmelde.cl{color:var(--muted);margin-top:1px}
+  /* Zwei Stände im Kopf des Ligavergleichs: Daten und Kader veralten getrennt */
+  .lstand{display:flex;gap:14px;margin-top:3px;font-family:var(--mono);font-size:11px;color:var(--text)}
+  .lvereine{font-size:11.5px;margin-top:3px}
+  .lfehlen{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.35}
+  /* „Vorläufig": gestrichelt wie jede dünne Datenbasis im Werkzeug, keine Warnfarbe */
+  .lvorl{border:1px dashed var(--dim);padding:7px 12px;margin:8px 0 0;font-size:12.5px;line-height:1.5}
+  .lgescoutet{text-decoration:underline dashed var(--dim);text-underline-offset:3px}
+  .clopt .clname{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .clopt em{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--pos)}
+  .clopt em.gesc{color:var(--muted)}
+  .clopt.on em{color:var(--on-accent)}
+  /* Vereinsauswahl für das CL-Niveau: gewählte als Chips, Angebot als Raster */
+  .clwahl{background:var(--surface2);border:1px solid var(--border);padding:12px 14px 14px;margin:6px 0 14px}
+  .clchips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
+  .clwahl input{min-width:260px;margin-bottom:8px}
+  .clliste{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px;
+    max-height:220px;overflow-y:auto}
+  .clopt{display:flex;justify-content:space-between;gap:8px;background:var(--surface);color:var(--text);
+    border:1px solid var(--border);clip-path:none;padding:6px 9px;font-family:var(--sans);font-size:12px;
+    font-weight:400;letter-spacing:0;text-transform:none;text-align:left}
+  /* die Zahl rechts – nur das letzte Kind, sonst erbt der Vereinsname die Monoschrift */
+  .clopt > span:last-child{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .clopt:hover{border-color:var(--accent);filter:none}
+  .clopt.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+  .clopt.on > span:last-child{color:var(--on-accent)}
+
+  /* ---------- Ligavergleich ----------
+     Je Position ein Streifen: Striche = je ein Ligaverein, senkrechte Linie =
+     Top-4-Schwelle, Punkt = wir (Figuren sind rund, Regel 3). Grün auf,
+     Violett unter Top-4-Niveau – kein Rot (Regel 2). Unter acht Vereinen mit
+     Daten ist ein Rang keine Aussage: Zeile gedämpft, Kachel nur als Kontur,
+     hohler Punkt, gestrichelte Unterkante am Hinweis wie bei dünner
+     Stichprobe. */
+  .ligawrap{padding:14px 16px 26px;max-width:1240px}
+  .ligakopf{display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px}
+  .ligakopf .ltitel{flex:1;min-width:340px}
+  .lbefund{font-size:12.5px;line-height:1.7;margin:8px 0 14px;padding:8px 12px;
+    background:var(--surface2);border-left:3px solid var(--accent)}
+  .lbefund b{font-weight:600}
+  table.liga{width:100%;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums}
+  table.liga th,table.liga td{position:static}
+  table.liga th{background:transparent;font-family:var(--mono);font-size:10px;font-weight:500;
+    letter-spacing:.11em;color:var(--muted);text-transform:uppercase;padding:6px 8px;
+    border-bottom:1.5px solid var(--border);cursor:default;text-align:right;vertical-align:bottom}
+  table.liga td{padding:8px 8px;border-bottom:1px solid var(--rule);font-size:12.5px;
+    text-align:right;cursor:pointer;vertical-align:middle;background:transparent}
+  table.liga td.lname{text-align:left;white-space:normal}
+  table.liga tbody tr{background:transparent}
+  table.liga tbody tr:hover td{background:var(--rowhover)}
+  table.liga tr.lsel td{background:var(--surface2)}
+  table.liga tr.ldet td{background:var(--surface);cursor:default;padding:4px 8px 16px;text-align:left}
+  table.liga tr.ldet:hover td{background:var(--surface)}
+  table.liga tr.duenn td{color:var(--muted)}
+  .ltile{display:inline-block;min-width:40px;text-align:center;background:var(--grp);
+    color:var(--on-accent);font-family:var(--display);font-size:12.5px;font-weight:700;
+    font-variation-settings:"wght" 700,"wdth" 80;letter-spacing:.06em;padding:5px 6px 4px}
+  tr.duenn .ltile{background:transparent;color:var(--grp);box-shadow:inset 0 0 0 1px var(--grp)}
+  .lpos{font-weight:600}
+  .leig{font-size:11.5px;color:var(--muted);margin-top:1px}
+  .lwert{font-family:var(--mono);font-size:14px;font-weight:700}
+  .ldim{color:var(--dim)}
+  .lkeine{color:var(--dim);text-decoration:underline dashed var(--dim);text-underline-offset:3px}
+  .lachse{position:relative;height:12px}
+  .lachse span{position:absolute;transform:translateX(-50%);letter-spacing:0}
+  /* Randbeschriftungen nach innen, sonst ragen sie in die Nachbarspalten */
+  .lachse span:first-child{transform:none}
+  .lachse span:last-child{transform:translateX(-100%)}
+  .lstrip{position:relative;height:24px}
+  .lstrip::before{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--rule)}
+  .lt{position:absolute;top:6px;width:2px;height:12px;margin-left:-1px;background:var(--muted);opacity:.45}
+  .lt.vor{opacity:.95;background:var(--text)}
+  .lt4{position:absolute;top:0;height:24px;margin-left:-1px;border-left:2px solid var(--accent)}
+  .lme{position:absolute;top:5px;width:14px;height:14px;margin-left:-7px;border-radius:50%;
+    background:var(--pos);box-shadow:0 0 0 2px var(--surface)}
+  .lme.unter{background:var(--neg)}
+  .lme.leer{background:var(--surface);box-shadow:inset 0 0 0 2px var(--dim)}
+  .lleg{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:10px}
+  .lleg span{display:inline-flex;align-items:center;gap:6px}
+  .lleg .lt,.lleg .lt4,.lleg .lme{position:static;display:inline-block;margin:0}
+  .lleg .lt4{height:12px}
+  table.lclub{border-collapse:collapse;font-size:12px;width:100%}
+  table.lclub td{padding:3px 8px;border-bottom:1px solid var(--rule);text-align:left;cursor:default;
+    white-space:normal;background:transparent}
+  table.lclub td:first-child{width:28px;text-align:right;position:static}
+  table.lclub td:last-child{width:60px;text-align:right;font-family:var(--mono)}
+  table.lclub tr.wir td{background:var(--surface2)}
+  table.lclub .lsp{color:var(--text)}
+  /* Ersatzsuche: Häkchen legt den Kandidaten in den Slot-Vergleich, ohne die
+     Zeile aufzuklappen – schmal, damit die Tabelle ins Fenster passt */
+  table.repl td.vgl{width:1%;text-align:center;cursor:default}
+  table.repl td.vgl input{cursor:pointer}
 
   /* ---------- Signale ----------
      Kauf = Grün, Verkauf = Violett. Zusätzlich zur Farbe trägt jede Zeile
@@ -565,7 +791,9 @@
   /* Auswahl schlaegt Elf-Markierung: gleiche Spezifitaet, deshalb MUSS diese
      Regel nach .telf stehen, sonst gewinnt die Elf-Kante. */
   table.tcand tr.tsel.telf td:first-child{box-shadow:inset 4px 0 0 var(--accent)}
-  .replbox{width:920px}
+  /* 1020 statt 920: seit die Zellen nicht mehr umbrechen und die Spalte
+     „Vgl" dazukam, braucht die Liste ~960 px; kleine Fenster deckelt 94vw */
+  .replbox{width:1020px}
   .replhead{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
     margin:10px 0 4px}
   table.repl{width:100%;border-collapse:collapse;margin:8px 0 0;
@@ -866,8 +1094,10 @@ const C_GOALS=["goals","Tore"], C_XG=["xg","xG"], C_FIN=["finishing","Δ xG"],
       C_AGE=["age","Alter"], C_VAL=["value_m","Wert M€"], C_VEFF=["value_score","€-Eff"],
       // Talent = Perzentil im eigenen Altersband auf der eigenen Position
       C_TAL=["talent","Talent"],
-      // Fair ±% = Abstand des Marktwerts zum leistungsbasierten Schätzwert
-      C_FAIR=["value_delta_pct","Fair ±%"],
+      // Fair Value = Urteil über den Abstand des Marktwerts zum
+      // leistungsbasierten Schätzwert; sortiert wird weiter nach dem Abstand.
+      // „Markt → Fair" im Kopf, sonst liest sich „108 → 40" als Verlauf.
+      C_FAIR=["value_delta_pct","Fair Value · Markt → Fair"],
       // Charakter = Persönlichkeit aus dem Spielerprofil (charakter.py); die
       // Zelle zeigt das Wort, sortiert wird nach der Zahl 0-100
       C_PERS=["pers_score","Charakter"];
@@ -882,7 +1112,9 @@ let FAIR_MIN_MIN = 450;
 
 // Erklärungen für Spaltenköpfe – nur wo die Überschrift allein zu knapp ist.
 const COL_TIPS = {
-  value_delta_pct: "Abweichung des Marktwerts vom leistungsbasierten Schätzwert. Positiv = unterbewertet.",
+  value_delta_pct: "Marktwert gegen den Schätzwert aus Leistung, Alter, Liga und Position – als Urteil, dahinter Markt → Fair in Mio. "
+    + "Unterbewertet = die Leistung ist mehr wert, als der Markt verlangt. Das Modell liegt typisch um Faktor 3,7 daneben; "
+    + "es trennt nur Extremfälle, deshalb gibt es „leicht“ und „deutlich“. Torhüter: kein Wert. Sortiert nach dem Abstand in %.",
   pers_score: "Persönlichkeit aus dem Spielerprofil, übersetzt in Entwicklung und Mentalität (0–100). Steht neben dem Score, nicht darin. Sortiert nach der Zahl.",
   note_resid: "Ø-Note minus dem, was die Gegentore/90 der Mannschaft erwarten lassen (Note = 7,65 − 0,68 × GT/90). Der eigene Anteil des Torwarts – über Saisonhälften stabil.",
   gp_shot: "Verhinderte Tore (xGA − Gegentore) je 100 Schüsse aufs Tor – je Schuss statt je Spiel, damit der Keeper der Schießbude keinen Volumenvorteil hat.",
@@ -904,7 +1136,9 @@ const TABS = {
   // Torwart nach dem Nachschärfen: Note über Erwartung, Paraden je Schuss und
   // die Stichprobe dahinter; "Verhindert gesamt" bleibt als Rohwert sichtbar.
   tw: {title:"Torhüter",    sort:["score",true], gk:true,
-       cols:[["name","Torhüter"],MIN,C_SC,C_PERS,C_FAIR,C_NOTE,["note_resid","Note ü. Erw."],
+       // Kein Fair Value: das Modell belohnt Liga und Minuten, nicht Paraden –
+       // bei Torhütern liefert das Backend überall null (D1).
+       cols:[["name","Torhüter"],MIN,C_SC,C_PERS,C_NOTE,["note_resid","Note ü. Erw."],
              ["conceded","GEG"],["sot_faced","Schüsse"],["save_pct","Paraden %"],
              ["gp_shot","Verh./100"],["goals_prevented","Verhind."],
              ["pen_saved","Elfer par."],C_PP]},
@@ -921,6 +1155,45 @@ function tabMatch(p){
 function fmt(v){ return (typeof v==="number" && !Number.isInteger(v)) ? v.toFixed(2) : v; }
 // Millionenbetrag mit Dezimalkomma, z.B. "9,0 Mio €"
 function fmtMio(v){ return v==null ? "–" : v.toFixed(1).replace(".", ",") + " Mio €"; }
+
+// Fair Value (D1): das Urteil kommt fertig aus dem Backend (fair_urteil,
+// fünf Stufen aus der Modellstreuung). Die Farbe hängt am Urteil, nicht am
+// Vorzeichen – siehe CSS „Fair Value". Torhüter bekommen überall null.
+const URTEIL_KLASSE = {"deutlich unterbewertet":"u-dunter", "leicht unterbewertet":"u-lunter",
+  "marktgerecht":"u-markt", "leicht überbewertet":"u-lueber", "deutlich überbewertet":"u-dueber"};
+const urteilKlasse = p => (URTEIL_KLASSE[p.fair_urteil] || "u-markt")
+  + (p.value_reliable===false ? " unsicher" : "");
+// Kurzbetrag für enge Zellen: ab 10 Mio ganze Zahl, darunter eine Stelle
+const mioKurz = v => v==null ? "–" : v>=10 ? String(Math.round(v)) : v.toFixed(1).replace(".", ",");
+const marktMio = p => p.value_m!=null ? p.value_m : (p.value ? p.value/1e6 : null);
+// Abstand als Satz statt als Vorzeichen: „Fair 98 % über Markt"
+const fairSatz = d => d==null ? "" : d===0 ? "Fair = Markt"
+  : `Fair ${Math.abs(d).toLocaleString("de-DE")} % ${d>0?"über":"unter"} Markt`;
+// „2026-09-22T13:28:45" -> "09/2026" (Stand der sichtbaren Persönlichkeit, E2)
+const monatJahr = s => s ? `${String(s).slice(5,7)}/${String(s).slice(0,4)}` : "";
+const FAIR_LEER_GK = "Bei Torhütern kein Fair Value – das Modell belohnt Liga und Minuten, nicht Paraden";
+// Eigener Spieler? Entscheidet, ob transfer_fee „Ablöseforderung" (fremd, was
+// wir zahlen müssten) oder „unsere Forderung" (eigen) heißt.
+const istEigen = p => p.im_kader!=null ? !!p.im_kader
+  : !!(TACT && p.eid && TACT.slots.some(s=>s.kandidaten.some(k=>+k.id===+p.eid)));
+function fairTd(p){
+  if(p.fair_urteil==null)
+    return `<td class="fair leer" title="${p.is_gk ? FAIR_LEER_GK
+      : "Kein Schätzwert – ohne Marktwert im Export oder solange das Modell kein belastbares Signal findet"}">–</td>`;
+  const tip = esc2(p.fair_text || p.fair_urteil) + (p.value_reliable===false
+    ? " – unsichere Stichprobe, das Urteil behauptet nichts" : "");
+  return `<td class="fair ${urteilKlasse(p)}" title="${tip}"><span class="fw">${p.fair_urteil}${
+    p.value_reliable===false ? " ?" : ""}</span><span class="fz">${mioKurz(marktMio(p))} → ${mioKurz(p.fair_value_m)}</span></td>`;
+}
+// Modellstatus fürs Kleingedruckte, z.B. „R² 0,44 · Streuung ×3,7"
+let VALUE_MODEL = null;
+function modellStatus(){
+  const m = VALUE_MODEL; if(!m || !m.ok) return "";
+  return [m.text || "", m.n_train ? `${m.n_train.toLocaleString("de-DE")} Spieler` : ""]
+    .filter(Boolean).join(" · ");
+}
+// Streuung als Faktor mit Dezimalkomma, z.B. „3,7" (Rückfall: Stand D1)
+const streuung = () => ((VALUE_MODEL && VALUE_MODEL.streuung_faktor) || 3.7).toFixed(1).replace(".", ",");
 
 // Persönlichkeit: Farbe nach Stufe – Grün für Vorbild/stark, Violett für
 // Risiko, sonst Textfarbe (kein Rot, Regel 2). Tooltip mit beiden Achsen
@@ -1004,24 +1277,9 @@ function cell(p, key){
     const v=p.value_score, a=Math.min(0.5, v/6*0.5).toFixed(2);
     return `<td style="background:rgba(var(--heat-pos),${a})">${v}</td>`;
   }
-  if(key==="value_delta_pct"){
-    // Kein Wert = kein Marktwert im Export ODER das Fair-Value-Modell trägt
-    // (noch) nicht. Beides ist ehrlicher als eine Zahl ohne Deckung.
-    if(p.value_delta_pct==null)
-      return `<td class="fair leer" title="Kein Schätzwert – ohne Marktwert im Export oder solange die Regression kein belastbares Signal findet">–</td>`;
-    const v = p.value_delta_pct;
-    const txt = (v>0?"+":v<0?"−":"±") + Math.abs(v).toLocaleString("de-DE") + " %";
-    const tip = `Marktwert ${fmtMio(p.value_m)} · Fair Value ${fmtMio(p.fair_value_m)}`;
-    // Dünne Stichprobe: Zahl gedämpft, keine Einfärbung – der Wert steht da,
-    // aber er behauptet nichts.
-    if(!p.value_reliable)
-      return `<td class="fair unsicher" title="${tip} – unsichere Stichprobe">${txt}</td>`;
-    // Neutralzone: unter 10 % ist die Abweichung Rauschen, nicht Signal.
-    if(Math.abs(v) < 10) return `<td class="fair">${txt}</td>`;
-    const col = v>0 ? "--heat-pos" : "--heat-neg";
-    const a = Math.min(0.5, 0.10 + Math.abs(v)/120*0.40).toFixed(2);
-    return `<td class="fair" title="${tip}" style="background:rgba(var(${col}),${a})">${txt}</td>`;
-  }
+  // Kein Wert = kein Marktwert im Export, Torhüter, oder das Modell trägt
+  // (noch) nicht. Alles ehrlicher als eine Zahl ohne Deckung.
+  if(key==="value_delta_pct") return fairTd(p);
   if(key==="pers_score") return persTd(p);
   if(key==="note_resid"){
     const v = p.note_resid;
@@ -1279,6 +1537,15 @@ function cardStats(p){
           {lab:"FRM",val:to99(one("rating"))}];
 }
 
+// Persönlichkeitszeile der Dossier-Karte: Beschreibung · Medien · Stand. Wird
+// sie zu lang, fällt der Medienumgang weg statt mitten im Wort abzubrechen.
+function persZeile(c){
+  const st = c.persStand ? "Stand " + c.persStand : "";
+  let t = [c.pers, c.medien, st].filter(Boolean).join(" · ");
+  if(t.length > 46) t = [c.pers, st].filter(Boolean).join(" · ");
+  return t.toUpperCase().slice(0, 46);
+}
+
 function cardConfigFor(p, label){
   const stats = cardStats(p);
   const ovr = p.score!=null ? Math.round(50+45*(p.score/100))
@@ -1286,7 +1553,8 @@ function cardConfigFor(p, label){
   return {pid:p.id, name:p.name, pos:p.pos_label||(p.is_gk?"TW":"?"),
           ovr, tier:tierForOvr(ovr), flag:"", img:null, label:label||"aktuell", stats,
           // Scouting-Bericht: die sichtbare Persönlichkeit gehört auf die Karte
-          pers:p.pers_label||"", persStufe:p.pers_stufe||"", medien:p.pers_medien||""};
+          pers:p.pers_label||"", persStufe:p.pers_stufe||"", medien:p.pers_medien||"",
+          persStand:monatJahr(p.pers_stand)};
 }
 
 function enrichSeasonRecord(rec, base){
@@ -1359,7 +1627,7 @@ function cardSVG(c){
     <text x="26" y="398" font-size="${nsz}" font-weight="600" fill="${t.txt}">${nm}</text>
     <text x="26" y="416" font-size="10" font-family="${MONO}" letter-spacing=".6" fill="${t.txt}" opacity=".6">${(c.label||"").slice(0,40)}</text>
     ${c.pers
-      ? `<text x="26" y="432" font-size="9" font-family="${MONO}" letter-spacing=".8" fill="${t.accent}">${esc2((c.pers+(c.medien?" · "+c.medien:"")).toUpperCase().slice(0,46))}</text>`
+      ? `<text x="26" y="432" font-size="9" font-family="${MONO}" letter-spacing=".8" fill="${t.accent}">${esc2(persZeile(c))}</text>`
       : `<text x="26" y="432" font-size="9" font-family="${MONO}" letter-spacing=".8" fill="${t.txt}" opacity=".4">PERSÖNLICHKEIT: NICHT GESCOUTET</text>`}
     <line x1="26" y1="440" x2="314" y2="440" stroke="${t.rule}" stroke-width="1"/>
     <text x="26" y="458" font-size="8" font-family="${MONO}" letter-spacing="1.8" fill="${t.txt}" opacity=".42">FM COMPANION · MONEYBALL</text>
@@ -1448,6 +1716,11 @@ let TACT = null, TACT_SLOT = null, TACT_PID = null, TACT_SQUADS = null;
 // fährt deshalb auf demselben Promise mit, statt einen neuen zu starten.
 let TACT_LADEN = null;
 
+// Ansicht unter „mein team": das Brett oder der Ligavergleich
+// (tactics.liga_vergleich). Der Vergleich rechnet sekundenlang und wird
+// deshalb erst beim ersten Umschalten geholt, dann aufgehoben.
+let TACT_VIEW = "brett", LIGA = null, LIGA_SORT = "platz", LIGA_OFFEN = null;
+
 function ladeTaktik(api){
   if(TACT_LADEN) return TACT_LADEN;
   TACT_LADEN = (async () => {
@@ -1470,6 +1743,7 @@ async function renderTactic(){
   if(!api){ host.innerHTML = `<div class="empty"><h2>Nur in der App</h2></div>`; return; }
   if(TACT_SQUADS){ renderSquadPicker(host); return; }
   if(!TACT){
+    LIGA = null; CLV = null;  // neues Brett = neue Elf, die Vergleiche rechnen neu
     if(!TACT_LADEN)
       host.innerHTML = `<div class="empty"><span class="spin"></span> lade Taktik…</div>`;
     let e;
@@ -1479,8 +1753,17 @@ async function renderTactic(){
     if(e.fehler){ host.innerHTML = `<div class="empty"><h2>${e.fehler}</h2></div>`; return; }
     if(!TACT) return;
   }
+  if(TACT_VIEW==="liga"){ drawLigaHost(host); return; }
   drawTactic(host);
 }
+
+function tactNav(){
+  return `<div class="tactnav"><div class="seg">
+    <button class="${TACT_VIEW==="brett"?"on":""}" onclick="setTactView('brett')">Brett</button>
+    <button class="${TACT_VIEW==="liga"?"on":""}" onclick="setTactView('liga')">Ligavergleich</button>
+  </div></div>`;
+}
+function setTactView(v){ TACT_VIEW = v; renderTactic(); }
 
 // Kaderwahl: der Export des eigenen Vereins IST der Kader. Die Kadererkennung
 // im Speicher bleibt als Ausweichweg – sie braucht ein laufendes FM24 und
@@ -1685,7 +1968,7 @@ function drawTactic(host){
       passt in die Rolle, ist gut <i>und</i> bringt den Charakter mit. Ohne
       gescoutete Persönlichkeit zählt nur √(Fit × Score).</div>`;
 
-  host.innerHTML = `<div class="tactwrap">
+  host.innerHTML = `${tactNav()}<div class="tactwrap">
     <div class="tactpitch">
       <svg viewBox="0 0 100 100" class="pitchsvg">
         <rect x="1" y="1" width="98" height="98" fill="var(--surface)" stroke="var(--border)" stroke-width="0.5"/>
@@ -1700,17 +1983,21 @@ function drawTactic(host){
       <div class="muted" style="font-size:10.5px;font-family:var(--mono)">
         ${TACT.verein?`<b>${esc2(TACT.verein)}</b> · `:""}${TACT.kader} Kaderspieler${TACT.ohne_daten?` · ${TACT.ohne_daten} ohne Statistikdaten`:""}
         · ${TACT.export_positionen} mit Export-Position
+        ${TACT.kader_stand ? `· Kader: Import ${datumKurz(TACT.kader_stand)}` : ""}
         · <button class="linkbtn" onclick="resetSquad()">Kader ändern</button>${
           TACT.pins && Object.keys(TACT.pins).length
             ? ` · ${Object.keys(TACT.pins).length} manuell aufgestellt
                <button class="linkbtn" onclick="pinsLoesen()">alle lösen</button>` : ""}
       </div>
+      ${meldeZeile(TACT.meldeliste)}
     </div>
     <div class="tactpanel">
       <div class="dsec" style="margin-top:0">${esc2(slot.label)}</div>
       <div style="font-size:12.5px;margin-bottom:2px"><b>${esc2(slot.rolle)}</b>
         <span class="muted">· ${esc2(slot.duty)}</span></div>
       <ul class="taufg">${slot.aufgaben.map(a=>`<li>${esc2(a)}</li>`).join("")}</ul>
+      <div class="tcmp"><button class="wbtn" onclick="openCompare('${slot.key}')">Vergleichen…</button>
+        <span class="muted">Stamm und Backup gegen bis zu drei Kandidaten – Leistung, Kennzahlen, Preis</span></div>
       <table class="tcand"><thead><tr>
         <th style="text-align:left">Spieler</th><th>Alter</th><th>Min</th>
         <th title="${GESAMT_TIP}">Gesamt</th>
@@ -1781,6 +2068,306 @@ function tactDetail(c){
     <div style="margin-top:10px">
       <button class="wbtn" onclick="openRepl(${c.id})">Ersatz finden…</button></div>`;
 }
+
+// ======================= Ligavergleich =====================================
+// Unsere Elf je Position gegen die Liga (tactics.liga_vergleich) oder gegen
+// eine feste Liste von CL-Vergleichsvereinen (cl_comparison, D9). Leistung =
+// √(Fit × Score) ohne Charakter. Die Scoutinglisten decken je Verein nur
+// 4–13 Spieler ab, bei Torhütern eine Handvoll: wo die Datenbasis nicht trägt,
+// sagt die Zeile „keine Aussage", statt eine Zahl zu zeigen – in der Liga
+// unter acht Vereinen, auf CL-Niveau nach dem Urteil des Backends (aussage:
+// mindestens 6 der 8 Vergleichsvereine mit Daten).
+const LIGA_MIN_VEREINE = 8;
+const LIGA_GRUPPE = {tw:"tw", lv:"def", iv:"def", rv:"def", dm:"mid",
+  aml:"off", amc:"off", amr:"off", st:"st"};
+const LIGA_SLOT = {iv:"ivl", dm:"dml"};          // Doppelposition -> Brett-Slot
+const fmtDelta = d => d==null ? "–" : (d>0?"+":d<0?"−":"±") + Math.abs(d).toLocaleString("de-DE");
+const fmtWert = v => v==null ? "–" : (+v).toLocaleString("de-DE", {maximumFractionDigits:1});
+// Maßstab: „liga" oder „cl". CLV = Ergebnis von cl_comparison; CL_WAHL ist die
+// offene Vereinsauswahl (Entwurf, erst „Übernehmen" speichert).
+let LIGA_MASS = "liga", CLV = null, CL_CLUBS = null, CL_WAHL = null, CL_Q = "";
+
+// Was sich zwischen Liga und CL-Niveau unterscheidet, steht nur hier.
+const MASS = {
+  liga: {
+    tragend: p => (p.vereine_mit_daten||0) >= LIGA_MIN_VEREINE && p.wert!=null,
+    ref: p => p.top4, delta: p => p.abstand_top4,
+    rangN: p => p.vereine_mit_daten,              // zählt den eigenen Verein mit
+    refName: "Top-4-Schwelle", deltaKopf: "Δ Top 4",
+    deltaTip: "Abstand zur Leistung des viertbesten Vereins",
+    unter: "Unter Top-4-Niveau", spitze: "Ligaspitze",
+    ueber: "wir, auf Top-4-Niveau", strich: "ein Ligaverein (sein Bester auf der Position)",
+    leerLeg: `keine Aussage (unter ${LIGA_MIN_VEREINE} Vereinen)`,
+    basis: p => `${p.vereine_mit_daten} Vereine <span class="muted">· ${p.liga_spieler} Spieler</span>`,
+    keine: p => `${p.vereine_mit_daten} Vereine · keine Aussage`,
+    keineTip: p => `Nur ${p.vereine_mit_daten} Vereine mit Daten – unter ${LIGA_MIN_VEREINE} ist ein Rang keine Aussage`,
+    leerGrund: p => `nur ${p.vereine_mit_daten} Vereine mit Daten`,
+  },
+  cl: {
+    tragend: p => !!p.aussage && p.wert!=null,
+    ref: p => p.messlatte, delta: p => p.abstand,
+    rangN: p => (p.vereine_mit_daten||0) + 1,     // kommt OHNE den eigenen Verein
+    refName: "CL-Messlatte", deltaKopf: "Δ Messlatte",
+    deltaTip: "Abstand zum Median der Vergleichsvereine",
+    unter: "Unter der CL-Messlatte", spitze: "Vor allen Vergleichsvereinen",
+    ueber: "wir, auf oder über der Messlatte", strich: "ein Vergleichsverein (sein Bester auf der Position)",
+    leerLeg: "keine Aussage (zu wenige Vergleichsvereine mit Daten)",
+    basis: p => `${p.vereine_mit_daten}/${p.vereine_soll} Vereine${(p.fehlende_vereine||[]).length
+      ? ` <span class="muted">· fehlen: ${p.fehlende_vereine.map(esc2).join(", ")}</span>` : ""}`,
+    keine: p => `${p.vereine_mit_daten}/${p.vereine_soll} · keine Aussage`,
+    // Die fehlenden Vereine klein unter dem Hinweis – sonst läuft die
+    // gestrichelte Unterstreichung über drei Zeilen
+    fehlen: p => (p.fehlende_vereine||[]).length
+      ? `<div class="lfehlen">fehlen: ${p.fehlende_vereine.map(esc2).join(", ")}</div>` : "",
+    keineTip: p => `Nur ${p.vereine_mit_daten} von ${p.vereine_soll} Vergleichsvereinen mit Daten – für eine Aussage braucht es ${
+      (CLV && CLV.min_mit_daten) || 6}. Fehlende Kader in FM exportieren (Strg+P) und importieren.`,
+    leerGrund: p => `${p.vereine_mit_daten}/${p.vereine_soll} Vereine`,
+  },
+};
+const ligaDaten = () => LIGA_MASS==="cl" ? CLV : LIGA;
+const ligaHost = () => document.getElementById("tableHost");
+
+async function drawLigaHost(host){
+  const api = API(); if(!api) return nurInApp();
+  if(LIGA_MASS==="cl" && !CLV){
+    host.innerHTML = tactNav() + `<div class="empty"><span class="spin"></span> rechne CL-Vergleich…</div>`;
+    try{ CLV = await api.cl_comparison(450); }catch(e){ CLV = {ok:false, error:String(e)}; }
+    if(TACT_VIEW!=="liga" || LIGA_MASS!=="cl") return;
+    // Noch keine Vergleichsvereine: direkt zur Auswahl führen
+    if(CLV && CLV.keine_vereine && !CL_WAHL){ await clWahlOeffnen(); return; }
+  }
+  if(LIGA_MASS==="liga" && !LIGA){
+    host.innerHTML = tactNav() + `<div class="empty"><span class="spin"></span> rechne Ligavergleich…</div>`;
+    try{ LIGA = await api.league_comparison(450); }catch(e){ LIGA = {ok:false, error:String(e)}; }
+    if(TACT_VIEW!=="liga" || LIGA_MASS!=="liga") return;
+  }
+  drawLiga(host);
+}
+function setLigaMass(m){ if(m===LIGA_MASS) return; LIGA_MASS = m; LIGA_OFFEN = null; CL_WAHL = null; drawLigaHost(ligaHost()); }
+function setLigaSort(v){ LIGA_SORT = v; drawLiga(ligaHost()); }
+function ligaAuf(k){ LIGA_OFFEN = (LIGA_OFFEN===k ? null : k); drawLiga(ligaHost()); }
+
+function ligaKopf(L, M){
+  const cl = LIGA_MASS==="cl";
+  const titel = cl ? `CL-Niveau${L && L.ok ? ` · ${L.vereine.length} Vergleichsvereine` : ""}`
+                   : `Ligavergleich${L && L.liga ? ` · ${esc2(L.liga)}` : ""}`;
+  const unter = cl
+    ? `je Position gegen den besten Spieler jedes Vergleichsvereins · Messlatte = Median`
+    : `je Position gegen den besten Spieler jedes Ligavereins`;
+  const stand = !L || !L.ok ? "" : `<div class="lstand" title="Vergleichsmenge: Importe seit ${datumKurz(L.stand)} (letzter Kaderimport minus 3 Tage)">${
+      L.daten_stand || L.kader_stand
+        ? `<span>Daten: Import ${datumKurz(L.daten_stand)}</span><span>Kader: Import ${datumKurz(L.kader_stand)}</span>`
+        : `<span>Vergleichsmenge: Importe seit ${datumKurz(L.stand)}</span>`}</div>`;
+  const erf = {}; ((L && L.erfassung) || []).forEach(e=>erf[e.club] = e);
+  const vName = c => erf[c] && erf[c].kader===false
+    ? `<span class="lgescoutet" title="${escAttr(`${c}: nur gescoutet – ${erf[c].n} Spieler in den Daten, Kader-Export fehlt`)}">${esc2(c)}</span>`
+    : esc2(c);
+  const vereine = cl && L && L.ok ? `<div class="lvereine">${L.vereine.map(vName).join(" · ")}
+      <button class="linkbtn" onclick="clWahlOeffnen()">Vereine ändern</button></div>` : "";
+  return `<div class="ligakopf">
+      <div class="ltitel"><div class="dsec" style="margin-top:0">${titel}</div>
+        <div class="muted" style="font-size:11.5px">${esc2((L && L.verein)||"")} ${unter} · Leistung = √(Fit × Score),
+          ohne Charakter${L && L.min_minutes ? ` · ab ${L.min_minutes} Min` : ""}</div>${stand}${vereine}</div>
+      <label class="status" style="display:flex;gap:6px;align-items:center">Maßstab
+        <span class="seg"><button class="${!cl?"on":""}" onclick="setLigaMass('liga')">Liga</button><button
+          class="${cl?"on":""}" onclick="setLigaMass('cl')"
+          title="Gegen eine feste Liste von bis zu 8 Vereinen auf CL-Niveau">CL-Niveau</button></span></label>
+      <label class="status" style="display:flex;gap:6px;align-items:center">Reihenfolge
+        <span class="seg"><button class="${LIGA_SORT==="platz"?"on":""}" onclick="setLigaSort('platz')">Platz</button><button
+          class="${LIGA_SORT==="rueckstand"?"on":""}" onclick="setLigaSort('rueckstand')">Rückstand</button></span></label>
+    </div>`;
+}
+
+function drawLiga(host){
+  const M = MASS[LIGA_MASS], L = ligaDaten(), cl = LIGA_MASS==="cl";
+  const wahl = CL_WAHL ? clWahlPanel() : "";
+  if(!L || !L.ok){
+    host.innerHTML = tactNav() + `<div class="ligawrap">${ligaKopf(L, M)}${wahl || `<div class="empty"><h2>${
+      cl ? "Kein CL-Vergleich" : "Kein Ligavergleich"}</h2>${esc2((L && L.error)
+      || (L && L.kein_kader ? "Erst einen Kader auswählen." : ""))}${
+      cl && L && L.keine_vereine ? `<div style="margin-top:12px"><button onclick="clWahlOeffnen()">Vereine wählen…</button></div>` : ""}</div>`}</div>`;
+    return;
+  }
+  const P = L.positionen.slice();
+  if(LIGA_SORT==="rueckstand")
+    P.sort((a,b)=>(M.tragend(b)-M.tragend(a)) || ((M.delta(a)??99)-(M.delta(b)??99)));
+  // Eine gemeinsame Achse für alle Positionen, damit Abstände vergleichbar sind
+  const werte = P.flatMap(p=>[p.wert, ...p.vereine.map(v=>v.wert)]).filter(v=>v!=null);
+  const lo = Math.max(0, Math.min(40, Math.floor(Math.min(...werte)/10)*10)), hi = 100;
+  const X = v => (100*(v-lo)/(hi-lo)).toFixed(2);
+  const kurz = p => slotKurz(LIGA_SLOT[p.key] || p.key);
+
+  // Befund in einem Satz je Gruppe – das, wofür man die Ansicht öffnet
+  const nenn = (p, zus) => `<b>${esc2(p.label)}</b>${zus ? ` <span class="muted">${zus}</span>` : ""}`;
+  const unter = P.filter(p=>M.tragend(p) && M.delta(p)<0).sort((a,b)=>M.delta(a)-M.delta(b));
+  const spitze = P.filter(p=>M.tragend(p) && p.rang===1);
+  const leer = P.filter(p=>!M.tragend(p));
+  const befund = [
+    unter.length ? `${M.unter}: ${unter.map(p=>nenn(p, `${fmtDelta(M.delta(p))}, Rang ${p.rang}/${M.rangN(p)}`)).join(" · ")}`
+                 : `${M.unter}: keine Position.`,
+    spitze.length ? `${M.spitze}: ${spitze.map(p=>nenn(p)).join(" · ")}` : "",
+    leer.length ? `Keine Aussage: ${leer.map(p=>nenn(p, M.leerGrund(p))).join(" · ")}` : "",
+  ].filter(Boolean).join("<br>");
+  // Die Elf kommt vom Brett, Pins eingeschlossen – sonst wundert man sich,
+  // warum der Befund nicht zur Auto-Elf passt.
+  const pins = Object.keys((TACT && TACT.pins) || {});
+  const pinHinweis = pins.length
+    ? `<div class="muted" style="font-size:11.5px;margin-top:2px">Elf vom Brett mit ${pins.length} Pin${pins.length>1?"s":""}
+        (${pins.map(k=>esc2(slotKurz(k))).join(", ")}) – weicht von der automatischen Elf ab.</div>` : "";
+
+  const achse = [lo, lo+(hi-lo)/3, lo+2*(hi-lo)/3, hi].map(v=>Math.round(v/5)*5)
+    .map(v=>`<span style="left:${X(v)}%">${v}</span>`).join("");
+
+  const zeilen = P.map(p=>{
+    const tr = M.tragend(p), offen = LIGA_OFFEN===p.key, ref = M.ref(p), d = M.delta(p);
+    const eig = (p.eigene||[]).map(e=>`${esc2(e.name)}${p.eigene.length>1?` <span class="muted">${e.leistung??"–"}</span>`:""}`).join(" · ")
+      || `<span class="muted">nicht besetzt</span>`;
+    const vor = v => p.wert!=null && v.wert > p.wert;
+    const striche = p.vereine.map(v=>`<i class="lt${vor(v)?" vor":""}" style="left:${X(v.wert)}%" title="${escAttr(
+      `${v.club} ${fmtWert(v.wert)} – ${v.spieler.map(s=>`${s.name} ${s.leistung}`).join(", ")}`)}"></i>`).join("");
+    // Ohne tragfähige Datenbasis gibt es auch keine Schwelle – bei drei
+    // Vereinen wäre sie nur der schwächste von ihnen.
+    const linie = tr && ref!=null ? `<i class="lt4" style="left:${X(ref)}%" title="${M.refName}: ${fmtWert(ref)}"></i>` : "";
+    const ich = p.wert!=null ? `<b class="lme${!tr?" leer":d<0?" unter":""}" style="left:${X(p.wert)}%" title="${escAttr(
+      `${L.verein}: ${fmtWert(p.wert)}`)}"></b>` : "";
+    return `<tr class="${offen?"lsel":""}${tr?"":" duenn"}" onclick="ligaAuf('${p.key}')" title="Klick: Vereine auf dieser Position">
+      <td class="lname"><span class="ltile" style="--grp:var(--pg-${LIGA_GRUPPE[p.key]||"mid"})">${esc2(kurz(p))}</span></td>
+      <td class="lname"><div class="lpos">${esc2(p.label)}</div><div class="leig">${eig}</div></td>
+      <td><span class="lwert">${fmtWert(p.wert)}</span></td>
+      <td class="lname"><div class="lstrip">${striche}${linie}${ich}</div></td>
+      <td>${tr ? `<b>${p.rang}</b><span class="muted">/${M.rangN(p)}</span>` : `<span class="ldim" title="${escAttr(M.keineTip(p))}">–</span>`}</td>
+      <td>${tr && d!=null ? `<span class="${d>0?"pos":d<0?"neg":"muted"}">${fmtDelta(d)}</span>` : `<span class="ldim">–</span>`}</td>
+      <td class="lname">${tr ? M.basis(p) : `<span class="lkeine" title="${escAttr(M.keineTip(p))}">${M.keine(p)}</span>${
+        M.fehlen ? M.fehlen(p) : ""}`}</td>
+    </tr>${offen ? `<tr class="ldet"><td></td><td colspan="6">${ligaVereine(p, L)}</td></tr>` : ""}`;
+  }).join("");
+
+  // Vorläufig, solange Vergleichsvereine nur über Scoutinglisten erfasst sind:
+  // ihr „bester Spieler" ist dann oft nicht ihr Stammspieler (Head Scout).
+  const gesc = cl ? (L.erfassung || []).filter(e=>e.kader===false) : [];
+  const nG = cl ? (L.nur_gescoutet ?? gesc.length) : 0;
+  const banner = nG > 0 ? `<div class="lvorl"><b>Vorläufig:</b> ${nG} von ${(L.vereine||[]).length} Vereinen nur über
+      Scoutinglisten erfasst${gesc.length ? ` (${gesc.map(e=>esc2(e.club)).join(", ")})` : ""}. Belastbar erst mit
+      ihren Kader-Exporten.</div>` : "";
+  host.innerHTML = tactNav() + `<div class="ligawrap">${ligaKopf(L, M)}${wahl}${banner}
+    <div class="lbefund">${befund}${cl && L.mit_aussage!=null
+      ? `<div class="muted" style="font-size:11.5px;margin-top:2px">Aussage auf ${L.mit_aussage} von ${P.length} Positionen.</div>` : ""}${pinHinweis}</div>
+    <table class="liga"><colgroup><col style="width:56px"><col style="width:22%"><col style="width:70px">
+      <col><col style="width:66px"><col style="width:84px"><col style="width:${cl ? 230 : 190}px"></colgroup>
+      <thead><tr><th></th><th style="text-align:left">Position · unsere Elf</th><th>Leistung</th>
+        <th style="text-align:left"><div class="lachse">${achse}</div></th>
+        <th title="Unser Platz unter den Vereinen mit Daten">Rang</th>
+        <th title="${M.deltaTip}">${M.deltaKopf}</th>
+        <th style="text-align:left">Datenbasis</th></tr></thead>
+      <tbody>${zeilen}</tbody></table>
+    <div class="lleg"><span><i class="lt"></i> ${M.strich}</span>
+      <span><i class="lt4"></i> ${M.refName}${cl ? " (Median der Vergleichsvereine)" : ""}</span>
+      <span><b class="lme"></b> ${M.ueber}</span><span><b class="lme unter"></b> wir, darunter</span>
+      <span><b class="lme leer"></b> ${M.leerLeg}</span></div>
+    <div class="cmfuss">${cl
+      ? `Messlatte = Median der Vergleichsvereine auf der Position, ohne uns. Die Daten stammen aus Scoutinglisten und
+         Kader-Exporten – fehlt ein Verein („fehlen: …"), dessen Kader in FM exportieren (Strg+P) und importieren.`
+      : `Die Datenbasis sind Scoutinglisten, keine Kader – je Verein oft nur 4–13 Spieler. Bei den anderen Vereinen darf
+         derselbe Spieler auf mehreren Positionen zählen, bei uns nicht; der Vergleich ist damit leicht zu streng gegen uns.`}
+      Innenverteidigung und Doppelsechs vergleichen das Mittel der zwei Besten. Zeile anklicken: alle Vereine auf dieser Position.</div>
+  </div>`;
+}
+
+// Aufgeklappt: wer auf dieser Position vor uns liegt – mit Namen, Alter und
+// Marktwert. Unsere Zeile steht auf ihrem Rang dazwischen.
+function ligaVereine(p, L){
+  const zeilen = p.vereine.map(v=>({club:v.club, wert:v.wert, spieler:v.spieler, wir:false}));
+  if(p.wert!=null) zeilen.push({club:L.verein, wert:p.wert, wir:true,
+    spieler:(p.eigene||[]).map(e=>({name:e.name, leistung:e.leistung, age:null, value:null}))});
+  zeilen.sort((a,b)=>b.wert-a.wert || (a.wir?-1:1));
+  const sp = s => `${esc2(s.name)} <b>${s.leistung??"–"}</b>${s.age!=null?` <span class="muted">${Math.round(s.age)} J</span>`:""}${
+    s.value ? ` <span class="muted">· ${fmtMio(s.value/1e6)}</span>` : ""}`;
+  const fehlen = (p.fehlende_vereine||[]).length
+    ? `<div class="muted" style="font-size:11px;margin-top:6px">Ohne Daten auf dieser Position: ${p.fehlende_vereine.map(esc2).join(", ")}</div>` : "";
+  return `<div class="muted" style="font-size:11px;margin:2px 0 6px">Vereine nach Leistung auf dieser Position –
+      je Verein ${p.key==="iv"||p.key==="dm" ? "die zwei Besten" : "der Beste"} aus den Daten</div>
+    <table class="lclub"><tbody>${zeilen.map((z,i)=>`<tr class="${z.wir?"wir":""}">
+      <td class="muted">${i+1}</td><td>${esc2(z.club)}${z.wir?` <span class="rbadge kader">wir</span>`:""}</td>
+      <td class="lsp">${z.spieler.map(sp).join(" · ")}</td><td><b>${fmtWert(z.wert)}</b></td></tr>`).join("")}</tbody></table>${fehlen}`;
+}
+
+// ---- Vereinsauswahl für das CL-Niveau (cl_clubs / set_cl_clubs) -----------
+// Bis zu 8 Vereine; der eigene steht nicht zur Wahl. Gespeichert wird erst
+// mit „Übernehmen" – bis dahin ist CL_WAHL nur ein Entwurf.
+async function clWahlOeffnen(){
+  const api = API(); if(!api) return nurInApp();
+  try{ CL_CLUBS = await api.cl_clubs(); }catch(e){ CL_CLUBS = {ok:false, error:String(e)}; }
+  CL_WAHL = ((CL_CLUBS && CL_CLUBS.vereine) || []).slice();
+  CL_Q = "";
+  drawLiga(ligaHost());
+}
+function clWahlAbbrechen(){ CL_WAHL = null; drawLiga(ligaHost()); }
+function clWahlSuche(q){ CL_Q = q; const el = document.getElementById("clListe"); if(el) el.innerHTML = clWahlListe(); }
+function clWahlKlick(i){
+  const c = (CL_CLUBS.auswahl||[])[i]; if(!c) return;
+  const k = CL_WAHL.indexOf(c.club), soll = CL_CLUBS.soll || 8;
+  if(k>=0) CL_WAHL.splice(k, 1); else if(CL_WAHL.length < soll) CL_WAHL.push(c.club);
+  drawLiga(ligaHost());
+  const inp = document.getElementById("clSuche"); if(inp){ inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+}
+function clWahlWeg(i){ CL_WAHL.splice(i, 1); drawLiga(ligaHost()); }
+function clWahlListe(){
+  const n = cardNorm(CL_Q.trim()), soll = (CL_CLUBS && CL_CLUBS.soll) || 8;
+  const alle = (CL_CLUBS && CL_CLUBS.auswahl) || [];
+  const treffer = alle.map((c,i)=>({c,i})).filter(({c})=>!n || cardNorm(c.club).includes(n)).slice(0, n ? 60 : 36);
+  if(!treffer.length) return `<div class="muted" style="font-size:12px;padding:6px 2px">Kein Verein in den aktuellen Importen.</div>`;
+  return treffer.map(({c,i})=>{
+    const on = CL_WAHL.includes(c.club), voll = !on && CL_WAHL.length >= soll;
+    return `<button class="clopt${on?" on":""}"${voll?" disabled":""} onclick="clWahlKlick(${i})"
+      title="${escAttr(`${c.club} – ${c.n} Spieler in den aktuellen Importen${c.kader===false ? " – nur gescoutet, Kader-Export fehlt"
+        : c.kader ? " – per Kader-Export erfasst" : ""}`)}"><span class="clname">${esc2(c.club)}${c.kader==null ? ""
+        : `<em class="${c.kader?"":"gesc"}">${c.kader ? "Kader" : "nur gescoutet"}</em>`}</span><span>${c.n}</span></button>`;
+  }).join("");
+}
+function clWahlPanel(){
+  if(!CL_CLUBS || !CL_CLUBS.ok) return `<div class="clwahl"><div class="dsub">${esc2((CL_CLUBS && CL_CLUBS.error) || "Vereine nicht verfügbar.")}</div></div>`;
+  const soll = CL_CLUBS.soll || 8, min = CL_CLUBS.min_mit_daten || 6;
+  const chips = CL_WAHL.map((c,i)=>`<span class="chip">${esc2(c)}<i onclick="clWahlWeg(${i})" title="entfernen">✕</i></span>`).join("")
+    || `<span class="muted" style="font-size:12px">noch keiner gewählt</span>`;
+  return `<div class="clwahl">
+    <div class="dsec" style="margin-top:0">CL-Vergleichsvereine · ${CL_WAHL.length}/${soll}</div>
+    <div class="clchips">${chips}</div>
+    <input id="clSuche" type="search" placeholder="Verein suchen…" value="${escAttr(CL_Q)}"
+      oninput="clWahlSuche(this.value)" autocomplete="off">
+    <div class="clliste" id="clListe">${clWahlListe()}</div>
+    <div class="muted" style="font-size:11.5px;margin:8px 0 10px;max-width:90ch">Zahl = Spieler dieses Vereins in den
+      aktuellen Importen; „nur gescoutet" heißt: kein Kader-Export – sein bester Spieler ist dann oft nicht sein Stammspieler. Ein Verein zählt auf einer Position, sobald er dort Spieler in den Daten hat; unter ${min} von
+      ${soll} Vereinen gibt es keine Aussage. Fehlende Kader in FM exportieren (Strg+P) und importieren.</div>
+    <button onclick="clWahlSpeichern()"${CL_WAHL.length?"":" disabled"}>Übernehmen</button>
+    <button class="linkbtn" style="margin-left:12px" onclick="clWahlAbbrechen()">abbrechen</button>
+  </div>`;
+}
+async function clWahlSpeichern(){
+  const api = API(); if(!api) return nurInApp();
+  let r; try{ r = await api.set_cl_clubs(CL_WAHL); }catch(e){ r = {ok:false, error:String(e)}; }
+  if(!r || !r.ok){ document.getElementById("status").textContent = "⚠ " + ((r && r.error) || "Vereine nicht gespeichert"); return; }
+  CL_WAHL = null; CLV = null; LIGA_MASS = "cl";
+  drawLigaHost(ligaHost());
+}
+
+// Meldeliste (D4): das Backend zählt, die Oberfläche zeigt nur an. Gerissen
+// (pl.ok false) steht in Violett – kein Rot (Regel 2). ok null heißt: Status
+// fehlen noch, der Text sagt was – neutral, keine Warnung.
+function meldeZeile(m){
+  if(!m || !m.pl) return "";
+  const gf = (m.grenzfaelle||[]).length
+    ? ` · <span title="U21-Grenze unsicher (Geburtsdatum ±1 Jahr): ${escAttr(m.grenzfaelle.join(", "))}">${m.grenzfaelle.length} Grenzfall${m.grenzfaelle.length>1?"e":""}</span>` : "";
+  return `<div class="tmelde${m.pl.ok===false?" riss":""}">
+      <span class="tmlab">Meldeliste</span> ${esc2(m.pl.text)}${gf}</div>${
+      m.cl && m.cl.text ? `<div class="tmelde cl">${esc2(m.cl.text)}</div>` : ""}`;
+}
+// Meldestatus eines Spielers: fertiger Text aus dem Backend, Grenzfall dazu
+// „Ausgebildet im Land (15–21)" -> „Land (15–21)": für die CL zählt genau das Detail
+const hgKurz = t => String(t||"").replace(/^Ausgebildet im /, "");
+const PL_FARBE = {heimisch:"var(--pos)", u21:"var(--pos)", braucht_platz:"var(--text)", unbekannt:"var(--dim)"};
+const plZelle = s => !s.pl_text ? `<span class="cmleer">–</span>`
+  : `<span style="font-size:12px;color:${PL_FARBE[s.pl_status]||"var(--text)"}">${esc2(s.pl_text)}</span>${
+      s.pl_grenzfall ? ` <span class="rbadge" title="U21-Grenze unsicher – Geburtsdatum fehlt, ±1 Jahr">Grenzfall</span>` : ""}`;
 
 function tactPick(k){ TACT_SLOT=k; TACT_PID=null; drawTactic(document.getElementById("tableHost")); }
 function tactPlayer(id){ TACT_PID = (TACT_PID===id?null:id); drawTactic(document.getElementById("tableHost")); }
@@ -1893,6 +2480,13 @@ function setReplAlle(v){ REPL_ALLE = (v==="alle"); REPL_PID=null; loadRepl(); }
 function setReplNurChar(on){ REPL_NUR_CHAR = !!on; REPL_PID=null; loadRepl(); }
 function setReplMin(v){ REPL_MIN=+v; REPL_PID=null; loadRepl(); }
 function replPick(id){ REPL_PID = (REPL_PID===id?null:id); drawRepl(); }
+// Kandidat aus der Ersatzsuche in den Slot-Vergleich legen (oder wieder heraus)
+function replVergleich(id){
+  if(REPL_FOR) CMP_SLOT = REPL_FOR.slot;
+  const c = REPL && REPL.treffer ? REPL.treffer.find(t=>t.id===id) : null;
+  if(COMPARE.includes(id)) removeCompare(id); else addCompare(id, c ? c.name : null);
+  drawRepl();
+}
 
 const replVal = v => v==null ? "" :
   (v>=1e6 ? (v/1e6).toFixed(1).replace(".",",")+" M€" : Math.round(v/1e3)+" k€");
@@ -1902,9 +2496,13 @@ const replNum = (t,v) => v==null ? "–"
 function drawRepl(){
   const box = document.getElementById("replBox");
   const slot = TACT && TACT.slots.find(s=>s.key===(REPL_FOR&&REPL_FOR.slot));
+  // Liegen Kandidaten im Vergleich, führt ein Knopf direkt hinein – die
+  // Vergleichsleiste selbst liegt unter diesem Fenster.
+  const vglKnopf = COMPARE.length && REPL_FOR
+    ? `<button class="wbtn on" onclick="openCompare('${REPL_FOR.slot}')">Vergleichen (${COMPARE.length})</button>` : "";
   const kopf = `<div class="dhead">
       <h2>Ersatz suchen${slot?` – ${esc2(slot.label)}`:""}</h2>
-      <button class="xbtn" onclick="closeRepl()">✕</button></div>`;
+      ${vglKnopf}<button class="xbtn" onclick="closeRepl()">✕</button></div>`;
   if(!REPL){
     box.innerHTML = kopf + `<div class="empty"><span class="spin"></span>
       suche im gesamten Datenbestand…</div>`;
@@ -1932,7 +2530,8 @@ function drawRepl(){
       c.stand ? `<span class="muted" title="Import-Datum dieser Zeile">Stand ${String(c.stand).slice(8,10)}.${String(c.stand).slice(5,7)}.</span>` : ""
     ].filter(Boolean).join(" · ");
     const det = c.id===REPL_PID
-      ? `<tr class="rdet"><td colspan="10">${replDetail(c)}</td></tr>` : "";
+      ? `<tr class="rdet"><td colspan="11">${replDetail(c)}</td></tr>` : "";
+    const imVgl = COMPARE.includes(c.id);
     return `<tr class="${c.id===REPL_PID?"rsel":""}" onclick="replPick(${c.id})">
       <td>${scorePill(c)}</td>
       <td class="muted" style="font-family:var(--mono)">${c.fit??"–"}</td>
@@ -1950,7 +2549,11 @@ function drawRepl(){
       <td>${c.age==null?"–":Math.round(c.age)}${
         c.delta_age!=null&&c.delta_age<0?`<span class="muted" style="font-size:10px"> ${c.delta_age}</span>`:""}</td>
       <td class="muted">${Math.round(c.minutes||0)}</td>
-      <td class="info">${info}</td></tr>${det}`;
+      <td class="info">${info}</td>
+      <td class="vgl" onclick="event.stopPropagation()"><input type="checkbox"${imVgl?" checked":""}
+        aria-label="${esc2(c.name)} in den Slot-Vergleich" title="${imVgl
+        ? "aus dem Vergleich nehmen" : "in den Slot-Vergleich legen – gegen Stamm und Backup"}"
+        onchange="replVergleich(${c.id})"></td></tr>${det}`;
   }).join("");
 
   const leer = `<div class="empty" style="padding:26px 8px">
@@ -1986,6 +2589,7 @@ function drawRepl(){
         <th style="text-align:left">Spieler</th>
         <th title="Positionen, die er heute schon spielt">Pos</th>
         <th>Alter</th><th>Min</th><th style="text-align:left">Verein / Wert</th>
+        <th title="In den Slot-Vergleich legen – bis zu drei Kandidaten gegen Stamm und Backup">Vgl</th>
       </tr></thead><tbody>${zeilen}</tbody></table>
       <div class="muted" style="font-size:11px;margin-top:8px">
         Zeile anklicken: Kennzahl für Kennzahl gegen ${esc2(o.name)}.</div>` : leer);
@@ -2058,6 +2662,8 @@ function replDetail(c){
 document.addEventListener("keydown", e=>{
   if(e.key!=="Escape") return;
   if(CTX){ closeCtx(); return; }
+  // Der Vergleich liegt über der Ersatzsuche und schließt zuerst
+  if(cmpOffen()){ closeCompare(); return; }
   const m = document.getElementById("replModal");
   if(m && m.classList.contains("on")) closeRepl();
 });
@@ -2359,6 +2965,7 @@ async function loadData(){
     // Zustand des Fair-Value-Modells (Minutenschwelle für den Hinweis im
     // Preislot). Fehlt er, bleibt die geplante Vorgabe stehen.
     if(res.value_model && res.value_model.threshold) FAIR_MIN_MIN = res.value_model.threshold;
+    VALUE_MODEL = res.value_model || null;
     st.textContent = SRC==="pool"
       ? `Pool: ${res.count} Spieler aus ${res.snapshots} Scans`
       : `${res.count} Spieler aus letztem Snapshot (${res.snapshots} gespeichert)`;
@@ -2457,23 +3064,31 @@ function metricBars(p, cohort){
 // Fehlt der Marktwert oder trägt das Modell nicht, entfällt der Block
 // vollständig (Abwesenheit statt Platzhalter).
 function preislot(p){
-  if(p.value_m==null || p.fair_value_m==null || p.value_delta_pct==null) return "";
-  const max = Math.max(p.value_m, p.fair_value_m) || 1;
-  const d = p.value_delta_pct;
-  const farbe = d>0 ? "var(--pos)" : d<0 ? "var(--neg)" : "var(--text)";
+  const markt = marktMio(p);
+  const abl = p.transfer_fee!=null ? p.transfer_fee/1e6 : null;     // D2
+  // Torhüter: Marktwert (und Ablöse) ja, Fair Value bewusst nicht
+  if(p.fair_urteil==null && !(p.is_gk && markt!=null)) return "";
+  const fair = p.fair_urteil==null ? null : p.fair_value_m;
+  const max = Math.max(markt||0, fair||0, abl||0) || 1;
+  const kl = urteilKlasse(p);
+  const farbe = /u-.unter/.test(kl) ? "var(--pos)" : /u-.ueber/.test(kl) ? "var(--neg)" : "var(--muted)";
   const balken = (label, wert, col) => `<div class="pbar">
        <span class="plab">${label}</span>
        <div class="ptrack"><i style="width:${Math.max(1,Math.round(100*wert/max))}%;background:${col}"></i></div>
        <span class="tval">${fmtMio(wert)}</span></div>`;
-  const wort = d>0 ? "unterbewertet" : d<0 ? "überbewertet" : "marktgerecht";
-  const vz = d>0 ? "+" : d<0 ? "−" : "±";
   return `<div class="dsec">Preislot</div>
    <div class="lot">
-     ${balken("Marktwert", p.value_m, "var(--blue)")}
-     ${balken("Fair Value", p.fair_value_m, farbe)}
-     <div class="lotdelta" style="color:${farbe}">${vz}${Math.abs(d).toLocaleString("de-DE")} % ${wort}</div>
-     <div class="lotnote">geschätzt aus Leistung, Alter, Liga und Position</div>
-     ${p.value_reliable ? "" : `<div class="lotwarn">unsichere Stichprobe (&lt; ${FAIR_MIN_MIN} Min.)</div>`}
+     ${markt!=null ? balken("Marktwert", markt, "var(--blue)") : ""}
+     ${fair!=null ? balken("Fair Value", fair, p.value_reliable===false ? "var(--dim)" : farbe) : ""}
+     ${abl!=null ? balken(istEigen(p) ? "unsere Forderung" : "Ablöseforderung", abl, "var(--text)") : ""}
+     ${fair!=null ? `<div class="lotdelta"><span class="urteil ${kl}">${p.fair_urteil}</span>
+        <span class="muted" style="font-weight:400;font-size:11.5px">${fairSatz(p.value_delta_pct)}</span></div>
+     <div class="lotnote">Schätzwert aus Leistung, Alter, Liga und Position${
+        modellStatus() ? ` · Modell: ${modellStatus()}` : ""}.</div>
+     <div class="lotwarn">${esc2((VALUE_MODEL && VALUE_MODEL.hinweis)
+        || `Der Schätzwert liegt typischerweise um Faktor ${streuung()} neben dem Markt – das Urteil trennt nur Extremfälle.`)}</div>
+     ${p.value_reliable===false ? `<div class="lotwarn">unsichere Stichprobe (&lt; ${FAIR_MIN_MIN} Min.) – das Urteil behauptet nichts</div>` : ""}`
+     : `<div class="lotnote">${FAIR_LEER_GK}.</div>`}
    </div>`;
 }
 
@@ -2492,7 +3107,8 @@ function charakterBlock(p){
   const hin=(p.pers_hinweise||[]).map(h=>`<div class="lotnote">· ${esc2(h)}</div>`).join("");
   return `<div class="dsec">Persönlichkeit</div>
     <div style="font-size:12.5px;margin-bottom:4px"><b style="color:${persInk(p.pers_score)}">${esc2(p.pers_label)}</b>
-      <span class="muted">· ${esc2(p.pers_stufe)} ${p.pers_score}${p.pers_medien?` · Medien: ${esc2(p.pers_medien)}`:""}${stamm?` · ${stamm}`:""}</span></div>
+      <span class="muted">· ${esc2(p.pers_stufe)} ${p.pers_score}${
+        p.pers_stand?` · Stand ${monatJahr(p.pers_stand)}`:""}${p.pers_medien?` · Medien: ${esc2(p.pers_medien)}`:""}${stamm?` · ${stamm}`:""}</span></div>
     ${bar("Entwicklung", p.pers_dev)}${bar("Mentalität", p.pers_ment)}${hin}
     <div class="lotnote">aus der sichtbaren Beschreibung im Spielerprofil – kein Bestandteil des Scores</div>`;
 }
@@ -2532,6 +3148,9 @@ async function renderDetail(){
    <div class="dhead"><h2>${p.name}</h2>${sc}<button class="xbtn" onclick="closeAll()">✕</button></div>
    <div class="dsub">${p.profile_label||"?"} · ${p.pos_label||"?"} · ${p.age?p.age+" J · ":""}${p.minutes||0} Min${p.value_m!=null?` · <b>${p.value_m} M€</b>`:""}${p.value_score!=null?` · Eff ${p.value_score}`:""} ·
      ${p.league?`${p.league} (K ${p.league_coeff})`:"Liga unbekannt"}${p.exp_at?` · <span title="Export-Stand">Export ${p.exp_at.slice(0,10)}</span>`:""}</div>
+   ${p.pl_text || p.homegrown ? `<div class="dhg" title="Bezogen auf unseren Verein zum Exportzeitpunkt">${
+      p.pl_text ? `Meldeliste · ${plZelle(p)}` : ""}${p.homegrown ? `<div class="muted">Eigengewächs: ${esc2(p.homegrown)}${
+      p.homegrown_stand ? ` · Stand ${datumKurz(p.homegrown_stand)}` : ""}</div>` : ""}</div>` : ""}
    ${preislot(p)}
    ${charakterBlock(p)}
    <div class="dsec">Merkliste</div>
@@ -2604,48 +3223,259 @@ async function saveNote(id){
   const api=API(); if(api) await api.watchlist_set(id, status, note);
 }
 
-// Blau / Orange / Violett – bewusst kein Grün-Rot-Paar: die drei bleiben auch
-// bei Farbsehschwäche auseinanderzuhalten und tragen auf hellem wie dunklem Grund.
-const CMP_COLORS=["#2f8fd8","#e08a1e","#8b5cc4"];
-function addCompare(id){
+// ======================= Slot-Vergleich =====================================
+// Die häufigste Frage im Scouting: „Wie steht Spieler X auf Position Y gegen
+// unsere Leute?" Spalten = Stamm und Backup der Position (vom Brett, Pins
+// eingeschlossen) plus bis zu drei Kandidaten; Zeilen = Leistung, die
+// Kennzahlen der Rolle, Preis, Profil. Gerechnet wird im Backend
+// (slot_compare) gegen dieselbe Referenz wie Brett und Ersatzsuche – Gesamt
+// ist die Brett-Zahl, sonst hieße „76" hier etwas anderes als auf dem Platz.
+// Kandidaten sammelt die Vergleichsleiste: aus Tabelle, Drawer, Ersatzsuche
+// oder direkt über das Suchfeld im Vergleich.
+let CMP = null, CMP_SLOT = null, CMP_Q = "", CMP_SEL = 0,
+    CMP_FOKUS = false;     // nach dem Hinzufügen zurück ins Suchfeld
+const CMP_NAMEN = {};      // Namen der Kandidaten, auch wenn sie nicht in PLAYERS stehen
+const SLOT_KEYS = ["tw","lv","ivl","ivr","rv","dml","dmr","aml","amc","amr","st"];
+const SLOT_NAMEN = {tw:"Torwart", lv:"Linksverteidiger", ivl:"Innenverteidiger links",
+  ivr:"Innenverteidiger rechts", rv:"Rechtsverteidiger", dml:"Sechser links",
+  dmr:"Sechser rechts", aml:"Linksaußen", amc:"Zehner", amr:"Rechtsaußen", st:"Sturmspitze"};
+const SLOT_KURZ = {tw:"TW", lv:"LV", ivl:"IV", ivr:"IV", rv:"RV", dml:"DM", dmr:"DM",
+  aml:"IAS", amc:"OM", amr:"IAS", st:"ST"};
+const SLOT_GRUPPE = {tw:"tw", lv:"def", ivl:"def", ivr:"def", rv:"def", dml:"mid",
+  dmr:"mid", aml:"off", amc:"off", amr:"off", st:"st"};
+const slotName = k => (TACT && (TACT.slots.find(s=>s.key===k)||{}).label) || SLOT_NAMEN[k] || k;
+const slotKurz = k => (TACT && (TACT.slots.find(s=>s.key===k)||{}).kurz) || SLOT_KURZ[k] || k;
+const spielerVon = id => PLAYERS.find(q=>q.id===id) || PLAYERS.find(q=>q.eid && +q.eid===+id);
+
+// Startvorschlag für die Position – nur ein Vorschlag, im Fenster umstellbar.
+function slotFuer(p){
+  if(!p) return null;
+  if(p.is_gk) return "tw";
+  const l = String(p.pos_label||"").split(",")[0].trim();
+  const links = /links/i.test(p.foot||"");
+  return {TW:"tw", IV:links?"ivl":"ivr", LV:"lv", RV:"rv", AV:links?"lv":"rv",
+          DM:"dml", ZM:"dmr", OM:"amc", FL:links?"aml":"amr", ST:"st"}[l] || null;
+}
+function cmpSlotVorschlag(){
+  if(CMP_SLOT) return CMP_SLOT;
+  return slotFuer(COMPARE.length ? spielerVon(COMPARE[0]) : null) || TACT_SLOT || "st";
+}
+const cmpOffen = () => document.getElementById("cmpModal").classList.contains("on");
+
+function addCompare(id, name){
+  if(name) CMP_NAMEN[id] = name;
   if(!COMPARE.includes(id)){ if(COMPARE.length>=3) COMPARE.shift(); COMPARE.push(id); }
   renderCompareBar();
+  if(cmpOffen()) loadCompare();
 }
-function removeCompare(id){ COMPARE=COMPARE.filter(x=>x!==id); renderCompareBar(); }
+function removeCompare(id){
+  COMPARE=COMPARE.filter(x=>x!==id); renderCompareBar();
+  if(cmpOffen()) loadCompare();
+}
 function renderCompareBar(){
   const bar=document.getElementById("compareBar");
   if(!COMPARE.length){ bar.classList.remove("on"); bar.innerHTML=""; return; }
-  const chips=COMPARE.map((id,i)=>{
-    const p=PLAYERS.find(q=>q.id===id);
-    return `<span class="chip"><span class="dotc" style="background:${CMP_COLORS[i]}"></span>${p?p.name:id}<i onclick="removeCompare(${id})">✕</i></span>`;
+  const chips=COMPARE.map(id=>{
+    const p=spielerVon(id);
+    return `<span class="chip">${esc2(p?p.name:(CMP_NAMEN[id]||String(id)))}<i onclick="removeCompare(${id})" title="aus dem Vergleich nehmen">✕</i></span>`;
   }).join("");
-  bar.innerHTML=`${chips}<button ${COMPARE.length<2?"disabled":""} onclick="openCompare()">Vergleichen (${COMPARE.length})</button>
+  bar.innerHTML=`${chips}<button onclick="openCompare()">Vergleichen</button>
+    <span class="cmpos">auf ${esc2(slotName(cmpSlotVorschlag()))} · gegen Stamm und Backup</span>
     <button class="xbtn" onclick="COMPARE=[];renderCompareBar()">leeren</button>`;
   bar.classList.add("on");
 }
-function openCompare(){
-  const ps=COMPARE.map(id=>PLAYERS.find(q=>q.id===id)).filter(Boolean);
-  if(ps.length<2) return;
-  const mets = ps.every(p=>p.is_gk) ? DETAIL_METRICS_GK : DETAIL_METRICS_FIELD;
-  const legend=ps.map((p,i)=>`<span><span class="dotc" style="background:${CMP_COLORS[i]}"></span>${p.name}
-    <span class="muted">(${p.profile_label||"?"} · Score ${p.score??"–"})</span></span>`).join("");
-  const body=mets.map(([k,l,inv])=>{
-    const rows=ps.map((p,i)=>{
-      const pct=pctOf(cohortFor(p).map(q=>+q[k]||0), +p[k]||0, inv);
-      const r=pct==null?null:Math.round(pct);
-      return `<div class="cmpbar"><span class="plab">${i===0?l:""}</span>
-        <div class="ptrack"><i style="width:${r??0}%;background:${CMP_COLORS[i]}"></i></div>
-        <b>${r??"–"}</b></div>`;
-    }).join("");
-    return `<div style="margin-bottom:8px">${rows}</div>`;
-  }).join("");
-  document.getElementById("cmpBox").innerHTML=`<div class="dhead">
-    <h2>Vergleich – Perzentile je eigener Positionsgruppe</h2>
-    <button class="xbtn" onclick="closeCompare()">✕</button></div>
-    <div class="legend">${legend}</div>${body}`;
+async function openCompare(slotKey){
+  CMP_SLOT = slotKey || cmpSlotVorschlag();
+  CMP_Q = ""; CMP_SEL = 0;
   document.getElementById("cmpModal").classList.add("on");
+  await loadCompare();
 }
-function closeCompare(){ document.getElementById("cmpModal").classList.remove("on"); }
+async function loadCompare(){
+  const api = API(); if(!api) return nurInApp();
+  CMP = null; drawCompare();
+  try{ CMP = await api.slot_compare(CMP_SLOT, COMPARE); }
+  catch(e){ CMP = {ok:false, error:String(e)}; }
+  drawCompare();
+}
+function setCmpSlot(k){ CMP_SLOT = k; renderCompareBar(); loadCompare(); }
+function closeCompare(){ document.getElementById("cmpModal").classList.remove("on"); CMP_Q=""; }
+
+// Der Vergleich rechnet wie das Brett, die Ersatzsuche ohne Moneyball-Score –
+// derselbe Kandidat kann dort eine andere Gesamtzahl tragen (FM Dev, D8).
+const GESAMT_VGL_TIP = "Wie auf dem Brett: Fit^0,35 × Score^0,35 × Charakter^0,30. "
+  + "Die Ersatzsuche rechnet ohne Moneyball-Score (Fit^0,7 × Charakter^0,3) – "
+  + "dort kann derselbe Kandidat eine andere Gesamtzahl haben; Fit und Umschulungsabzug sind gleich.";
+
+// ---- Bausteine der Matrix ----
+const cmpDelta = d => d==null ? `<span class="cmd"></span>`
+  : `<span class="cmd ${d>0?"pos":d<0?"neg":""}">${d>0?"+":d<0?"−":"±"}${Math.abs(d)}</span>`;
+const rohwert = t => t.wert==null ? "–" : t.format==="pct" ? Math.round(t.wert)+" %"
+  : t.format==="1f" ? (+t.wert).toFixed(1) : (+t.wert).toFixed(2);
+const fussKurz = f => (f||"").replace(/^Nur /,"nur ").replace(/^Rechts$/,"rechts")
+  .replace(/^Links$/,"links").replace(/^Beide$/,"beidfüßig").replace(/nur (R|L)/, (m,a)=>"nur "+a.toLowerCase());
+const datumKurz = s => s ? `${String(s).slice(8,10)}.${String(s).slice(5,7)}.${String(s).slice(0,4)}` : "–";
+
+function drawCompare(){
+  const box = document.getElementById("cmpBox");
+  box.classList.add("slotcmp");
+  const key = CMP_SLOT;
+  const slot = (CMP && CMP.ok && CMP.slot) || {label:slotName(key), kurz:slotKurz(key)};
+  const optionen = SLOT_KEYS.map(k=>`<option value="${k}"${k===key?" selected":""}>${esc2(slotName(k))}</option>`).join("");
+  const kopf = `<div class="cmhead">
+      <span class="cmtile" style="--grp:var(--pg-${SLOT_GRUPPE[key]||"mid"})">${esc2(slot.kurz||slotKurz(key))}</span>
+      <div class="cmtitel"><h2>${esc2(slot.label||slotName(key))}</h2>
+        <div class="dsub">${slot.rolle ? `${esc2(slot.rolle)} · ${esc2(slot.duty||"")} · ` : ""}Vergleich gegen Stamm und Backup</div></div>
+      <label class="status" style="display:flex;gap:6px;align-items:center">Position
+        <select onchange="setCmpSlot(this.value)">${optionen}</select></label>
+      <button class="xbtn" onclick="closeCompare()" title="schließen (Esc)">✕</button></div>`;
+  if(!CMP){ box.innerHTML = kopf + `<div class="empty" style="padding:36px 8px"><span class="spin"></span> rechne…</div>`; return; }
+  if(!CMP.ok){ box.innerHTML = kopf + `<div class="dsub" style="margin-top:14px">${esc2(CMP.error
+      || (CMP.kein_kader ? "Erst einen Kader auswählen." : "Kein Vergleich möglich."))}</div>`; return; }
+
+  const S = CMP.spieler;
+  const st = S.find(s=>s.rolle==="stamm");
+  let kn = 0;
+  S.forEach(s=>{ if(s.rolle==="kandidat") s._nr = ++kn; });
+  const platz = kn < 3;                                   // Suchspalte zeigen?
+  const zc = s => s.rolle==="stamm" ? ' class="stamm"' : "";
+  const leer = platz ? "<td></td>" : "";
+  const sektion = (t, sub) => `<tr class="cmsec"><td>${t}${sub?` <span style="text-transform:none;letter-spacing:0">· ${sub}</span>`:""}</td>${
+    S.map(s=>`<td${zc(s)}></td>`).join("")}${leer}</tr>`;
+  const zeile = (label, sub, fn) => `<tr><td>${label}${sub?`<small>${sub}</small>`:""}</td>${
+    S.map(s=>`<td${zc(s)}>${s.fehlt ? `<span class="cmleer">–</span>` : fn(s)}</td>`).join("")}${leer}</tr>`;
+
+  // Kopfzeile: Rolle, Name, Eckdaten; Kandidaten mit ✕
+  const kopfzellen = S.map(s=>{
+    const rolle = s.rolle==="stamm" ? `Stamm${s.gepinnt?"<em>manuell</em>":""}`
+      : s.rolle==="backup" ? "Backup" : `Kandidat ${s._nr}`;
+    // Zwei feste Zeilen (Verein / Alter · Fuß), damit alle Köpfe gleich hoch sind
+    const meta = `${esc2(s.club||"–")}<br>${[s.age!=null ? Math.round(s.age)+" J" : null,
+      fussKurz(s.foot)||null].filter(Boolean).map(esc2).join(" · ")}`;
+    const weg = s.rolle==="kandidat" && s.anfrage_id!=null
+      ? `<button class="cmweg" onclick="removeCompare(${s.anfrage_id})" title="aus dem Vergleich nehmen">✕</button>` : "";
+    return `<th${zc(s)}>${weg}<span class="cmrolle">${rolle}</span>
+      <div class="cmname">${esc2(s.name)}</div>
+      ${s.fehlt ? `${s.club ? `<div class="cmmeta">${esc2(s.club)}</div>` : ""}<div class="cmfehlt">${esc2(s.fehlt)}</div>`
+                : `<div class="cmmeta">${meta}</div>`}</th>`;
+  }).join("");
+  const suchkopf = platz ? `<th class="cmadd"><span class="cmrolle">+ Kandidat</span>
+      <div style="position:relative"><input id="cmpSuche" type="search" placeholder="Spieler aus Exporten…"
+        value="${esc2(CMP_Q)}" oninput="cmpSuche(this.value)" onkeydown="cmpSucheTaste(event)"
+        autocomplete="off"><div id="cmpSugg"></div></div></th>` : "";
+
+  // Leistung
+  const pill = s => s.gesamt==null ? `<span class="cmleer">–</span>` : scorePill({score:s.gesamt,
+    verlaesslich:s.verlaesslich ?? 1, minutes:s.minutes, charakter:s.charakter});
+  const dStamm = (s, k) => st && s!==st && s[k]!=null && st[k]!=null ? cmpDelta(s[k]-st[k]) : "";
+  let html = sektion("Leistung", "Δ gegen den Stamm")
+    + zeile(`<span title="${GESAMT_VGL_TIP}">Gesamt</span>`, "Fit · Score · Charakter", s=>`<div class="cmkpi" style="gap:9px">${pill(s)}${dStamm(s,"gesamt")}</div>`)
+    + zeile("Fit auf der Position", "nach Abzug für Umschulung", s=>`<span class="cmwert">${s.fit??"–"}</span>${
+        s.abzug ? `<span class="rbadge um" title="Spielt bisher: ${esc2(s.umschulung||"")}">umschulen −${s.abzug}</span>` : ""}`)
+    + zeile("Score", "Moneyball, stilneutral", s=>`<span class="cmwert">${s.mb??"–"}</span>`)
+    + zeile("Charakter", "sichtbare Persönlichkeit", s=>s.pers_score==null
+        ? `<span class="cmleer" title="Persönlichkeit noch nicht gescoutet">ungescoutet</span>`
+        : `<span style="color:${persInk(s.pers_score)}" title="${persTip(s)}">${esc2(persKurz(s.pers_label))}</span> <span class="cmraw" style="display:inline">${s.pers_score}</span>`);
+
+  // Rolle: Kennzahlen in der Reihenfolge des Stamms (sonst des ersten mit Daten)
+  const basis = (st && st.teile && st.teile.length ? st : S.find(s=>(s.teile||[]).length)) || {teile:[]};
+  const stats = basis.teile.map(t=>t);
+  html += sektion(`Rolle · ${esc2(slot.rolle||slot.label||"")}`, "Perzentil · Δ · Rohwert");
+  stats.forEach(b=>{
+    html += zeile(esc2(b.label), `Gewicht ${Math.round((b.gewicht||0)*100)} %`, s=>{
+      const t = (s.teile||[]).find(x=>x.stat===b.stat);
+      if(!t || t.pct==null) return `<span class="cmleer">–</span>`;
+      const col = t.pct>=50 ? "var(--heat-pos)" : "var(--heat-neg)";
+      const ref = st && s!==st ? (st.teile||[]).find(x=>x.stat===b.stat) : null;
+      return `<div class="cmkpi"><span class="cmtrack"><i style="width:${Math.max(1,t.pct)}%;background:rgba(${col},.85)"></i></span>
+        <b>${t.pct}</b>${cmpDelta(ref && ref.pct!=null ? t.pct-ref.pct : null)}</div><div class="cmraw">${rohwert(t)}</div>`;
+    });
+  });
+  html += zeile("Bilanz", st ? `gegen ${esc2(st.name)}` : "", s=>{
+    if(!st || s===st) return `<span class="cmraw" style="font-size:11px">Messlatte</span>`;
+    let n=0, besser=0, gw=0, gwB=0;
+    stats.forEach(b=>{
+      const t=(s.teile||[]).find(x=>x.stat===b.stat), r=(st.teile||[]).find(x=>x.stat===b.stat);
+      if(!t || !r || t.pct==null || r.pct==null) return;
+      n++; gw += b.gewicht||0;
+      if(t.pct>r.pct){ besser++; gwB += b.gewicht||0; }
+    });
+    if(!n) return `<span class="cmleer">–</span>`;
+    return `<div class="cmbilanz"><b>${besser}</b> von ${n} besser</div>
+      <div class="cmraw">${Math.round(100*gwB/(gw||1))} % des Gewichts</div>`;
+  });
+
+  // Preis
+  const istGk = key==="tw";
+  html += sektion("Preis", istGk ? "Fair Value bei Torhütern nicht aussagekräftig" : "Markt gegen Schätzwert aus Leistung");
+  html += zeile("Marktwert", "", s=>`<span class="cmwert">${fmtMio(marktMio(s))}</span>`)
+    + zeile("Fair Value", "", s=>s.fair_urteil==null
+        ? `<span class="cmleer" title="${istGk?FAIR_LEER_GK:"kein Schätzwert"}">–</span>`
+        : `<span class="cmwert">${fmtMio(s.fair_value_m)}</span>`)
+    + zeile("Urteil", `Streuung ×${streuung()} – nur Extremfälle`, s=>s.fair_urteil==null ? `<span class="cmleer">–</span>`
+        : `<span class="urteil ${urteilKlasse(s)}" title="${esc2(s.fair_text||"")}">${s.fair_urteil}</span>
+           <div class="cmraw">${fairSatz(s.value_delta_pct)}${s.value_reliable===false?" · unsichere Stichprobe":""}</div>`)
+    + zeile("Ablöseforderung", "bei eigenen: unsere Forderung", s=>{
+        const eigen = s.rolle!=="kandidat" || s.im_kader;
+        if(s.transfer_fee===undefined) return `<span class="cmleer" title="kommt mit D2 aus dem Export">–</span>`;
+        if(s.transfer_fee==null) return `<span class="cmleer" title="${eigen
+          ? "Wir haben keine Forderung festgesetzt"
+          : "Der Verein hat keine Forderung festgesetzt – das heißt nicht, dass er unverkäuflich ist"}">keine festgesetzt</span>`;
+        return `<span class="cmwert">${fmtMio(s.transfer_fee/1e6)}</span>${eigen ? `<div class="cmraw">unsere Forderung</div>` : ""}`;
+      })
+    + zeile("Gehalt", "je Woche", s=>s.wage!=null
+        ? `<span class="cmwert">${Math.round(s.wage/1000).toLocaleString("de-DE")} k€</span>` : `<span class="cmleer">–</span>`);
+
+  // Profil
+  html += sektion("Profil")
+    + zeile("Alter", "", s=>`<span class="cmwert">${s.age!=null?Math.round(s.age):"–"}</span>`)
+    + zeile("Fuß", "", s=>esc2(fussKurz(s.foot)) || `<span class="cmleer">–</span>`)
+    + zeile("Spielzeit", "Saison, alle Wettbewerbe", s=>`<span class="cmwert">${Math.round(s.minutes||0).toLocaleString("de-DE")} Min</span>${
+        s.verlaesslich!=null ? `<div class="cmraw">Stichprobe ${Math.round(s.verlaesslich*100)} %</div>` : ""}`)
+    + zeile("Positionen", "laut Export", s=>s.position ? `<span style="font-size:12px">${esc2(s.position)}</span>` : `<span class="cmleer">–</span>`)
+    + zeile("Meldeliste", "Premier League, für uns", s=>plZelle(s)
+        + (s.homegrown ? `<div class="cmraw" title="${escAttr(s.homegrown)}">${esc2(hgKurz(s.homegrown))}</div>` : ""))
+    + zeile("Verein", "", s=>`${esc2(s.club||"–")}${s.league?`<div class="cmraw">${esc2(s.league)}</div>`:""}`)
+    + zeile("Datenstand", "Import", s=>`<span class="cmraw" style="font-size:11px">${datumKurz(s.stand)}</span>`);
+
+  box.innerHTML = kopf
+    + `<table class="cmx"><colgroup><col class="lab">${S.map(()=>'<col class="sp">').join("")}${platz?'<col class="sp">':""}</colgroup>
+       <thead><tr><th></th>${kopfzellen}${suchkopf}</tr></thead><tbody>${html}</tbody></table>
+       <div class="cmfuss">Δ = Abstand zum Stammspieler in Perzentilpunkten. Perzentile gegen
+         ${(CMP.vergleichsbasis||0).toLocaleString("de-DE")} Spieler, die diese Position spielen können.
+         Gesamt = Fit^0,35 × Score^0,35 × Charakter^0,30 – dieselbe Zahl wie auf dem Brett; ohne
+         gescoutete Persönlichkeit √(Fit × Score). Die Ersatzsuche rechnet ohne Score und kann für
+         denselben Kandidaten eine andere Gesamtzahl zeigen. Kandidaten kommen über das Suchfeld,
+         „+ zum Vergleich“ im Spielerbogen oder die Ersatzsuche dazu.</div>`;
+  if(platz && CMP_Q) cmpSuche(CMP_Q, true);
+  if(CMP_FOKUS){ const i = document.getElementById("cmpSuche"); if(i) i.focus(); CMP_FOKUS = false; }
+}
+
+// Suchfeld im Vergleich: Diakritika weggefaltet wie in der Dossier-Suche
+function cmpTreffer(q){
+  const n = cardNorm(q.trim());
+  if(n.length < 2) return [];
+  const drin = new Set((CMP && CMP.spieler || []).map(s=>+s.eid||s.id));
+  // Nur Spieler mit EID: ohne Export-Zeile kann das Backend nicht vergleichen
+  // („Nicht im Export …") – die Suche soll nicht in diese Sackgasse führen.
+  return PLAYERS.filter(p=>p.name && p.eid && cardNorm(p.name).includes(n) && !drin.has(+p.eid))
+    .sort((a,b)=>(b.minutes||0)-(a.minutes||0)).slice(0, 8);
+}
+function cmpSuche(q, still){
+  CMP_Q = q; if(!still) CMP_SEL = 0;
+  const host = document.getElementById("cmpSugg"); if(!host) return;
+  const t = cmpTreffer(q);
+  host.innerHTML = t.length ? `<div class="cmsugg">${t.map((p,i)=>
+    `<button class="${i===CMP_SEL?"on":""}" onmousedown="event.preventDefault();cmpNimm(${p.id})">${esc2(p.name)}
+      <span>${esc2(p.club||"")} · ${esc2(p.pos_label||"?")}</span></button>`).join("")}</div>` : "";
+}
+function cmpSucheTaste(e){
+  const t = cmpTreffer(CMP_Q);
+  if(e.key==="ArrowDown"){ CMP_SEL = Math.min(t.length-1, CMP_SEL+1); cmpSuche(CMP_Q, true); e.preventDefault(); }
+  else if(e.key==="ArrowUp"){ CMP_SEL = Math.max(0, CMP_SEL-1); cmpSuche(CMP_Q, true); e.preventDefault(); }
+  else if(e.key==="Enter" && t[CMP_SEL]){ cmpNimm(t[CMP_SEL].id); e.preventDefault(); }
+  else if(e.key==="Escape" && CMP_Q){ e.stopPropagation(); e.target.value=""; cmpSuche(""); }
+}
+function cmpNimm(id){ CMP_Q = ""; CMP_SEL = 0; CMP_FOKUS = true; addCompare(id); }
 
 function sortBy(k){ if(sortKey===k) sortDesc=!sortDesc; else {sortKey=k; sortDesc=true;} render(); }
 function applyRanking(){
