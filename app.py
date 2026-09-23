@@ -138,28 +138,54 @@ class Api:
             n += 1
         return n
 
-    def _ref_year(self, conn, players=None):
-        """Bezugsjahr fuers Alter. Der RAM liefert das GEBURTSJAHR, nicht das
-        Alter – ohne aktuelles Spieljahr ist es wertlos. Das Spieldatum selbst
-        liess sich im Speicher nicht isolieren (die haeufigsten Datumsangaben
-        sind Vertragsenden), deshalb kalibriert es sich an den Export-Altern:
-        Geburtsjahr + Alter = Jahr des Exports. Manuell ueberschreibbar ueber
-        die Einstellung season_year (0 = automatisch)."""
+    def _bezug(self, conn):
+        """Bezugsdatum fuers Alter: {"ref_year", "ref_day"} fuer moneyball.enrich.
+
+        Der RAM liefert das GEBURTSDATUM, nicht das Alter – ohne aktuelles
+        Spieldatum ist es wertlos. Das Spieldatum liess sich im Speicher nicht
+        isolieren (die haeufigsten Datumsangaben sind Vertragsenden), deshalb
+        kalibriert es sich an den Export-Altern (_kalibrieren). Manuell
+        ueberschreibbar ueber die Einstellung season_year (0 = automatisch)."""
         manual = int(db.get_setting(conn, "season_year", 0) or 0)
         if manual:
-            return manual
-        cand = []
-        if players:
-            exp = {int(e["eid"]): e.get("age") for e in db.load_export(conn)
-                   if e.get("eid") and e.get("age")}
-            for p in players:
-                a = exp.get(int(p["eid"])) if p.get("eid") else None
-                if a and p.get("birth_year"):
-                    cand.append(int(p["birth_year"]) + int(a))
-        if len(cand) >= 5:
-            cand.sort()
-            return cand[len(cand) // 2]
-        return int(db.get_setting(conn, "ref_year_cached", 0) or 0) or None
+            return {"ref_year": manual, "ref_day": None}
+        return {"ref_year": int(db.get_setting(conn, "ref_year_cached", 0) or 0) or None,
+                "ref_day": int(db.get_setting(conn, "ref_day_cached", 0) or 0) or None}
+
+    def _ref_year(self, conn):
+        """Nur das Bezugsjahr (fuer Aufrufer ausserhalb, etwa das Scoutkit)."""
+        return self._bezug(conn)["ref_year"]
+
+    def _kalibrieren(self, conn, geburt=None):
+        """Bezugsdatum aus RAM-Geburtsdaten und AKTUELLEN Export-Altern neu
+        bestimmen und merken (moneyball.bezugsdatum).
+
+        Frueher lief das nur beim RAM-Scan und nahm den Median ueber ALLE
+        Export-Zeilen – auch die aus Juli und August mit den Altern von damals.
+        Seit der Auto-Scan aus ist, stand das Bezugsjahr im September 2026 auf
+        2025, das Spiel war bei 2028: jede RAM-Zeile (Vergleichskohorte, Scan-
+        Zeilen der Spielertabelle) war drei Jahre zu jung, und die Altersbaender
+        von Talent-Board und "Fuer sein Alter stark" verrutschten. Jetzt zaehlen
+        nur Zeilen seit _pool_stand, und kalibriert wird auch bei jedem Import.
+        An Summer3 geprueft: 1.202 Spieler, compute_age trifft jedes Export-Alter.
+
+        geburt: {eid: (birth_year, birth_day)} aus einem Scan; None = aus dem
+        neuesten Snapshot (db.geburtsdaten), dann braucht es kein FM24.
+        """
+        if geburt is None:
+            geburt = db.geburtsdaten(conn)
+        export = [e for e in db.load_export(conn) if e.get("eid") and e.get("age")]
+        stand = self._pool_stand(conn)
+        if not stand and export:          # ohne Kader-Import: der letzte Importtag
+            stand = max(e.get("imported_at") or "" for e in export)[:10]
+        paare = [(*geburt[int(e["eid"])], e["age"]) for e in export
+                 if int(e["eid"]) in geburt
+                 and (e.get("imported_at") or "") >= (stand or "")]
+        jahr, tag = moneyball.bezugsdatum(paare)
+        if jahr:
+            db.set_setting(conn, "ref_year_cached", jahr)
+            db.set_setting(conn, "ref_day_cached", tag or 0)
+        return self._bezug(conn)
 
     def _add_scores(self, players, reference=None):
         """Moneyball-Scores: Perzentil-Basis ist der Pool PLUS die namenlose
@@ -168,14 +194,14 @@ class Api:
         'im 90. Perzentil' auch etwas. Liga-Koeffizienten kommen aus dem
         Export (EID-Join); Kohorten-Spieler haben keine EID -> Faktor 1.0."""
         conn = self._db()
-        ry = self._ref_year(conn)
+        bz = self._bezug(conn)
         if reference is None:
-            reference = moneyball.enrich(db.pool_players(conn), ref_year=ry)
+            reference = moneyball.enrich(db.pool_players(conn), **bz)
         if int(db.get_setting(conn, "cohort_on",
                               self.SETTING_DEFAULTS["cohort_on"])):
             cohort = db.cohort_load(conn)
             if cohort:
-                reference = list(reference) + moneyball.enrich(cohort, ref_year=ry)
+                reference = list(reference) + moneyball.enrich(cohort, **bz)
         leagues = {int(r["eid"]): r["league"]
                    for r in db.load_export(conn)
                    if r.get("eid") and r.get("league")}
@@ -210,13 +236,13 @@ class Api:
                 cur_max_min=cur, known=db.names_all(conn), meta=meta,
                 cohort_min_minutes=cmin,
                 hot_regions=self._hot_regions, full_sweep=full)
-            ref = self._ref_year(conn, raw)
-            if ref:
-                db.set_setting(conn, "ref_year_cached", ref)
-            meta["ref_year"] = ref
-            players = moneyball.enrich(raw, ref_year=ref)
-            if meta.get("cohort"):          # Kohorte braucht dasselbe Bezugsjahr
-                meta["cohort"] = moneyball.enrich(meta["cohort"], ref_year=ref)
+            geburt = {int(p["eid"]): (p["birth_year"], p.get("birth_day"))
+                      for p in raw if p.get("eid") and p.get("birth_year")}
+            bz = self._kalibrieren(conn, geburt) if geburt else self._bezug(conn)
+            meta["ref_year"] = bz["ref_year"]
+            players = moneyball.enrich(raw, **bz)
+            if meta.get("cohort"):          # Kohorte braucht dasselbe Bezugsdatum
+                meta["cohort"] = moneyball.enrich(meta["cohort"], **bz)
             self._hot_regions = meta.pop("hot_regions", None) or self._hot_regions
             meta["names_new"] = db.names_learn(conn, meta.get("names_ram") or {},
                                                meta.get("eids_ram"))
@@ -372,12 +398,12 @@ class Api:
         Ziele, die FM nicht in den RAM laedt) kommen als vollwertige Eintraege
         mit Score dazu. mode='last'=letzter Snapshot, 'pool'=akkumuliert."""
         conn = self._db()
-        ry = self._ref_year(conn)
+        bz = self._bezug(conn)
         raw = db.pool_players(conn) if mode == "pool" else db.latest_players(conn)
         exp = db.load_export(conn)
         exp_by_eid = {int(e["eid"]): e for e in exp if e.get("eid")}
         aus_export = self._merge_export_stats(raw, exp_by_eid)
-        players = moneyball.enrich(raw, ref_year=ry)
+        players = moneyball.enrich(raw, **bz)
         for p in players:
             p.setdefault("id", p.get("player_id"))
             p["source"] = "ram"
@@ -401,7 +427,7 @@ class Api:
                               is_gk=pos.strip().startswith("TW"),
                               pos_mask=moneyball.pos_mask_from_string(pos),
                               source="export", exp_at=e.get("imported_at")))
-        players += moneyball.enrich(extra, ref_year=ry)
+        players += moneyball.enrich(extra, **bz)
         # Der RAM fuehrt je Wettbewerb einen eigenen Datensatz; gewinnt der
         # Export, tragen alle Datensaetze desselben Spielers dieselben Zahlen
         # und standen in der Tabelle doppelt und dreifach (Christensen zweimal
@@ -472,8 +498,7 @@ class Api:
             min_minutes = int(db.get_setting(conn, "sig_min_minutes",
                                              self.SETTING_DEFAULTS["sig_min_minutes"]))
         min_minutes = max(180, int(min_minutes))
-        players = moneyball.enrich(db.pool_players(conn),
-                                   ref_year=self._ref_year(conn))
+        players = moneyball.enrich(db.pool_players(conn), **self._bezug(conn))
         for p in players:
             p.setdefault("id", p.get("player_id"))
         self._add_scores(players, reference=players)
@@ -667,7 +692,9 @@ class Api:
                     or "Keine Spieler in der Datei gefunden."}
         conn = self._db()
         db.save_export(conn, players, felder, datei=os.path.basename(path))
-        return self._squad_from_players(conn, players)
+        res = self._squad_from_players(conn, players)
+        self._kalibrieren(conn)             # erst jetzt steht der neue _pool_stand
+        return res
 
     def import_squad(self):
         """Dialog: Export des EIGENEN Vereins waehlen -> das ist der Kader."""
@@ -713,7 +740,7 @@ class Api:
                     stat_stand=e.get("imported_at"), exp_at=e.get("imported_at"),
                     taken_at=e.get("imported_at"))     # "Stand" in der Ersatzsuche
 
-    def _kader_rows(self, conn, ry, eids):
+    def _kader_rows(self, conn, bz, eids):
         """Der eigene Kader als angereicherte Spieler – aus dem EXPORT.
 
         Bewusst nicht aus dem RAM: der Export ist der vollstaendige, aktuelle
@@ -723,7 +750,7 @@ class Api:
         """
         exp = {int(e["eid"]): e for e in db.load_export(conn) if e.get("eid")}
         rows = [self._export_row_to_player(exp[e]) for e in eids if e in exp]
-        return moneyball.enrich(rows, ref_year=ry)
+        return moneyball.enrich(rows, **bz)
 
     def tactic_board(self):
         """Je Position der Formation die passenden Kaderspieler mit Score und
@@ -733,12 +760,12 @@ class Api:
         eids = self._squad_eids(conn)
         if not eids:
             return {"ok": False, "kein_kader": True}
-        ry = self._ref_year(conn)
+        bz = self._bezug(conn)
         # Kader aus dem Export (siehe _kader_rows); id = EID, damit Brett,
         # Ersatzsuche und Formkurve denselben Schluessel benutzen.
-        kader = self._kader_rows(conn, ry, eids)
+        kader = self._kader_rows(conn, bz, eids)
         aus_export = len(kader)
-        kohorte = moneyball.enrich(db.cohort_load(conn), ref_year=ry)
+        kohorte = moneyball.enrich(db.cohort_load(conn), **bz)
         fehlt = len(eids) - len(kader)
         # Teamstaerke fuer den Carry-Zuschlag: aus den EXPORT-Zeilen, nicht aus
         # dem Kader – gebraucht werden die Schnitte FREMDER Vereine, und nur der
@@ -748,8 +775,7 @@ class Api:
         ligen = {int(e["eid"]): e["league"] for e in export
                  if e.get("eid") and e.get("league")}
         export_rows = moneyball.enrich(
-            [self._export_row_to_player(e) for e in export if e.get("eid")],
-            ref_year=ry)
+            [self._export_row_to_player(e) for e in export if e.get("eid")], **bz)
         # Vergleichsmenge fuer die Positions-Perzentile: ganzer Export PLUS
         # Kohorte. Frueher nur Kader + Kohorte ("die Kohorte reicht") – seit
         # dem Nachschaerfen des Torwarts reicht sie nicht mehr: Paraden je
@@ -830,11 +856,11 @@ class Api:
             k = next((c for c in s["kandidaten"] if c["id"] == s.get("startelf_id")), None)
             if k is not None:
                 elf[s["key"]] = k
-        ry = self._ref_year(conn)
+        bz = self._bezug(conn)
         export = db.load_export(conn)
         rows = moneyball.enrich([self._export_row_to_player(e) for e in export
-                                 if e.get("eid")], ref_year=ry)
-        referenz = rows + moneyball.enrich(db.cohort_load(conn), ref_year=ry)
+                                 if e.get("eid")], **bz)
+        referenz = rows + moneyball.enrich(db.cohort_load(conn), **bz)
         ligen = {int(e["eid"]): e["league"] for e in export
                  if e.get("eid") and e.get("league")}
         moneyball.add_scores(rows, referenz, ligen)
@@ -990,17 +1016,16 @@ class Api:
         key = (stand, eids, len(roh), max_at)
         if self._repl_cache and self._repl_cache[0] == key:
             return self._repl_cache[1:]
-        ry = self._ref_year(conn)
+        bz = self._bezug(conn)
         # ALLE Export-Zeilen anreichern: die Suchmenge sind nur die aktuellen,
         # die Vergleichsmenge fuer die Perzentile aber ganzer Export + Kohorte
         # – dieselbe wie im Taktikbrett (siehe dort, Torwart-Kennzahlen).
-        alle = moneyball.enrich([self._export_row_to_player(e) for e in roh],
-                                ref_year=ry)
+        alle = moneyball.enrich([self._export_row_to_player(e) for e in roh], **bz)
         pool = [p for p in alle
                 if not stand or (p.get("imported_at") or "") >= stand]
         ligen = {int(e["eid"]): e.get("league") for e in roh if e.get("league")}
         kader_ids = frozenset(p["id"] for p in pool if int(p["eid"]) in eids)
-        referenz = alle + moneyball.enrich(db.cohort_load(conn), ref_year=ry)
+        referenz = alle + moneyball.enrich(db.cohort_load(conn), **bz)
         moneyball.add_dna(pool, referenz, ligen)
         self._repl_cache = (key, pool, referenz, kader_ids)
         return pool, referenz, kader_ids
@@ -1092,6 +1117,7 @@ class Api:
         ts = _dt.now().isoformat(timespec="seconds")
         for name, players, felder in geparst:
             db.save_export(conn, players, felder, datei=name, ts=ts)
+        self._kalibrieren(conn)             # neue Export-Alter -> Bezugsdatum
         n = len({p["eid"] for _, players, _ in geparst for p in players})
         return {"ok": True, "count": n, "dateien": dateien,
                 "zeilen": sum(d["spieler"] for d in dateien), "fehler": fehler}

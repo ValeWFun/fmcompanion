@@ -112,6 +112,36 @@ def compute_age(birth_year, birth_day, ref_year, ref_day=None):
     return a if 10 <= a <= 60 else None
 
 
+def bezugsdatum(paare, min_anteil=0.10):
+    """(Spieljahr, Tag im Jahr) eines Exports aus RAM-Geburtsdaten und Export-Altern.
+
+    paare: [(birth_year, birth_day, export_alter)]. Fuer jeden Spieler ist
+    Geburtsjahr + Alter entweder das Spieljahr (Geburtstag schon gewesen)
+    oder das Jahr davor. Das Spieljahr ist deshalb der HOECHSTE Wert, den
+    mindestens min_anteil der Spieler tragen – der frueher benutzte Median
+    lag bei Summer3 (2027: 700 Spieler, 2028: 502) ein Jahr zu tief, und die
+    Rueckfallgrenze schuetzt vor Einzelfaellen mit falschem EID-Join.
+    Der Tag trennt beide Gruppen: wer das Spieljahr traegt, hatte schon
+    Geburtstag (birth_day <= Tag). Gewaehlt wird der Tag mit den wenigsten
+    Widerspruechen – damit stimmt compute_age auch vor dem Geburtstag.
+    -> (jahr, tag); (None, None) bei weniger als 5 Paaren, tag None ohne
+    Geburtstage.
+    """
+    from collections import Counter
+    gueltig = [(int(by), bd, int(a)) for by, bd, a in paare if by and a]
+    if len(gueltig) < 5:
+        return None, None
+    zaehl = Counter(by + a for by, _, a in gueltig)
+    jahr = max(w for w, n in zaehl.items() if n >= min_anteil * len(gueltig))
+    tage = [(int(bd), by + a == jahr) for by, bd, a in gueltig
+            if bd and by + a in (jahr, jahr - 1)]
+    if not tage:
+        return jahr, None
+    tag = min(range(1, 367), key=lambda t: sum((bd > t) if gehabt else (bd <= t)
+                                                for bd, gehabt in tage))
+    return jahr, tag
+
+
 def enrich(players, ref_year=None, ref_day=None):
     """Ergaenzt jeden Spieler um abgeleitete Moneyball-Kennzahlen.
 

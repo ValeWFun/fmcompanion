@@ -516,6 +516,24 @@ def latest_snapshot_id(conn):
     return row["id"] if row else None
 
 
+def geburtsdaten(conn):
+    """{eid: (birth_year, birth_day)} aus dem neuesten Snapshot.
+
+    Die Geburtsdaten stammen aus dem RAM und aendern sich nie – der letzte
+    Scan reicht, um das Bezugsjahr auch beim Import zu kalibrieren, ohne
+    dass FM24 laufen muss (app._kalibrieren)."""
+    sid = latest_snapshot_id(conn)
+    if sid is None:
+        return {}
+    rows = conn.execute(
+        "SELECT eid, birth_year, birth_day FROM player_stats "
+        "WHERE snapshot_id = ? AND eid IS NOT NULL AND birth_year IS NOT NULL",
+        (sid,)).fetchall()
+    return {int(r["eid"]): (int(r["birth_year"]),
+                            int(r["birth_day"]) if r["birth_day"] else None)
+            for r in rows if r["birth_year"]}
+
+
 def latest_players(conn):
     sid = latest_snapshot_id(conn)
     if sid is None:
