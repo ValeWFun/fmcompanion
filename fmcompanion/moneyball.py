@@ -325,8 +325,10 @@ RANKINGS = {
     "Kreativität (xA/90)": ("xa_p90", True),
     "Vorlagen/90": ("assists_p90", True),
     "Offensive Beteiligung/90": ("attack_p90", True),
-    "Ballgewinner (Zweikämpfe/90)": ("duels_p90", True),
-    "Zweikampfquote %": ("duel_pct", True),
+    # Zweikampf-Bestenliste ueber die gewonnenen Duelle/90 (Split-Half IV
+    # r 0,75). Die "Zweikampfquote %" stand hier auch – eine Rauschgroesse
+    # (r 0,01–0,10) gehoert nicht als Bestenliste heraus.
+    "Gewonnene Zweikämpfe/90": ("duels_p90", True),
     "Pressing-Monster (/90)": ("press_p90", True),
     "Progressive Pässe/90": ("prog_p90", True),
     "Schlüsselpässe/90": ("keyp_p90", True),
