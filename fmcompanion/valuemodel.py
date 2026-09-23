@@ -399,7 +399,7 @@ def score(model, rows):
             "value_reliable": bool(reliable),
             "fair_urteil": wort,
             "fair_text": (f"Markt {_mio(val)} / Fair {_mio(fair)} Mio – "
-                          f"{wort} ({delta:+d} %)"),
+                          f"{wort} ({delta:+d} %)".replace("-", "−")),
         }
     return out
 

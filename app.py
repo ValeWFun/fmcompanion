@@ -860,7 +860,9 @@ class Api:
                 "kader": len(kader), "ohne_daten": fehlt, "aus_export": aus_export,
                 "mit_form": len(form), "teams_bekannt": len(teams),
                 "export_positionen": sum(1 for p in kader if p.get("position")),
-                "meldeliste": melde}
+                "meldeliste": melde,
+                # Stand der Elf: nach Transfers veraltet der Kader-Import
+                "kader_stand": db.get_setting(conn, "squad_imported_at", "") or None}
 
     def registration(self):
         """Meldeliste des eigenen Kaders: PL-Zaehler (25/17/8, U21 frei),
@@ -911,7 +913,13 @@ class Api:
         zeilen = tactics.liga_vergleich(elf, pool, referenz, liga[0][0], verein,
                                         teams=tactics.team_strength(export),
                                         min_minutes=max(90, int(min_minutes)))
+        # stand = Grenze der Vergleichsmenge (Tooltip); daten_stand = neuester
+        # Import darin, kader_stand = Stand der eigenen Elf. Aus der Grenze
+        # allein las die Oberflaeche "Stand 19.09.", importiert war am 22.09.
         return {"ok": True, "liga": liga[0][0], "verein": verein, "stand": stand,
+                "daten_stand": max((p.get("imported_at") or "" for p in pool),
+                                   default="") or None,
+                "kader_stand": db.get_setting(conn, "squad_imported_at", "") or None,
                 "positionen": zeilen, "min_minutes": int(min_minutes)}
 
     # ------------------------------------------------ manuelle Aufstellung
@@ -1109,6 +1117,156 @@ class Api:
             res["stand"] = None if alle else self._pool_stand(conn)
             res["pool"] = len(pool)
         return res
+
+    VERGLEICH_MAX = 3          # so viele Kandidaten nimmt der Slot-Vergleich
+
+    def slot_compare(self, slot_key, player_ids=None):
+        """Slot-Vergleich: Stamm, Backup und bis zu drei Kandidaten auf EINER
+        Position nebeneinander – gegen dieselbe Referenz wie Brett und
+        Ersatzsuche (ganzer Export + Kohorte).
+
+        - Stamm = Brett-Elf samt Pins; Backup = bester Kaderspieler auf dem
+          Slot, der weder Stamm ist noch anderswo in der Elf steht.
+        - gesamt = Brett-Formel tactics.gesamt(fit, mb, charakter). Die
+          Ersatzsuche sortiert ohne Moneyball-Score – ihre Zahl ist deshalb
+          nicht dieselbe, fit und abzug aber schon.
+        - fit = Slot-Fit nach Umschulungsabzug (tactics.umschulung), wie in
+          der Ersatzsuche; Kaderspieler auf dem Brett haben keinen Abzug.
+        - player_ids wie in der Oberflaeche: EID (Brett, Ersatzsuche, Export-
+          Zeilen) oder RAM-player_id (ueber known_players in die EID
+          uebersetzt). Wer sich nicht bewerten laesst, kommt mit 'fehlt'
+          zurueck, statt still zu verschwinden.
+        """
+        slot = next((s for s in tactics.FORMATION if s["key"] == slot_key), None)
+        if slot is None:
+            return {"ok": False, "error": "Unbekannte Position."}
+        conn = self._db()
+        eids = self._squad_eids(conn)
+        if not eids:
+            return {"ok": False, "kein_kader": True}
+        brett = self.tactic_board()
+        if not brett.get("ok"):
+            return brett
+        bs = next(s for s in brett["slots"] if s["key"] == slot_key)
+        _, referenz, _ = self._repl_pool(conn)
+        nach_eid = {int(r["eid"]): r for r in referenz
+                    if r.get("source") == "export" and r.get("eid")}
+        export = db.load_export(conn)
+        teams = tactics.team_strength(export)
+        ligen = {int(e["eid"]): e["league"] for e in export
+                 if e.get("eid") and e.get("league")}
+        dists, basis = tactics.slot_dists(slot, referenz)
+        fair, _ = valuemodel.fair_values(export)
+
+        def zeile(rolle, r, w, anfrage_id=None, gepinnt=None):
+            e = int(r["eid"])
+            fv = fair.get(e) or {}
+            v = r.get("value")
+            z = {"rolle": rolle, "anfrage_id": anfrage_id, "id": e, "eid": e,
+                 "name": r.get("name"), "club": r.get("club"),
+                 "league": r.get("league"), "position": r.get("position"),
+                 "age": r.get("age"), "foot": r.get("foot"),
+                 "minutes": r.get("minutes"), "rating": r.get("rating"),
+                 "stand": r.get("imported_at"), "im_kader": e in eids,
+                 "charakter": r.get("pers_score"),
+                 "pers_hinweise": r.get("pers_hinweise") or [],
+                 "value_m": round(v / 1e6, 1) if v else None}
+            z.update(w)
+            for k in ("pers_label", "pers_score", "pers_stufe", "pers_dev",
+                      "pers_ment", "pers_medien", "pers_stand", "wage",
+                      "transfer_fee", "homegrown", "homegrown_stand",
+                      "pl_status", "pl_text", "pl_grenzfall"):
+                z[k] = r.get(k)
+            for k in ("fair_value_m", "value_delta_pct", "value_reliable",
+                      "fair_urteil", "fair_text"):
+                z[k] = fv.get(k)
+            if gepinnt is not None:
+                z["gepinnt"] = gepinnt
+            return z
+
+        def vom_brett(k):
+            return {"gesamt": k["score"], "fit": k["fit"], "mb": k.get("mb"),
+                    "abzug": 0, "umschulung": None, "teile": k.get("teile") or [],
+                    "verlaesslich": k.get("verlaesslich"), "carry": k.get("carry")}
+
+        # Kopien: die Zeilen stecken im Cache der Ersatzsuche
+        def kopie(e):
+            return dict(nach_eid[e]) if e in nach_eid else None
+
+        spieler, belegt = [], set()
+        stamm = next((k for k in bs["kandidaten"] if k["id"] == bs.get("startelf_id")), None)
+        backup = next((k for k in bs["kandidaten"]
+                       if k is not stamm and not k.get("gesetzt_auf")), None)
+        for rolle, k in (("stamm", stamm), ("backup", backup)):
+            if k is None or kopie(int(k["id"])) is None:
+                continue
+            r = kopie(int(k["id"]))
+            self._pl_markieren(conn, [r])
+            spieler.append(zeile(rolle, r, vom_brett(k),
+                                 gepinnt=bool(bs.get("gepinnt")) if rolle == "stamm" else None))
+            belegt.add(int(k["id"]))
+
+        # Kandidaten: in die EID aufloesen, gemeinsam gegen die Referenz scoren.
+        # `folge` haelt die Anfrage-Reihenfolge: (anfrage, Zeile) oder
+        # (anfrage, fertige fehlt-Zeile).
+        folge, offen = [], []
+        for anfrage in list(player_ids or [])[:self.VERGLEICH_MAX]:
+            try:
+                pid = int(anfrage)
+            except (TypeError, ValueError):
+                folge.append((anfrage, {"rolle": "kandidat", "anfrage_id": anfrage,
+                                        "id": None, "name": None,
+                                        "fehlt": "Ungültige Spieler-Id."}))
+                continue
+            e = pid if pid in nach_eid else None
+            if e is None:
+                row = conn.execute("SELECT eid FROM known_players WHERE player_id = ?",
+                                   (pid,)).fetchone()
+                if row and row["eid"] and int(row["eid"]) in nach_eid:
+                    e = int(row["eid"])
+            if e is None:
+                folge.append((anfrage, {"rolle": "kandidat", "anfrage_id": anfrage,
+                                        "id": pid, "name": None,
+                                        "fehlt": "Nicht im Export – nur Spieler aus einem "
+                                                 "importierten FM-Export lassen sich "
+                                                 "vergleichen."}))
+                continue
+            if e in belegt:
+                continue                  # schon Stamm, Backup oder doppelt angefragt
+            belegt.add(e)
+            r = kopie(e)
+            offen.append(r)
+            folge.append((anfrage, r))
+        if offen:
+            moneyball.add_scores(offen, referenz, ligen)   # mb wie auf dem Brett
+            self._pl_markieren(conn, offen)
+        for anfrage, r in folge:
+            if "fehlt" in r:
+                spieler.append(r)
+                continue
+            gruppen, _ = tactics.player_groups(r)
+            kosten, von = tactics.umschulung(gruppen, slot["gruppen"])
+            b = tactics.score_slot(r, slot, dists, teams) if kosten is not None else None
+            if kosten is None or b is None:
+                spieler.append({"rolle": "kandidat", "anfrage_id": anfrage,
+                                "id": int(r["eid"]), "eid": int(r["eid"]),
+                                "name": r.get("name"), "club": r.get("club"),
+                                "fehlt": ("Kann diese Position nicht spielen – keine "
+                                          "Umschulung möglich." if kosten is None else
+                                          "Zu wenige Kennzahlen für diese Position.")})
+                continue
+            fit = max(0, min(100, round(b["score"] - kosten)))
+            mb = r.get("score")
+            spieler.append(zeile("kandidat", r, {
+                "gesamt": tactics.gesamt(fit, mb, r.get("pers_score")),
+                "fit": fit, "mb": mb, "abzug": round(kosten),
+                "umschulung": None if not kosten else tactics.GROUP_LABEL.get(von, von),
+                "teile": b["teile"], "verlaesslich": b["verlaesslich"],
+                "carry": b["carry"]}, anfrage_id=anfrage))
+        return {"ok": True,
+                "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "duty")},
+                "vergleichsbasis": basis, "char_gewicht": tactics.CHAR_GEWICHT,
+                "spieler": spieler}
 
     def watchlist(self):
         return db.watchlist_all(self._db())
