@@ -771,6 +771,9 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None):
                 # Ablöseforderung (Euro, meist None) und Eigengewaechs-Status
                 "transfer_fee": p.get("transfer_fee"), "homegrown": p.get("homegrown"),
                 "homegrown_stand": p.get("homegrown_stand"),
+                # PL-Meldestatus bei uns (pl_markieren, vom Aufrufer gesetzt)
+                "pl_status": p.get("pl_status"), "pl_grenzfall": p.get("pl_grenzfall"),
+                "pl_text": p.get("pl_text"),
                 "archetypen": {k: _archetyp_pct(b["teile"], stats)
                                for k, stats in
                                ARCHETYPEN.get(slot["key"], {}).items()},
@@ -1212,6 +1215,8 @@ def find_replacements(slot, original, kandidaten, reference,
             "pers_stand": p.get("pers_stand"),
             "transfer_fee": p.get("transfer_fee"), "homegrown": p.get("homegrown"),
             "homegrown_stand": p.get("homegrown_stand"),
+            "pl_status": p.get("pl_status"), "pl_grenzfall": p.get("pl_grenzfall"),
+            "pl_text": p.get("pl_text"),
             "carry": b["carry"], "liga_koeff": b["liga_koeff"],
             "team_schnitt": b["team_schnitt"],
             "delta_score": score - ziel,
@@ -1244,3 +1249,121 @@ def find_replacements(slot, original, kandidaten, reference,
             "gefunden": len(treffer), "vergleichsbasis": basis,
             "min_minutes": min_minutes, "char_gewicht": CHAR_GEWICHT,
             "nur_charakter": bool(nur_charakter)}
+
+
+# ------------------------------------------------------------ Meldelisten
+# Premier League: hoechstens 25 Spieler ueber 21, davon hoechstens 17 nicht
+# heimisch; die Liste schrumpft auf 17 + Heimische, solange es weniger als 8
+# sind. U21 sind frei. Champions League, Liste A: 17 + bis zu 8 lokal
+# ausgebildete (davon hoechstens 4 "im Land"). Die CL-Zahl ist nur ein
+# Richtwert: FM zeigt im Export nicht zuverlaessig den staerksten Status –
+# United-Akademiespieler stehen immer mit "(0–21)" da, auch wenn sie das
+# UEFA-Fenster ab 15 erfuellen (Mainoo). Massgeblich bleibt der
+# Registrierungsbildschirm im Spiel.
+PL_MAX_KADER = 25
+PL_MAX_NICHT_HEIMISCH = 17
+PL_MIN_HEIMISCH = 8
+CL_MAX_LOKAL = 8
+CL_MAX_LAND = 4
+# ab diesem Tag im Jahr gilt ein Export fuer die Saison, die im selben Jahr
+# beginnt (Sommer-Exporte liegen bei Tag 134–139, Winter-Exporte bei 361–364
+# des Vorjahres bzw. frueh im Jahr; siehe moneyball.bezugsdatum)
+SAISON_AB_TAG = 121
+PL_TEXT = {"heimisch": "heimisch – kostet keinen Ausländerplatz",
+           "braucht_platz": "braucht Ausländerplatz",
+           "u21": "U21 – frei",
+           "unbekannt": "Eigengewächs-Status unbekannt"}
+
+
+def saisonstart(ref_year, ref_day=None):
+    """Startjahr der Saison, fuer die gemeldet wird.
+
+    Bis Ende April laeuft die Saison des Vorjahres (Winterfenster); ab Mai
+    wird fuer die Saison gemeldet, die in diesem Jahr beginnt. Ohne Tag
+    (manuelles season_year) gilt das Bezugsjahr selbst.
+    """
+    if not ref_year:
+        return None
+    return ref_year if (ref_day is None or ref_day >= SAISON_AB_TAG) else ref_year - 1
+
+
+def pl_status(p, start, seit=None, ref_year=None):
+    """PL-Meldestatus eines Spielers BEI UNS -> (status, grenzfall).
+
+    status: "u21", "heimisch", "braucht_platz" oder "unbekannt".
+    - U21: Geburtsjahr >= Saisonstart - 21. Das Geburtsjahr kommt aus dem RAM
+      (birth_year); fehlt es, aus dem Export-Alter – das laesst +-1 Jahr offen
+      (Geburtstag vor oder nach dem Export). Liegt die Grenze genau dazwischen,
+      ist es ein GRENZFALL und zaehlt vorsichtshalber als ueber 21.
+    - Heimisch: jeder homegrown-Wert (Verein wie Land). Er bezieht sich auf
+      den Verein des Nutzers zum Exportzeitpunkt und zaehlt deshalb nur mit
+      homegrown_stand ab `seit` (Vereinswechsel); ein Wert aus der Benfica-
+      Zeit sagt ueber United nichts. Ohne verwertbaren Stand: "unbekannt".
+    """
+    grenze = start - 21 if start else None
+    by = p.get("birth_year")
+    grenzfall = False
+    if grenze is not None and by:
+        u21 = int(by) >= grenze
+    elif grenze is not None and p.get("age") is not None and ref_year:
+        jahre = {ref_year - int(p["age"]) - 1, ref_year - int(p["age"])}
+        u21 = min(jahre) >= grenze
+        grenzfall = not u21 and max(jahre) >= grenze
+    else:
+        u21, grenzfall = False, True
+    if u21:
+        return "u21", False
+    stand = p.get("homegrown_stand")
+    if not stand or (seit and stand < seit):
+        return "unbekannt", grenzfall
+    return ("heimisch" if p.get("homegrown") else "braucht_platz"), grenzfall
+
+
+def pl_markieren(players, start, seit=None, ref_year=None):
+    """pl_status, pl_grenzfall und pl_text an jeden Spieler haengen (in place)."""
+    for p in players:
+        st, gf = pl_status(p, start, seit, ref_year)
+        p["pl_status"], p["pl_grenzfall"], p["pl_text"] = st, gf, PL_TEXT[st]
+    return players
+
+
+def meldeliste(kader, start, seit=None, ref_year=None):
+    """PL-Zaehler und CL-Richtwert fuer den eigenen Kader.
+
+    Grundlage des Winter-Scoutings: jeder Kandidat mit "heimisch" kostet
+    keinen der 17 Plaetze fuer Nicht-Heimische.
+    """
+    pl_markieren(kader, start, seit, ref_year)
+    zaehl = {s: sum(1 for p in kader if p["pl_status"] == s) for s in PL_TEXT}
+    heim = zaehl["heimisch"]
+    nicht = zaehl["braucht_platz"]
+    kader_max = PL_MAX_KADER - max(0, PL_MIN_HEIMISCH - heim)
+    ueber_21 = heim + nicht + zaehl["unbekannt"]
+    # CL Liste A: nur "(15–21)" zaehlt sicher als UEFA-ausgebildet
+    ueber = [p for p in kader if p["pl_status"] != "u21"]
+    hg = [p.get("homegrown") or "" for p in ueber if p["pl_status"] == "heimisch"]
+    verein = sum(1 for h in hg if "Verein" in h and "15" in h)
+    land = sum(1 for h in hg if "Land" in h and "15" in h)
+    pruefen = sum(1 for h in hg if "0–21" in h or "0-21" in h)
+    lokal = min(verein + min(land, CL_MAX_LAND), CL_MAX_LOKAL)
+    return {
+        "saisonstart": start, "u21_ab_jahrgang": start - 21 if start else None,
+        "pl": {"nicht_heimisch": nicht, "max_nicht_heimisch": PL_MAX_NICHT_HEIMISCH,
+               "heimisch": heim, "u21": zaehl["u21"], "unbekannt": zaehl["unbekannt"],
+               "ueber_21": ueber_21, "kader_max": kader_max,
+               "ok": nicht <= PL_MAX_NICHT_HEIMISCH and ueber_21 <= kader_max,
+               "text": (f"PL: {nicht}/{PL_MAX_NICHT_HEIMISCH} Nicht-Heimische über 21, "
+                        f"{heim} Heimische")},
+        "cl": {"verein_15": verein, "land_15": land, "pruefen_0_21": pruefen,
+               "liste_a_max": PL_MAX_NICHT_HEIMISCH + lokal,
+               "text": (f"CL Liste A: bis zu {PL_MAX_NICHT_HEIMISCH + lokal} Plätze "
+                        f"(Richtwert)" + (f", {pruefen} × „(0–21)“ im "
+                                          f"Registrierungsbildschirm prüfen"
+                                          if pruefen else ""))},
+        "grenzfaelle": [p.get("name") for p in kader if p["pl_grenzfall"]],
+        "spieler": [{"id": p.get("id"), "eid": p.get("eid"), "name": p.get("name"),
+                     "age": p.get("age"), "birth_year": p.get("birth_year"),
+                     "homegrown": p.get("homegrown"), "pl_status": p["pl_status"],
+                     "pl_grenzfall": p["pl_grenzfall"], "pl_text": p["pl_text"]}
+                    for p in kader],
+    }

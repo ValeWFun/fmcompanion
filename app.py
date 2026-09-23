@@ -187,6 +187,22 @@ class Api:
             db.set_setting(conn, "ref_day_cached", tag or 0)
         return self._bezug(conn)
 
+    def _meldebasis(self, conn, players, bz=None):
+        """(saisonstart, seit, ref_year) fuer die Meldeliste; ergaenzt fehlende
+        RAM-Geburtsjahre (Export-Zeilen tragen keine) NACH dem Anreichern,
+        damit das Export-Alter stehen bleibt."""
+        bz = bz or self._bezug(conn)
+        geburt = db.geburtsdaten(conn)
+        for p in players:
+            if not p.get("birth_year") and p.get("eid") and int(p["eid"]) in geburt:
+                p["birth_year"] = geburt[int(p["eid"])][0]
+        return (tactics.saisonstart(bz["ref_year"], bz["ref_day"]),
+                db.get_setting(conn, "own_club_seit", "") or None, bz["ref_year"])
+
+    def _pl_markieren(self, conn, players, bz=None):
+        """pl_status/pl_grenzfall/pl_text je Spieler (tactics.pl_status)."""
+        return tactics.pl_markieren(players, *self._meldebasis(conn, players, bz))
+
     def _add_scores(self, players, reference=None):
         """Moneyball-Scores: Perzentil-Basis ist der Pool PLUS die namenlose
         Vergleichskohorte aus dem RAM. Ohne sie rechnen die Perzentile gegen
@@ -470,6 +486,8 @@ class Api:
             for k in ("fair_value_m", "value_delta_pct", "value_reliable",
                       "fair_urteil", "fair_text"):
                 p[k] = fv[k] if fv else None
+        # Meldestatus bei UNS: heimisch / braucht Auslaenderplatz / U21
+        self._pl_markieren(conn, players, bz)
         return {"ok": True, "players": players, "count": len(players),
                 "snapshots": db.snapshot_count(conn), "exports": len(exp),
                 "aus_export": aus_export,
@@ -795,6 +813,10 @@ class Api:
         # Vereins-DNA gegen dieselbe Referenz wie die Positionsscores – nur so
         # liegen beide Zahlen auf einer Skala.
         moneyball.add_dna(kader, referenz, ligen)
+        # Meldeliste (PL-Zaehler, CL-Richtwert) – markiert zugleich jeden
+        # Kaderspieler mit pl_status, das Brett reicht es an die Kandidaten.
+        melde = tactics.meldeliste(kader, *self._meldebasis(conn, kader, bz))
+        melde.pop("spieler", None)
         slots = tactics.build_board(kader, referenz, teams=teams)
         # Brett-Zahl = geometrisches Mittel aus Fit (passt in den Slot), Score
         # (wie gut allgemein) und Charakter (Persoenlichkeit, tactics.gesamt).
@@ -837,7 +859,21 @@ class Api:
                 "char_gewicht": tactics.CHAR_GEWICHT,
                 "kader": len(kader), "ohne_daten": fehlt, "aus_export": aus_export,
                 "mit_form": len(form), "teams_bekannt": len(teams),
-                "export_positionen": sum(1 for p in kader if p.get("position"))}
+                "export_positionen": sum(1 for p in kader if p.get("position")),
+                "meldeliste": melde}
+
+    def registration(self):
+        """Meldeliste des eigenen Kaders: PL-Zaehler (25/17/8, U21 frei),
+        CL-Liste-A-Richtwert und Status je Spieler (tactics.meldeliste)."""
+        conn = self._db()
+        eids = self._squad_eids(conn)
+        if not eids:
+            return {"ok": False, "kein_kader": True}
+        bz = self._bezug(conn)
+        kader = self._kader_rows(conn, bz, eids)
+        res = tactics.meldeliste(kader, *self._meldebasis(conn, kader, bz))
+        res["ok"] = True
+        return res
 
     def league_comparison(self, min_minutes=450):
         """Eigene Elf je Position gegen die eigene Liga (tactics.liga_vergleich).
@@ -1027,6 +1063,7 @@ class Api:
         kader_ids = frozenset(p["id"] for p in pool if int(p["eid"]) in eids)
         referenz = alle + moneyball.enrich(db.cohort_load(conn), **bz)
         moneyball.add_dna(pool, referenz, ligen)
+        self._pl_markieren(conn, pool, bz)
         self._repl_cache = (key, pool, referenz, kader_ids)
         return pool, referenz, kader_ids
 
