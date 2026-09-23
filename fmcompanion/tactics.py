@@ -311,7 +311,7 @@ FORMATION = [
     },
     {
         "key": "dml", "label": "Sechser links", "kurz": "DM",
-        "rolle": "Defensives Mittelfeld", "duty": "Unterstützend",
+        "rolle": "Defensiver Mittelfeldspieler", "duty": "Unterstützend",
         "x": 38, "y": 55, "gruppen": ["dm", "zm"],
         "aufgaben": [
             "Abschirmen und zirkulieren – NICHT zwischen die Innenverteidiger "
@@ -330,7 +330,7 @@ FORMATION = [
     },
     {
         "key": "dmr", "label": "Sechser rechts", "kurz": "DM",
-        "rolle": "Defensives Mittelfeld", "duty": "Unterstützend",
+        "rolle": "Defensiver Mittelfeldspieler", "duty": "Unterstützend",
         "x": 62, "y": 55, "gruppen": ["dm", "zm"],
         "aufgaben": [
             "Abschirmen und zirkulieren",
@@ -347,7 +347,7 @@ FORMATION = [
     },
     {
         "key": "aml", "label": "Linksaußen", "kurz": "IAS",
-        "rolle": "Invertierter Außenstürmer", "duty": "Unterstützend",
+        "rolle": "Inverser Außenstürmer", "duty": "Unterstützend",
         "x": 18, "y": 33, "gruppen": ["oml", "ml"],
         "aufgaben": [
             "Auf den starken Fuß nach innen ziehen und SELBST abschließen – das "
@@ -368,7 +368,7 @@ FORMATION = [
     },
     {
         "key": "amc", "label": "Zehner", "kurz": "OM",
-        "rolle": "Offensives Mittelfeld", "duty": "Angreifend",
+        "rolle": "Offensiver Mittelfeldspieler", "duty": "Angreifend",
         "x": 50, "y": 36, "gruppen": ["omz"],
         "aufgaben": [
             "Verbindung zwischen Doppelsechs und Sturm",
@@ -387,7 +387,7 @@ FORMATION = [
     },
     {
         "key": "amr", "label": "Rechtsaußen", "kurz": "IAS",
-        "rolle": "Invertierter Außenstürmer", "duty": "Unterstützend",
+        "rolle": "Inverser Außenstürmer", "duty": "Unterstützend",
         "x": 82, "y": 33, "gruppen": ["omr", "mr"],
         "aufgaben": [
             "Auf den starken Fuß nach innen ziehen und selbst abschließen",
@@ -418,7 +418,7 @@ FORMATION = [
                      "duel_pct": 0.08, "duels_p90": 0.05},
         "blind": [
             "Das Anlaufen: die Sturmspitze hat keinen eingebauten Pressing"
-            "auftrag – wenn das wichtig ist, wäre der Pressingstürmer die Rolle.",
+            "auftrag – wenn das wichtig ist, wäre der Pressende Stürmer die Rolle.",
             "Läufe ohne Ball, die Räume öffnen, tauchen in keiner Zahl auf.",
         ],
     },
