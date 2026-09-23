@@ -1358,6 +1358,13 @@ def pl_status(p, start, seit=None, ref_year=None):
         jahre = {ref_year - int(p["age"]) - 1, ref_year - int(p["age"])}
         u21 = min(jahre) >= grenze
         grenzfall = not u21 and max(jahre) >= grenze
+    elif p.get("age") is not None:
+        # Ohne Bezugsdatum nur das Export-Alter: der Export liegt im Jahr des
+        # Saisonstarts oder im Jahr danach, das Geburtsjahr ist +-1 offen.
+        # Bis 20 ist ein Spieler sicher U21, ab 23 sicher nicht; 21 und 22
+        # sind Grenzfaelle – sonst stuende "Grenzfall" an jedem 28-Jaehrigen.
+        a = int(p["age"])
+        u21, grenzfall = a <= 20, a in (21, 22)
     else:
         u21, grenzfall = False, True
     if u21:

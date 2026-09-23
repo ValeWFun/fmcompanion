@@ -138,6 +138,8 @@ class Api:
             n += 1
         return n
 
+    BEZUG_VERSION = "2"        # Kalibrierung nach moneyball.bezugsdatum (Sept. 2026)
+
     def _bezug(self, conn):
         """Bezugsdatum fuers Alter: {"ref_year", "ref_day"} fuer moneyball.enrich.
 
@@ -149,6 +151,11 @@ class Api:
         manual = int(db.get_setting(conn, "season_year", 0) or 0)
         if manual:
             return {"ref_year": manual, "ref_day": None}
+        if db.get_setting(conn, "bezug_version", "") != self.BEZUG_VERSION:
+            # Einmal nachkalibrieren, wenn der Cache noch aus der alten Logik
+            # stammt (Median ueber alle Zeilen, 2025 statt 2028) – sonst
+            # stimmten Alter und U21-Grenze bis zum naechsten Import nicht.
+            self._kalibrieren(conn)
         return {"ref_year": int(db.get_setting(conn, "ref_year_cached", 0) or 0) or None,
                 "ref_day": int(db.get_setting(conn, "ref_day_cached", 0) or 0) or None}
 
@@ -172,6 +179,8 @@ class Api:
         geburt: {eid: (birth_year, birth_day)} aus einem Scan; None = aus dem
         neuesten Snapshot (db.geburtsdaten), dann braucht es kein FM24.
         """
+        # zuerst merken: _bezug ruft _kalibrieren, solange die Version fehlt
+        db.set_setting(conn, "bezug_version", self.BEZUG_VERSION)
         if geburt is None:
             geburt = db.geburtsdaten(conn)
         export = [e for e in db.load_export(conn) if e.get("eid") and e.get("age")]
@@ -940,6 +949,33 @@ class Api:
     # unser Scouting statt der Vereine (siehe tactics.cl_vergleich).
     CL_SETTING = "cl_referenz_vereine"
     CL_SOLL = 8
+    # Per Kader-Export erfasst? Sicheres Merkmal ist die Herkunftsdatei: eine
+    # Datei, in der ein Verein mindestens KADER_DATEI_MIN Spieler und die
+    # Mehrheit stellt (Team.html: 21 Man Utd + 8 Verliehene). Fuer Zeilen aus
+    # der Zeit vor der Import-Historie bleibt nur die Anzahl: so viele aktuelle
+    # Spieler eines Vereins kommen aus Scoutinglisten nicht zusammen (dort
+    # 4–13 je Verein).
+    KADER_DATEI_MIN = 15
+    KADER_MIN = 18
+
+    def _kader_vereine(self, conn, stand=None):
+        """Vereine, deren Kader per Export erfasst ist (siehe KADER_DATEI_MIN)."""
+        vereine = set()
+        for zaehl in db.import_vereine(conn, stand or "").values():
+            club, n = max(zaehl.items(), key=lambda kv: kv[1])
+            if n >= self.KADER_DATEI_MIN and 2 * n > sum(zaehl.values()):
+                vereine.add(club)
+        return vereine
+
+    def _cl_erfassung(self, conn, clubs):
+        """[{club, n, kader}] – n = Spieler im aktuellen Stand."""
+        from collections import Counter
+        stand = self._pool_stand(conn) or ""
+        n = Counter(e.get("club") for e in db.load_export(conn)
+                    if e.get("club") and (e.get("imported_at") or "") >= stand)
+        kader = self._kader_vereine(conn, stand)
+        return [{"club": c, "n": n.get(c, 0),
+                 "kader": c in kader or n.get(c, 0) >= self.KADER_MIN} for c in clubs]
 
     def _cl_liste(self, conn):
         import json
@@ -949,19 +985,18 @@ class Api:
             return []
 
     def cl_clubs(self):
-        """Gewaehlte CL-Vergleichsvereine plus Auswahl (Vereine im Export mit
-        Spielerzahl, aktuelle Zeilen zuerst gezaehlt)."""
+        """Gewaehlte CL-Vergleichsvereine plus Auswahl: Vereine im aktuellen
+        Stand mit Spielerzahl n und kader (per Kader-Export erfasst)."""
         from collections import Counter
         conn = self._db()
         stand = self._pool_stand(conn) or ""
-        export = db.load_export(conn)
-        aktuell = Counter(e.get("club") for e in export
+        aktuell = Counter(e.get("club") for e in db.load_export(conn)
                           if e.get("club") and (e.get("imported_at") or "") >= stand)
         eigener = db.get_setting(conn, "own_club", "") or ""
+        clubs = [c for c, _ in aktuell.most_common() if c != eigener]
         return {"ok": True, "vereine": self._cl_liste(conn), "soll": self.CL_SOLL,
                 "min_mit_daten": tactics.CL_MIN_VEREINE, "eigener": eigener,
-                "auswahl": [{"club": c, "n": n} for c, n in aktuell.most_common()
-                            if c != eigener]}
+                "auswahl": self._cl_erfassung(conn, clubs)}
 
     def set_cl_clubs(self, clubs):
         """CL-Vergleichsvereine festlegen (hoechstens CL_SOLL, ohne den eigenen)."""
@@ -994,9 +1029,17 @@ class Api:
         zeilen = tactics.cl_vergleich(b["elf"], b["pool"], b["referenz"], vereine,
                                       b["verein"], teams=b["teams"],
                                       min_minutes=max(90, int(min_minutes)))
-        return dict(b["kopf"], ok=True, vereine=[v for v in vereine if v != b["verein"]],
+        gewaehlt = [v for v in vereine if v != b["verein"]]
+        # Die Regel "6 von 8" sagt nur, OB Daten da sind – nicht, ob es die
+        # Stammspieler sind. Aus Scoutinglisten ist der beste Spieler eines
+        # Vereins oft nicht sein Stammspieler; das Banner "vorlaeufig" braucht
+        # deshalb, wer nur gescoutet ist.
+        erfassung = self._cl_erfassung(b["conn"], gewaehlt)
+        return dict(b["kopf"], ok=True, vereine=gewaehlt,
                     min_mit_daten=tactics.CL_MIN_VEREINE, positionen=zeilen,
-                    mit_aussage=sum(1 for z in zeilen if z["aussage"]))
+                    mit_aussage=sum(1 for z in zeilen if z["aussage"]),
+                    erfassung=erfassung,
+                    nur_gescoutet=sum(1 for e in erfassung if not e["kader"]))
 
     # ------------------------------------------------ manuelle Aufstellung
     # Pins: {slot_key: eid}. Die Automatik bleibt der Vorschlag, ein Pin

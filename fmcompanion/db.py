@@ -443,6 +443,23 @@ def export_verlauf(conn, eid):
     return [dict(r, felder=r["felder"].split(",")) for r in rows]
 
 
+def import_vereine(conn, seit=""):
+    """{import_id: {verein: anzahl}} fuer alle Importe ab `seit`, ohne den
+    uebernommenen Altbestand (dessen "Dateien" sind nur Zeitpunkte). Daraus
+    laesst sich ablesen, welche Datei ein Kader-Export war."""
+    if not _hat_tabelle(conn, "export_importe"):
+        return {}
+    out = {}
+    for r in conn.execute(
+            "SELECT i.id, s.club, COUNT(*) AS n FROM export_stand s "
+            "JOIN export_importe i ON i.id = s.import_id "
+            "WHERE i.imported_at >= ? AND (i.datei IS NULL OR i.datei != ?) "
+            "GROUP BY i.id, s.club", (seit or "", BESTAND_DATEI)).fetchall():
+        if r["club"]:
+            out.setdefault(r["id"], {})[r["club"]] = r["n"]
+    return out
+
+
 def export_stand_bis(conn, bis):
     """Der zusammengefuehrte Export-Stand, wie er zum Zeitpunkt `bis` war.
 
