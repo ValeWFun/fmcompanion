@@ -143,8 +143,11 @@ class Api:
 
     BEZUG_VERSION = "2"        # Kalibrierung nach moneyball.bezugsdatum (Sept. 2026)
 
-    def _bezug(self, conn):
+    def _bezug(self, conn, kalibrieren=True):
         """Bezugsdatum fuers Alter: {"ref_year", "ref_day"} fuer moneyball.enrich.
+
+        kalibrieren=False fuer rein lesende Aufrufer (Scoutkit): dann wird
+        nur gelesen, auch wenn der Cache noch aus der alten Logik stammt.
 
         Der RAM liefert das GEBURTSDATUM, nicht das Alter – ohne aktuelles
         Spieldatum ist es wertlos. Das Spieldatum liess sich im Speicher nicht
@@ -154,7 +157,7 @@ class Api:
         manual = int(db.get_setting(conn, "season_year", 0) or 0)
         if manual:
             return {"ref_year": manual, "ref_day": None}
-        if db.get_setting(conn, "bezug_version", "") != self.BEZUG_VERSION:
+        if kalibrieren and db.get_setting(conn, "bezug_version", "") != self.BEZUG_VERSION:
             # Einmal nachkalibrieren, wenn der Cache noch aus der alten Logik
             # stammt (Median ueber alle Zeilen, 2025 statt 2028) – sonst
             # stimmten Alter und U21-Grenze bis zum naechsten Import nicht.
@@ -1648,7 +1651,13 @@ def main():
         width=1280, height=820, min_size=(960, 600),
         background_color="#0b0e12",   # --bg (dunkel): kein heller Blitz beim Start
     )
-    webview.start(api._boot)
+    # pywebview 6 startet sonst im InPrivate-Modus (private_mode=True) und
+    # loescht den WebView-Datenordner beim Beenden – die Hell/Dunkel-Wahl und
+    # alles andere im localStorage ueberlebte keinen Neustart. Eigener Ordner
+    # unter %APPDATA%, damit nichts mit anderen pywebview-Apps geteilt wird.
+    speicher = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
+                            "FMCompanion", "webview")
+    webview.start(api._boot, private_mode=False, storage_path=speicher)
 
 
 if __name__ == "__main__":
