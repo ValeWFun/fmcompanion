@@ -2,6 +2,7 @@
 <html lang="de" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FM Companion</title>
 <style>
@@ -557,6 +558,21 @@
   .tcmp{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:11.5px}
   /* Umschalter unter „mein team": Brett | Ligavergleich */
   .tactnav{padding:14px 16px 0}
+  /* Rollenkürzel wie im Spiel (StS, BsV …): Groß-/Kleinschreibung bleibt */
+  .rkurz{display:inline-block;margin-left:6px;padding:0 5px;font-family:var(--mono);font-size:10px;
+    font-weight:500;letter-spacing:.04em;color:var(--muted);border:1px solid var(--border);vertical-align:1px}
+  .replrolle{font-size:12px;margin:-2px 0 6px}
+  /* Fuß zur Rolle im Slot-Vergleich: Grün passt, Violett dagegen – kein Rot */
+  .fusszeile{font-size:11px;margin-top:2px}
+  .fusszeile.fpasst{color:var(--pos)} .fusszeile.fgegen{color:var(--neg)}
+  .fusszeile.fneutral{color:var(--muted)}
+  /* Rückfrage beim Kader-Import (D10): Frage als Überschrift, Abbrechen gefüllt */
+  #rueckModal{z-index:30}
+  .rueckbox{width:560px}
+  .rueckbox h2{font-size:19px;line-height:1.3;margin:0 0 8px}
+  .rueckbox p{margin:0 0 10px;font-size:12.5px;line-height:1.5}
+  .rueckmeta{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:18px}
+  .rueckknoepfe{display:flex;gap:12px;align-items:center}
   /* Meldeliste am Brett (D4): eine Zeile unter dem Platz */
   .tmelde{font-family:var(--mono);font-size:10.5px;color:var(--text);margin-top:4px}
   .tmelde .tmlab{color:var(--muted);text-transform:uppercase;letter-spacing:.11em;font-size:9.5px;margin-right:4px}
@@ -1813,6 +1829,7 @@ async function importSquad(){
   const api = API(); if(!api) return nurInApp();
   const st = document.getElementById("status");
   let r; try{ r = await api.import_squad(); }catch(e){ r = {ok:false, error:String(e)}; }
+  if(r && r.rueckfrage === "vereinswechsel"){ kaderRueckfrage(r); return; }
   if(!r || !r.ok){ if(r && r.error) st.textContent = r.error; return; }
   st.textContent = `Kader importiert: ${r.anzahl} Spieler von ${r.verein}`
     + (r.verliehen ? ` · ${r.verliehen} verliehene ausgelassen` : "");
@@ -1993,7 +2010,7 @@ function drawTactic(host){
     </div>
     <div class="tactpanel">
       <div class="dsec" style="margin-top:0">${esc2(slot.label)}</div>
-      <div style="font-size:12.5px;margin-bottom:2px"><b>${esc2(slot.rolle)}</b>
+      <div style="font-size:12.5px;margin-bottom:2px"><b>${esc2(slot.rolle)}</b>${rolleKurz(slot)}
         <span class="muted">· ${esc2(slot.duty)}</span></div>
       <ul class="taufg">${slot.aufgaben.map(a=>`<li>${esc2(a)}</li>`).join("")}</ul>
       <div class="tcmp"><button class="wbtn" onclick="openCompare('${slot.key}')">Vergleichen…</button>
@@ -2133,9 +2150,9 @@ async function drawLigaHost(host){
     host.innerHTML = tactNav() + `<div class="empty"><span class="spin"></span> rechne CL-Vergleich…</div>`;
     try{ CLV = await api.cl_comparison(450); }catch(e){ CLV = {ok:false, error:String(e)}; }
     if(TACT_VIEW!=="liga" || LIGA_MASS!=="cl") return;
-    // Noch keine Vergleichsvereine: direkt zur Auswahl führen
-    if(CLV && CLV.keine_vereine && !CL_WAHL){ await clWahlOeffnen(); return; }
   }
+  // Noch keine Vergleichsvereine: direkt zur Auswahl – auch beim zweiten Mal
+  if(LIGA_MASS==="cl" && CLV && CLV.keine_vereine && !CL_WAHL){ await clWahlOeffnen(); return; }
   if(LIGA_MASS==="liga" && !LIGA){
     host.innerHTML = tactNav() + `<div class="empty"><span class="spin"></span> rechne Ligavergleich…</div>`;
     try{ LIGA = await api.league_comparison(450); }catch(e){ LIGA = {ok:false, error:String(e)}; }
@@ -2231,7 +2248,8 @@ function drawLiga(host){
     const ich = p.wert!=null ? `<b class="lme${!tr?" leer":d<0?" unter":""}" style="left:${X(p.wert)}%" title="${escAttr(
       `${L.verein}: ${fmtWert(p.wert)}`)}"></b>` : "";
     return `<tr class="${offen?"lsel":""}${tr?"":" duenn"}" onclick="ligaAuf('${p.key}')" title="Klick: Vereine auf dieser Position">
-      <td class="lname"><span class="ltile" style="--grp:var(--pg-${LIGA_GRUPPE[p.key]||"mid"})">${esc2(kurz(p))}</span></td>
+      <td class="lname"><span class="ltile" style="--grp:var(--pg-${LIGA_GRUPPE[p.key]||"mid"})"${
+        p.rolle ? ` title="${escAttr(p.rolle + (p.rolle_kurz ? ` (${p.rolle_kurz})` : ""))}"` : ""}>${esc2(kurz(p))}</span></td>
       <td class="lname"><div class="lpos">${esc2(p.label)}</div><div class="leig">${eig}</div></td>
       <td><span class="lwert">${fmtWert(p.wert)}</span></td>
       <td class="lname"><div class="lstrip">${striche}${linie}${ich}</div></td>
@@ -2369,6 +2387,57 @@ const plZelle = s => !s.pl_text ? `<span class="cmleer">–</span>`
   : `<span style="font-size:12px;color:${PL_FARBE[s.pl_status]||"var(--text)"}">${esc2(s.pl_text)}</span>${
       s.pl_grenzfall ? ` <span class="rbadge" title="U21-Grenze unsicher – Geburtsdatum fehlt, ±1 Jahr">Grenzfall</span>` : ""}`;
 
+// Rollenkürzel (D7) wie im Spiel, z.B. StS – nur an der Rolle, nie an der
+// Position: kurz (TW, IV, ST …) und rolle_kurz sind bei DM/IAS/OM gleich und
+// sähen nebeneinander doppelt aus.
+const rolleKurz = s => s && s.rolle_kurz && s.rolle_kurz !== s.kurz
+  ? ` <span class="rkurz" title="Rolle im Spiel">${esc2(s.rolle_kurz)}</span>` : "";
+// Fuß zur Rolle (D12): sichtbar, nicht im Score. Nur inverse Flügel (streng)
+// und Innenverteidiger (nur Hinweis); „neutral" bleibt in der Liste stumm.
+const FUSS_KLASSE = {"passt":"fpasst", "gegen die Rolle":"fgegen", "neutral":"fneutral"};
+const fussMarke = f => !f || f.passung === "neutral" ? ""
+  : `<span class="rbadge ${f.passung==="passt" ? "kader" : "um"}" title="${escAttr(f.text)} – nicht im Score">${
+      f.passung==="passt" ? "Fuß passt" : "Fuß gegen Rolle"}</span>`;
+
+// ---- Rückfrage beim Kader-Import (D10) ----------------------------------
+// Die Datei ist der Kader eines FREMDEN Vereins – fast immer ein Versehen
+// (Kader eines CL-Vergleichsvereins über den falschen Knopf). Deshalb ist
+// „Abbrechen" die Voreinstellung: gefüllt, fokussiert, Esc und Klick daneben
+// brechen ab. Übernehmen gibt es nur als Kontur-Knopf.
+function kaderRueckfrage(r){
+  schliesseRueckfrage();
+  const m = document.createElement("div");
+  m.id = "rueckModal"; m.className = "cmpmodal on";
+  m.onclick = e => { if(e.target === m) kaderRueckfrageAntwort(false); };
+  m.innerHTML = `<div class="cmpbox rueckbox" role="alertdialog" aria-modal="true"
+      aria-labelledby="rueckT" aria-describedby="rueckH">
+    <div class="dsec" style="margin-top:0">Kader-Import · Rückfrage</div>
+    <h2 id="rueckT">${esc2(r.frage || "Die Datei ist nicht der eigene Kader. Trotzdem übernehmen?")}</h2>
+    <p id="rueckH" class="muted">${esc2(r.hinweis || "")}</p>
+    <div class="rueckmeta">Datei: <b>${esc2(r.verein_datei || "?")}</b>${r.anzahl ? ` · ${r.anzahl} Spieler` : ""}
+      · bisher: <b>${esc2(r.verein_bisher || "?")}</b></div>
+    <div class="rueckknoepfe">
+      <button id="rueckNein" onclick="kaderRueckfrageAntwort(false)">Abbrechen</button>
+      <button class="ghost" onclick="kaderRueckfrageAntwort(true)">Als eigenen Kader übernehmen</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  document.getElementById("rueckNein").focus();
+}
+function schliesseRueckfrage(){ const m = document.getElementById("rueckModal"); if(m) m.remove(); }
+async function kaderRueckfrageAntwort(ja){
+  const api = API(); if(!api) return nurInApp();
+  const st = document.getElementById("status");
+  schliesseRueckfrage();
+  let r; try{ r = ja ? await api.import_squad_confirm() : await api.import_squad_cancel(); }
+  catch(e){ r = {ok:false, error:String(e)}; }
+  if(!r || !r.ok){ st.textContent = "⚠ " + ((r && r.error) || "Kader-Import fehlgeschlagen"); return; }
+  if(!ja){ st.textContent = "Kader unverändert – die Spieler der Datei sind wie bei „Import“ eingelesen."; return; }
+  st.textContent = `Kader importiert: ${r.anzahl} Spieler von ${r.verein}`
+    + (r.verliehen ? ` · ${r.verliehen} verliehene ausgelassen` : "");
+  TACT_SQUADS = null; TACT = null; TACT_SLOT = null; TACT_PID = null;
+  renderTactic();
+}
+
 function tactPick(k){ TACT_SLOT=k; TACT_PID=null; drawTactic(document.getElementById("tableHost")); }
 function tactPlayer(id){ TACT_PID = (TACT_PID===id?null:id); drawTactic(document.getElementById("tableHost")); }
 
@@ -2502,7 +2571,8 @@ function drawRepl(){
     ? `<button class="wbtn on" onclick="openCompare('${REPL_FOR.slot}')">Vergleichen (${COMPARE.length})</button>` : "";
   const kopf = `<div class="dhead">
       <h2>Ersatz suchen${slot?` – ${esc2(slot.label)}`:""}</h2>
-      ${vglKnopf}<button class="xbtn" onclick="closeRepl()">✕</button></div>`;
+      ${vglKnopf}<button class="xbtn" onclick="closeRepl()">✕</button></div>${
+      slot && slot.rolle ? `<div class="replrolle">${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")}</div>` : ""}`;
   if(!REPL){
     box.innerHTML = kopf + `<div class="empty"><span class="spin"></span>
       suche im gesamten Datenbestand…</div>`;
@@ -2522,6 +2592,7 @@ function drawRepl(){
       (c.umschulung ? `<span class="rbadge um"
           title="Spielt bisher: ${esc2(c.umschulung)} – Umschulung kostet ${c.abzug} Punkte">umschulen −${c.abzug}</span>` : "")
       + (c.im_kader ? `<span class="rbadge kader">eigener Kader</span>` : "")
+      + fussMarke(c.fuss_passung)
       + (c.stale ? `<span class="rbadge" title="Zahlen aus einem älteren Scan${
           c.stand?" ("+esc2(String(c.stand).slice(0,10))+")":""}">alt</span>` : "");
     const pos = (c.gruppen||[]).slice(0,3).map(g=>g.toUpperCase()).join(" ")
@@ -2661,6 +2732,7 @@ function replDetail(c){
 
 document.addEventListener("keydown", e=>{
   if(e.key!=="Escape") return;
+  if(document.getElementById("rueckModal")){ kaderRueckfrageAntwort(false); return; }
   if(CTX){ closeCtx(); return; }
   // Der Vergleich liegt über der Ersatzsuche und schließt zuerst
   if(cmpOffen()){ closeCompare(); return; }
@@ -3324,7 +3396,7 @@ function drawCompare(){
   const kopf = `<div class="cmhead">
       <span class="cmtile" style="--grp:var(--pg-${SLOT_GRUPPE[key]||"mid"})">${esc2(slot.kurz||slotKurz(key))}</span>
       <div class="cmtitel"><h2>${esc2(slot.label||slotName(key))}</h2>
-        <div class="dsub">${slot.rolle ? `${esc2(slot.rolle)} · ${esc2(slot.duty||"")} · ` : ""}Vergleich gegen Stamm und Backup</div></div>
+        <div class="dsub">${slot.rolle ? `${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")} · ` : ""}Vergleich gegen Stamm und Backup</div></div>
       <label class="status" style="display:flex;gap:6px;align-items:center">Position
         <select onchange="setCmpSlot(this.value)">${optionen}</select></label>
       <button class="xbtn" onclick="closeCompare()" title="schließen (Esc)">✕</button></div>`;
@@ -3428,7 +3500,8 @@ function drawCompare(){
   // Profil
   html += sektion("Profil")
     + zeile("Alter", "", s=>`<span class="cmwert">${s.age!=null?Math.round(s.age):"–"}</span>`)
-    + zeile("Fuß", "", s=>esc2(fussKurz(s.foot)) || `<span class="cmleer">–</span>`)
+    + zeile("Fuß", "passt er zur Rolle?", s=>(esc2(fussKurz(s.foot)) || `<span class="cmleer">–</span>`)
+        + (s.fuss_passung ? `<div class="fusszeile ${FUSS_KLASSE[s.fuss_passung.passung]||""}">${esc2(s.fuss_passung.text)}</div>` : ""))
     + zeile("Spielzeit", "Saison, alle Wettbewerbe", s=>`<span class="cmwert">${Math.round(s.minutes||0).toLocaleString("de-DE")} Min</span>${
         s.verlaesslich!=null ? `<div class="cmraw">Stichprobe ${Math.round(s.verlaesslich*100)} %</div>` : ""}`)
     + zeile("Positionen", "laut Export", s=>s.position ? `<span style="font-size:12px">${esc2(s.position)}</span>` : `<span class="cmleer">–</span>`)
