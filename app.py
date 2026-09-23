@@ -435,10 +435,14 @@ class Api:
             p["value_m"] = round(v / 1e6, 1) if v else None
             p["value_score"] = (round(p["score"] / (v / 1e6), 1)
                                 if v and v > 0 and p.get("score") is not None else None)
+            # Torhueter und Spieler ohne Minuten/Note stehen nicht in `fair`
+            # und bekommen ueberall None. fair_urteil/fair_text sind das
+            # fertige Urteil – positiv heisst unterbewertet, das soll niemand
+            # mehr selbst aus dem Vorzeichen lesen muessen.
             fv = fair.get(int(p["eid"])) if p.get("eid") else None
-            p["fair_value_m"] = fv["fair_value_m"] if fv else None
-            p["value_delta_pct"] = fv["value_delta_pct"] if fv else None
-            p["value_reliable"] = fv["value_reliable"] if fv else None
+            for k in ("fair_value_m", "value_delta_pct", "value_reliable",
+                      "fair_urteil", "fair_text"):
+                p[k] = fv[k] if fv else None
         return {"ok": True, "players": players, "count": len(players),
                 "snapshots": db.snapshot_count(conn), "exports": len(exp),
                 "aus_export": aus_export,
