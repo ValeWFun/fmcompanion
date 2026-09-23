@@ -56,6 +56,18 @@ COLUMNS = {
     # werden NICHT gelesen (siehe charakter.py). Starker Fuss fuer Seiten-
     # fragen (invertierter Fluegel, linker Innenverteidiger), Info fuer die
     # Statuskuerzel (Ver = verletzt, Trn = Transferliste, Unz = unzufrieden).
+    # Ablöseforderung: der Preis, den der Verein des Spielers festgesetzt hat
+    # (bei eigenen Spielern UNSERE Forderung) – anders als der Transferwert
+    # ein echter Preis. Meist "-" = keine Forderung gesetzt.
+    "transfer_fee": ["Ablöseforderung", "Asking Price"],
+    # Eigengewaechs-Status, bezogen auf den Verein des NUTZERS zum Zeitpunkt
+    # des Exports (an Exporten Winter 2 bis Summer 3 nachgemessen: in der
+    # Benfica-Zeit tragen Benfica-Akademiespieler bei fremden Vereinen
+    # "Ausgebildet im Verein", in der United-Zeit die United-Akademie). Damit
+    # sagt die Spalte direkt, ob ein Kandidat bei uns als Eigengewaechs zaehlt
+    # – Grundlage der PL-/CL-Meldelisten. Werte: "Ausgebildet im Verein
+    # (0–21)", "… im Land (15–21)", "… im Land (0–21)" oder "-".
+    "homegrown": ["Status Eigengewächs", "Home-Grown Status"],
     "personality": ["Persönlichkeit", "Personality"],
     "media": ["Medienumgang", "Media Handling"],
     "foot": ["Starker Fuß", "Preferred Foot"],
@@ -63,7 +75,7 @@ COLUMNS = {
     "height": ["Größe", "Height"],
 }
 # Textfelder, die roh (bereinigt) uebernommen werden; leere Platzhalter -> None
-_TEXT = ["personality", "media", "foot", "info"]
+_TEXT = ["personality", "media", "foot", "info", "homegrown"]
 _TEXT_LEER = {"", "-", "Scouting erforderlich", "Unbekannt"}
 # ganzzahlige Statistik-Felder
 _STAT_INT = ["duels", "duels_total", "shots_total", "shots_on", "pass_try",
@@ -243,6 +255,7 @@ def parse_export_felder(path):
             "nation": _clean(g(row, "nation")),
             "value": parse_money(g(row, "value")),
             "wage": parse_money(g(row, "wage")),
+            "transfer_fee": parse_money(g(row, "transfer_fee")),
             "goals": _num(g(row, "goals"), int),
             "assists": _num(g(row, "assists"), int),
             "xg": _num(g(row, "xg")),

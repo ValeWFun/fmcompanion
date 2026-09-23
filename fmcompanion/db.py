@@ -204,10 +204,18 @@ EXPORT_COLS = ["name", "position", "age", "club", "league", "nation",
                "saves_tipped", "saves_parried", "saves_held", "clean_sheets",
                # sichtbare Stammdaten: Persoenlichkeit, Medienumgang, starker
                # Fuss, Statuskuerzel, Groesse (cm)
-               "personality", "media", "foot", "info", "height"]
+               "personality", "media", "foot", "info", "height",
+               # Ablöseforderung (Euro) und Eigengewaechs-Status (Text)
+               "transfer_fee", "homegrown"]
 # Spalten, die Text tragen – alles andere ist REAL
 EXPORT_TEXT = {"name", "position", "club", "league", "nation",
-               "personality", "media", "foot", "info"}
+               "personality", "media", "foot", "info", "homegrown"}
+# Nur in export_players: WANN ein Feld zuletzt aus einem Export kam.
+# pers_stand – die Persoenlichkeit bleibt bei "Scouting erforderlich" stehen
+# und aendert sich bei jungen Spielern; homegrown_stand – der Eigengewaechs-
+# Status bezieht sich auf den Verein des Nutzers ZUM EXPORTZEITPUNKT, ein
+# Wert aus der Benfica-Zeit sagt ueber United nichts (siehe app, own_club_seit).
+STAND_COLS = ["pers_stand", "homegrown_stand"]
 # Felder, die ein leerer Wert NICHT ueberschreibt. "Scouting erforderlich"
 # heisst nicht, dass die Persoenlichkeit weg ist, sondern dass der EIGENE
 # Verein sie gerade nicht kennt – das Scouting-Wissen haengt am Verein. Nach
@@ -222,7 +230,8 @@ def _init_export(conn):
     cols = ", ".join(
         f"{c} {'TEXT' if c in EXPORT_TEXT else 'REAL'}" for c in EXPORT_COLS)
     conn.execute(f"""CREATE TABLE IF NOT EXISTS export_players (
-        eid INTEGER PRIMARY KEY, imported_at TEXT, pers_stand TEXT, {cols})""")
+        eid INTEGER PRIMARY KEY, imported_at TEXT,
+        {', '.join(f'{c} TEXT' for c in STAND_COLS)}, {cols})""")
     # Wertverlauf: je Import eine Zeile (nicht ueberschreiben)
     conn.execute("""CREATE TABLE IF NOT EXISTS export_history (
         eid INTEGER NOT NULL, imported_at TEXT NOT NULL,
@@ -230,10 +239,8 @@ def _init_export(conn):
         PRIMARY KEY (eid, imported_at))""")
     have = {r["name"] for r in
             conn.execute("PRAGMA table_info(export_players)").fetchall()}
-    # bestehende DBs nachziehen. pers_stand: wann die Persoenlichkeit zuletzt
-    # in einem Export sichtbar war – sie bleibt stehen, wenn spaetere Exporte
-    # "Scouting erforderlich" zeigen, und aendert sich bei jungen Spielern.
-    for c, typ in ([("pers_stand", "TEXT")]
+    # bestehende DBs nachziehen (nur ADD COLUMN, nie umbauen)
+    for c, typ in ([(c, "TEXT") for c in STAND_COLS]
                    + [(c, "TEXT" if c in EXPORT_TEXT else "REAL") for c in EXPORT_COLS]):
         if c not in have:
             conn.execute(f"ALTER TABLE export_players ADD COLUMN {c} {typ}")
@@ -287,10 +294,12 @@ def _zusammenfuehren(alt, neu, felder, ts):
     - imported_at ist der Stand der STATISTIK (Pool "aktuell", Ersatzsuche)
       und rueckt nur vor, wenn die Datei Minuten enthaelt. Sonst machte eine
       Shortlist mit blossen Marktwerten Vorsaisonzahlen zu aktuellen.
+    - STAND_COLS merken, aus welchem Export Persoenlichkeit und Eigengewaechs-
+      Status stammen. Der Status gilt auch als "-" – der neueste Stand zaehlt.
     """
     zeile = (dict(alt) if alt else
-             dict({c: None for c in EXPORT_COLS}, eid=int(neu["eid"]),
-                  imported_at=None, pers_stand=None))
+             dict({c: None for c in EXPORT_COLS + STAND_COLS},
+                  eid=int(neu["eid"]), imported_at=None))
     for f in felder:
         v = neu.get(f)
         if v is None and f in BEHALTEN_WENN_LEER:
@@ -298,6 +307,8 @@ def _zusammenfuehren(alt, neu, felder, ts):
         zeile[f] = v
     if "personality" in felder and neu.get("personality") is not None:
         zeile["pers_stand"] = ts
+    if "homegrown" in felder:
+        zeile["homegrown_stand"] = ts
     if "minutes" in felder or not zeile.get("imported_at"):
         zeile["imported_at"] = ts
     return zeile
@@ -323,7 +334,7 @@ def bestand_sichern(conn):
     if conn.execute("SELECT 1 FROM export_importe LIMIT 1").fetchone():
         return 0
     cols = ", ".join(EXPORT_COLS)
-    felder = ",".join(EXPORT_COLS)
+    zaehler = ", ".join(f"COUNT({c})" for c in EXPORT_COLS)
     n = 0
     zeiten = [r["imported_at"] for r in conn.execute(
         "SELECT DISTINCT imported_at FROM export_players "
@@ -331,6 +342,13 @@ def bestand_sichern(conn):
     for ts in zeiten:
         anzahl = conn.execute("SELECT COUNT(*) AS n FROM export_players "
                               "WHERE imported_at = ?", (ts,)).fetchone()["n"]
+        # Welche Spalten die Datei damals hatte, weiss niemand mehr. Ein Feld,
+        # das bei KEINEM Spieler dieses Zeitpunkts gefuellt ist, gilt als
+        # nicht enthalten – sonst behauptete die Historie etwa, der nie
+        # importierte Eigengewaechs-Status sei damals "-" gewesen.
+        gezaehlt = conn.execute(f"SELECT {zaehler} FROM export_players "
+                                f"WHERE imported_at = ?", (ts,)).fetchone()
+        felder = ",".join(c for c, k in zip(EXPORT_COLS, gezaehlt) if k)
         iid = conn.execute(
             "INSERT INTO export_importe (imported_at, datei, felder, anzahl) "
             "VALUES (?, ?, ?, ?)", (ts, BESTAND_DATEI, felder, anzahl)).lastrowid
@@ -379,7 +397,7 @@ def save_export(conn, players, felder=None, datei=None, ts=None):
     zeilen = [_zusammenfuehren(alt.get(int(p["eid"])), p, felder, ts) for p in players]
 
     # UPSERT statt REPLACE: Spalten, die dieser Code nicht kennt, bleiben stehen
-    cols = ["eid", "imported_at", "pers_stand"] + EXPORT_COLS
+    cols = ["eid", "imported_at"] + STAND_COLS + EXPORT_COLS
     setzen = ", ".join(f"{c} = excluded.{c}" for c in cols[1:])
     conn.executemany(
         f"INSERT INTO export_players ({', '.join(cols)}) "

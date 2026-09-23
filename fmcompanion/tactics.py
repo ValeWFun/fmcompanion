@@ -767,6 +767,10 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None):
                 "pers_stufe": p.get("pers_stufe"), "pers_medien": p.get("pers_medien"),
                 "pers_hinweise": p.get("pers_hinweise") or [],
                 "foot": p.get("foot"), "info": p.get("info"),
+                "pers_stand": p.get("pers_stand"),
+                # Ablöseforderung (Euro, meist None) und Eigengewaechs-Status
+                "transfer_fee": p.get("transfer_fee"), "homegrown": p.get("homegrown"),
+                "homegrown_stand": p.get("homegrown_stand"),
                 "archetypen": {k: _archetyp_pct(b["teile"], stats)
                                for k, stats in
                                ARCHETYPEN.get(slot["key"], {}).items()},
@@ -1205,6 +1209,9 @@ def find_replacements(slot, original, kandidaten, reference,
             "pers_stufe": p.get("pers_stufe"), "pers_medien": p.get("pers_medien"),
             "pers_hinweise": p.get("pers_hinweise") or [],
             "foot": p.get("foot"), "info": p.get("info"), "wage": p.get("wage"),
+            "pers_stand": p.get("pers_stand"),
+            "transfer_fee": p.get("transfer_fee"), "homegrown": p.get("homegrown"),
+            "homegrown_stand": p.get("homegrown_stand"),
             "carry": b["carry"], "liga_koeff": b["liga_koeff"],
             "team_schnitt": b["team_schnitt"],
             "delta_score": score - ziel,

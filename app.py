@@ -93,7 +93,8 @@ class Api:
                     "saves_tipped", "saves_parried", "saves_held", "clean_sheets")
     # Sichtbare Stammdaten, die nur der Export kennt (nie aus dem RAM)
     EXPORT_STAMM = ("position", "club", "league", "value", "wage",
-                    "personality", "media", "foot", "info", "height")
+                    "personality", "media", "foot", "info", "height",
+                    "transfer_fee", "homegrown", "pers_stand", "homegrown_stand")
     # Zaehler, die es NUR im RAM gibt. Gewinnt der Export, gehoeren sie nicht
     # mehr zu seinen Minuten – eine Foul-Rate aus RAM-Zaehlern und
     # Export-Minuten waere schlicht falsch. Dann lieber leer lassen: die
@@ -598,11 +599,20 @@ class Api:
     def _set_squad(self, conn, verein, eids, verliehen=0):
         """Kader und eigenen Verein festschreiben; Pins des alten Vereins loesen."""
         import json
+        from datetime import datetime as _dt
+        jetzt = _dt.now().isoformat(timespec="seconds")
         alt = db.get_setting(conn, "own_club", "") or ""
         if alt and alt != verein:
             # Pins zeigen auf Spieler des alten Vereins – nach dem Wechsel
             # zu Manchester United stand sonst noch die Benfica-Elf fest.
             db.set_setting(conn, "startelf_pins", "{}")
+        if alt != verein:
+            # Stichtag des Vereinswechsels: der Eigengewaechs-Status im Export
+            # bezieht sich auf den Verein des Nutzers ZUM EXPORTZEITPUNKT.
+            # Fuer Meldelisten zaehlen nur Werte mit homegrown_stand ab hier.
+            # Fehlt die Einstellung (Wechsel zu Man Utd lag vor ihrer
+            # Einfuehrung, der Status wurde davor nie importiert), gilt jeder.
+            db.set_setting(conn, "own_club_seit", jetzt)
         db.set_setting(conn, "squad_eids", json.dumps(sorted(eids)))
         db.set_setting(conn, "own_club", verein)
         # Den bisherigen Kader-Import merken: _pool_stand reicht nie weiter
@@ -611,9 +621,7 @@ class Api:
         if vorher:
             db.set_setting(conn, "squad_imported_prev", vorher)
         # Der Kader-Import definiert, was "aktuell" heisst (siehe _pool_stand)
-        from datetime import datetime as _dt
-        db.set_setting(conn, "squad_imported_at",
-                       _dt.now().isoformat(timespec="seconds"))
+        db.set_setting(conn, "squad_imported_at", jetzt)
         self._repl_cache = None
         return {"ok": True, "verein": verein, "anzahl": len(eids),
                 "verliehen": verliehen}
