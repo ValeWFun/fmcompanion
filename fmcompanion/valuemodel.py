@@ -9,7 +9,23 @@ sein muesste, als der Markt aufruft, ist unterbewertet.
 
 Gegenueber dem bestehenden `value_score` (Offensivproduktion je Mio) ist das
 der ehrlichere Massstab – er kontrolliert Alter, Liga und Position und liefert
-damit auch fuer Verteidiger und Torhueter sinnvolle Werte.
+damit auch fuer Verteidiger sinnvolle Werte.
+
+TORHUETER sind ausgenommen, in Training UND Bewertung. Ins Training kamen sie
+nie (ihnen fehlen Detailspalten), bewertet wurden sie trotzdem – wie Spieler
+ohne Positionsgruppe. Heraus kamen Kotarski mit 55,6 Mio Fair Value bei
+25 Mio Markt und Seimen mit 17,4 bei 62. Bis es ein eigenes Torwart-Modell
+gibt, bekommen sie keinen Wert ("–").
+
+Das URTEIL folgt der Streuung des Modells, nicht einer festen Prozentgrenze.
+Kreuzvalidiert liegt der Schaetzwert typischerweise um den Faktor exp(sigma)
+neben dem Markt (September 2026: sigma 1,32, also Faktor 3,7); nur 7 % aller
+Spieler liegen innerhalb +-10 %. Eine feste Schwelle etikettierte fast jeden,
+und fast jedes Etikett waere Rauschen. Deshalb: |ln(fair/markt)| unter
+ZONE_LEICHT sigma = marktgerecht, bis ZONE_DEUTLICH = leicht, darueber =
+deutlich unter- bzw. ueberbewertet. POSITIV heisst UNTERBEWERTET (die Leistung
+ist mehr wert, als der Markt aufruft) – das Vorzeichen wurde im Scouting
+fuenfmal verdreht, deshalb liefert das Modell das Urteil als Text mit.
 
 WICHTIG – das Modell haelt sich selbst zurueck: Es liefert nur dann Zahlen,
 wenn der Fit kreuzvalidiert echtes Signal zeigt (MIN_CV_R2). Bleibt er darunter,
@@ -61,7 +77,12 @@ DETAIL_COLS = ("prog_passes", "press_win", "interceptions", "key_passes",
 
 # Positionsgruppen als Dummy-Variablen. "unk" ist bewusst die Basiskategorie
 # und bekommt keine eigene Spalte – sonst waeren die Dummies linear abhaengig.
-POS_DUMMIES = ("tw", "def", "mid", "off", "st")
+# "tw" fehlt, weil Torhueter gar nicht ins Modell kommen (siehe oben).
+POS_DUMMIES = ("def", "mid", "off", "st")
+
+# Urteilszonen in Vielfachen von sigma (Streuung der kreuzvalidierten Residuen)
+ZONE_LEICHT = 0.5
+ZONE_DEUTLICH = 1.0
 
 FEATURE_NAMES = (
     "tore_p90", "vorlagen_p90", "xg_p90", "xa_p90", "prog_p90", "press_p90",
@@ -81,6 +102,39 @@ def _group(row):
     mask = pos_mask_from_string(pos)
     groups, _ = pos_info(mask, pos.startswith("TW"))
     return groups[0]
+
+
+def _ist_torwart(row):
+    return _group(row) == "tw"
+
+
+def _bewertbar(row):
+    """Bekommt der Spieler ueberhaupt einen Fair Value?
+
+    Nicht ohne Marktwert, Alter, Minuten und Note: ohne Minuten sind alle
+    /90-Raten null, ohne Note fehlt das staerkste Feature – heraus kamen
+    0,0 Mio und "-100 %" (Schiks, 142 Spieler ohne Minuten). Torhueter nie
+    (siehe Modul-Docstring).
+    """
+    return ((row.get("value") or 0) > 0
+            and row.get("age") is not None
+            and (row.get("minutes") or 0) > 0
+            and (row.get("rating") or 0) > 0
+            and not _ist_torwart(row))
+
+
+def urteil(ln_verhaeltnis, sigma):
+    """ln(fair/markt) -> Urteil in Worten, gemessen an der Modellstreuung.
+    Positiv = unterbewertet."""
+    z = abs(ln_verhaeltnis) / sigma if sigma else 0.0
+    if z < ZONE_LEICHT:
+        return "marktgerecht"
+    staerke = "leicht" if z < ZONE_DEUTLICH else "deutlich"
+    return f"{staerke} {'unterbewertet' if ln_verhaeltnis > 0 else 'überbewertet'}"
+
+
+def _mio(euro):
+    return f"{euro / 1e6:.1f}".replace(".", ",")
 
 
 def _features(row):
@@ -119,9 +173,7 @@ def _features(row):
 
 def _trainable(row):
     """Taugt die Zeile als Trainingsbeispiel? (Wert, Alter, Detailstatistik)"""
-    return ((row.get("value") or 0) > 0
-            and row.get("age") is not None
-            and (row.get("rating") or 0) > 0
+    return (_bewertbar(row)
             and all(row.get(c) is not None for c in DETAIL_COLS))
 
 
@@ -183,21 +235,28 @@ def _r2(y, pred):
     return 1.0 - ss_res / ss_tot if ss_tot else 0.0
 
 
-def _cv_r2(X, y, alpha, folds=CV_FOLDS):
-    """Kreuzvalidiertes R². Der Wert im Training selbst ist bei kleiner
-    Stichprobe wertlos – er steigt mit jedem Feature, auch mit sinnlosen."""
+def _cv_pred(X, y, alpha, folds=CV_FOLDS):
+    """Kreuzvalidierte Vorhersage je Zeile, oder None, wenn die Menge nicht
+    reicht. Jede Zeile schaetzt ein Modell, das sie nicht gesehen hat."""
     n, k = X.shape
     if n < folds * 2:
-        return float("nan")
+        return None
     idx = np.arange(n)
     pred = np.empty(n, dtype=float)
     for f in range(folds):
         te = (idx % folds) == f
         tr = ~te
         if tr.sum() <= k or not te.any():
-            return float("nan")
+            return None
         pred[te] = _predict_core(_fit_core(X[tr], y[tr], alpha), X[te])
-    return _r2(y, pred)
+    return pred
+
+
+def _cv_r2(X, y, alpha, folds=CV_FOLDS):
+    """Kreuzvalidiertes R². Der Wert im Training selbst ist bei kleiner
+    Stichprobe wertlos – er steigt mit jedem Feature, auch mit sinnlosen."""
+    pred = _cv_pred(X, y, alpha, folds)
+    return float("nan") if pred is None else _r2(y, pred)
 
 
 class FairValueModel:
@@ -205,7 +264,7 @@ class FairValueModel:
     ueberhaupt nach draussen gehen."""
 
     def __init__(self, core, imput, threshold, n_train, alpha, r2, cv_r2,
-                 group_rows):
+                 group_rows, sigma=float("nan")):
         self._core = core
         self._imput = imput             # Spaltenmittel fuer fehlende Features
         self.threshold = threshold      # tatsaechlich benutzte Minutenschwelle
@@ -214,6 +273,9 @@ class FairValueModel:
         self.r2 = r2
         self.cv_r2 = cv_r2
         self.group_rows = group_rows    # Trainingszeilen je Positionsgruppe
+        # Streuung der kreuzvalidierten Residuen von ln(Marktwert): der
+        # Massstab fuers Urteil. exp(sigma) = typischer Faktor daneben.
+        self.sigma = sigma
 
     @property
     def usable(self):
@@ -246,10 +308,17 @@ class FairValueModel:
 
     def status(self):
         """Kompakter Zustand fuers Frontend / die Diagnose."""
+        cv = None if math.isnan(self.cv_r2) else round(self.cv_r2, 3)
+        sigma = None if math.isnan(self.sigma) else round(self.sigma, 3)
+        faktor = None if sigma is None else round(math.exp(self.sigma), 1)
+        text = (f"R² {cv:.2f} · Streuung ×{faktor:.1f}".replace(".", ",")
+                if cv is not None and faktor is not None else None)
         return {"ok": self.usable, "reason": self.reason,
                 "n_train": self.n_train, "threshold": self.threshold,
-                "r2": round(self.r2, 3),
-                "cv_r2": None if math.isnan(self.cv_r2) else round(self.cv_r2, 3)}
+                "r2": round(self.r2, 3), "cv_r2": cv,
+                "sigma": sigma, "streuung_faktor": faktor, "text": text,
+                "hinweis": ("Der Schätzwert liegt typischerweise um diesen Faktor "
+                            "neben dem Markt – das Urteil trennt nur Extremfälle.")}
 
 
 def fit(rows):
@@ -281,13 +350,15 @@ def fit(rows):
             best_alpha, best_cv = a, cv
     core = _fit_core(X, y, best_alpha)
     r2 = _r2(y, _predict_core(core, X))
+    cv_pred = _cv_pred(X, y, best_alpha)
+    sigma = float(np.std(y - cv_pred)) if cv_pred is not None else float("nan")
     groups = {}
     for r in train:
         g = _group(r)
         groups[g] = groups.get(g, 0) + 1
     return FairValueModel(core, imput, threshold, len(train), best_alpha, r2,
                           best_cv if best_cv > -math.inf else float("nan"),
-                          groups)
+                          groups, sigma)
 
 
 def score(model, rows):
@@ -299,13 +370,17 @@ def score(model, rows):
     Spieler unter der Trainingsschwelle bekommen einen Wert, aber mit
     `value_reliable = False` gekennzeichnet; die Oberflaeche zeigt ihn dann
     gedaempft und ohne Einfaerbung. Dasselbe gilt fuer Positionsgruppen, die im
-    Training kaum vertreten waren.
+    Training kaum vertreten waren. Torhueter und Spieler ohne Minuten oder
+    Note fehlen ganz (siehe _bewertbar).
+
+    Felder je Spieler: fair_value_m, value_delta_pct (POSITIV = UNTERBEWERTET),
+    value_reliable, fair_urteil (Worte, siehe urteil()) und fair_text – der
+    fertige Anzeigetext, damit niemand das Vorzeichen selbst deuten muss.
     """
     out = {}
     if model is None or not model.usable:
         return out
-    usable = [r for r in rows if r.get("eid") and (r.get("value") or 0) > 0
-              and r.get("age") is not None]
+    usable = [r for r in rows if r.get("eid") and _bewertbar(r)]
     if not usable:
         return out
     preds = model.predict_log(usable)
@@ -314,13 +389,17 @@ def score(model, rows):
         val = float(r["value"])
         reliable = ((r.get("minutes") or 0) >= model.threshold
                     and all(r.get(c) is not None for c in DETAIL_COLS)
-                    and (r.get("rating") or 0) > 0
                     and model.group_rows.get(_group(r), 0) >= MIN_GROUP_ROWS)
+        delta = round((fair / val - 1.0) * 100.0)
+        wort = urteil(math.log(fair / val), model.sigma)
         out[int(r["eid"])] = {
             "fair_value_m": round(fair / 1e6, 1),
             # positiv = unterbewertet (Statistik erwartet mehr als der Markt)
-            "value_delta_pct": round((fair / val - 1.0) * 100.0),
+            "value_delta_pct": delta,
             "value_reliable": bool(reliable),
+            "fair_urteil": wort,
+            "fair_text": (f"Markt {_mio(val)} / Fair {_mio(fair)} Mio – "
+                          f"{wort} ({delta:+d} %)".replace("-", "−")),
         }
     return out
 
@@ -364,6 +443,9 @@ if __name__ == "__main__":
     print(f"R² im Training   : {model.r2:6.3f}")
     print(f"R² kreuzvalidiert: {model.cv_r2:6.3f}   <- der ehrliche Wert "
           f"(Schwelle {MIN_CV_R2:.2f})")
+    print(f"Streuung sigma   : {model.sigma:6.3f}   -> Faktor "
+          f"{math.exp(model.sigma):.1f} (Urteil: <{ZONE_LEICHT} sigma marktgerecht, "
+          f"<{ZONE_DEUTLICH} leicht, sonst deutlich)")
     print("Trainingszeilen je Positionsgruppe: "
           + ", ".join(f"{g}={n}" for g, n in sorted(model.group_rows.items(),
                                                     key=lambda kv: -kv[1])))
@@ -394,7 +476,8 @@ if __name__ == "__main__":
             print(f"  {name:22s} {int(r['age']):3d} "
                   f"{int(r.get('minutes') or 0):4d} "
                   f"{r['value']/1e6:6.1f}M {v['fair_value_m']:6.1f}M "
-                  f"{d:+6d}%  {(r.get('position') or '?'):16s} "
+                  f"{d:+6d}%  {v['fair_urteil']:22s} "
+                  f"{(r.get('position') or '?'):16s} "
                   f"{(r.get('league') or '?')[:24]}")
 
     table("Top 10 unterbewertet (Statistik erwartet mehr als der Markt):",

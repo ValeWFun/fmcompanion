@@ -112,6 +112,57 @@ def compute_age(birth_year, birth_day, ref_year, ref_day=None):
     return a if 10 <= a <= 60 else None
 
 
+def _trenntag(tage):
+    """Tag im Jahr, der "Geburtstag schon gewesen" am besten trennt.
+    tage: [(birth_day, gehabt)] -> (tag, Zahl der Widersprueche)."""
+    gehabt, offen = [0] * 367, [0] * 367
+    for bd, g in tage:
+        (gehabt if g else offen)[max(1, min(366, int(bd)))] += 1
+    rest, bis_offen = sum(gehabt), 0
+    bester = (1, None)
+    for t in range(1, 367):
+        rest -= gehabt[t]              # schon gewesen, aber bd > t: Widerspruch
+        bis_offen += offen[t]          # noch nicht, aber bd <= t: Widerspruch
+        fehler = rest + bis_offen
+        if bester[1] is None or fehler < bester[1]:
+            bester = (t, fehler)
+    return bester
+
+
+def bezugsdatum(paare):
+    """(Spieljahr, Tag im Jahr) eines Exports aus RAM-Geburtsdaten und Export-Altern.
+
+    paare: [(birth_year, birth_day, export_alter)]. Fuer jeden Spieler ist
+    Geburtsjahr + Alter entweder das Spieljahr Y (Geburtstag schon gewesen)
+    oder Y - 1. Gewaehlt wird das Y, das die meisten Spieler WIDERSPRUCHSFREI
+    erklaert: Spieler mit Y oder Y - 1, abzueglich derer, die kein Trenntag
+    richtig einordnet. Der frueher benutzte Median lag bei Summer3 (2027: 700
+    Spieler, 2028: 502) ein Jahr zu tief. Auch "der hoechste Wert mit 10 %
+    Anteil" reicht nicht: bei einem Export Anfang Januar hatten erst ~5 %
+    Geburtstag, das Vorjahr gewann, und genau diese Spieler kamen ein Jahr zu
+    jung heraus (vom Junior-Dev im Test gefunden). Einzelne falsche EID-Joins
+    erklaeren nur sich selbst und gewinnen nie.
+    Der Tag trennt beide Gruppen (birth_day <= Tag: schon Geburtstag) – damit
+    stimmt compute_age auch vor dem Geburtstag.
+    -> (jahr, tag); (None, None) bei weniger als 5 Paaren, tag None ohne
+    Geburtstage.
+    """
+    from collections import Counter
+    gueltig = [(int(by), bd, int(a)) for by, bd, a in paare if by and a]
+    if len(gueltig) < 5:
+        return None, None
+    zaehl = Counter(by + a for by, _, a in gueltig)
+    bestes = None
+    for jahr in zaehl:
+        tage = [(bd, by + a == jahr) for by, bd, a in gueltig
+                if bd and by + a in (jahr, jahr - 1)]
+        tag, fehler = _trenntag(tage) if tage else (None, 0)
+        erklaert = zaehl[jahr] + zaehl.get(jahr - 1, 0) - (fehler or 0)
+        if bestes is None or (erklaert, jahr) > bestes[0]:
+            bestes = ((erklaert, jahr), jahr, tag)
+    return bestes[1], bestes[2]
+
+
 def enrich(players, ref_year=None, ref_day=None):
     """Ergaenzt jeden Spieler um abgeleitete Moneyball-Kennzahlen.
 

@@ -56,6 +56,18 @@ COLUMNS = {
     # werden NICHT gelesen (siehe charakter.py). Starker Fuss fuer Seiten-
     # fragen (invertierter Fluegel, linker Innenverteidiger), Info fuer die
     # Statuskuerzel (Ver = verletzt, Trn = Transferliste, Unz = unzufrieden).
+    # Ablöseforderung: der Preis, den der Verein des Spielers festgesetzt hat
+    # (bei eigenen Spielern UNSERE Forderung) – anders als der Transferwert
+    # ein echter Preis. Meist "-" = keine Forderung gesetzt.
+    "transfer_fee": ["Ablöseforderung", "Asking Price"],
+    # Eigengewaechs-Status, bezogen auf den Verein des NUTZERS zum Zeitpunkt
+    # des Exports (an Exporten Winter 2 bis Summer 3 nachgemessen: in der
+    # Benfica-Zeit tragen Benfica-Akademiespieler bei fremden Vereinen
+    # "Ausgebildet im Verein", in der United-Zeit die United-Akademie). Damit
+    # sagt die Spalte direkt, ob ein Kandidat bei uns als Eigengewaechs zaehlt
+    # – Grundlage der PL-/CL-Meldelisten. Werte: "Ausgebildet im Verein
+    # (0–21)", "… im Land (15–21)", "… im Land (0–21)" oder "-".
+    "homegrown": ["Status Eigengewächs", "Home-Grown Status"],
     "personality": ["Persönlichkeit", "Personality"],
     "media": ["Medienumgang", "Media Handling"],
     "foot": ["Starker Fuß", "Preferred Foot"],
@@ -63,7 +75,7 @@ COLUMNS = {
     "height": ["Größe", "Height"],
 }
 # Textfelder, die roh (bereinigt) uebernommen werden; leere Platzhalter -> None
-_TEXT = ["personality", "media", "foot", "info"]
+_TEXT = ["personality", "media", "foot", "info", "homegrown"]
 _TEXT_LEER = {"", "-", "Scouting erforderlich", "Unbekannt"}
 # ganzzahlige Statistik-Felder
 _STAT_INT = ["duels", "duels_total", "shots_total", "shots_on", "pass_try",
@@ -175,20 +187,52 @@ def diagnose(path):
     return None
 
 
+# COLUMNS-Eintraege, die nur als Quelle fuer ein abgeleitetes Feld dienen und
+# selbst nicht gespeichert werden.
+_NUR_QUELLE = {"eid", "losses_p90", "recoveries_p90", "gp_p90", "chances_p90",
+               "sprints_p90"}
+# Abgeleitete Felder und ALLE Spalten, aus denen sie entstehen. Fehlt eine
+# davon, steht im Feld ein Ersatzwert (xga waeren dann nackte Gegentore) –
+# es gilt deshalb als NICHT in der Datei enthalten und wird nicht gespeichert.
+_ABGELEITET = {
+    "losses": ("losses_p90", "minutes"),
+    "recoveries": ("recoveries_p90", "minutes"),
+    "xga": ("conceded", "gp_p90", "minutes"),
+    "chances": ("chances_p90", "minutes"),
+    "sprints": ("sprints_p90", "minutes"),
+}
+
+
 def parse_export(path):
     """Liste von Spieler-Dicts aus einem FM-HTML-Export."""
+    return parse_export_felder(path)[0]
+
+
+def parse_export_felder(path):
+    """(Spieler, Felder) aus einem FM-HTML-Export.
+
+    Felder sind die gespeicherten Felder, die die Datei WIRKLICH enthaelt.
+    Die Spieler-Dicts tragen immer alle Schluessel – fuer eine fehlende Spalte
+    eben None oder einen Ersatzwert –, daran allein laesst sich "Spalte fehlt"
+    nicht von "Wert ist leer" unterscheiden. Der Import braucht genau das:
+    eine Shortlist mit zehn Spalten darf nur diese zehn Felder aendern, nicht
+    alle anderen auf NULL setzen (db.save_export).
+    """
     with open(path, encoding="utf-8", errors="replace") as f:
         html = f.read()
     headers = [_clean(h) for h in re.findall(r"<th>(.*?)</th>", html, re.S)]
     ncol = len(headers)
     if ncol == 0:
-        return []
+        return [], set()
     col = {}
     for field, names in COLUMNS.items():
         for nm in names:
             if nm in headers:
                 col[field] = headers.index(nm)
                 break
+    felder = {f for f in col if f not in _NUR_QUELLE}
+    felder |= {f for f, quellen in _ABGELEITET.items()
+               if all(q in col for q in quellen)}
     cells = re.findall(r"<td>(.*?)</td>", html, re.S)
     rows = [cells[i:i + ncol] for i in range(0, len(cells) - ncol + 1, ncol)]
 
@@ -211,6 +255,7 @@ def parse_export(path):
             "nation": _clean(g(row, "nation")),
             "value": parse_money(g(row, "value")),
             "wage": parse_money(g(row, "wage")),
+            "transfer_fee": parse_money(g(row, "transfer_fee")),
             "goals": _num(g(row, "goals"), int),
             "assists": _num(g(row, "assists"), int),
             "xg": _num(g(row, "xg")),
@@ -264,4 +309,4 @@ def parse_export(path):
         sp90 = _num(g(row, "sprints_p90"))
         p["sprints"] = round((sp90 or 0) * m / 90) if (m and sp90 is not None) else None
         players.append(p)
-    return players
+    return players, felder
