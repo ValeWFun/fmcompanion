@@ -877,14 +877,10 @@ class Api:
         res["ok"] = True
         return res
 
-    def league_comparison(self, min_minutes=450):
-        """Eigene Elf je Position gegen die eigene Liga (tactics.liga_vergleich).
-
-        Die Elf kommt aus dem Brett (automatische Aufstellung samt Pins), die
-        Liga ist die haeufigste im eigenen Kader, der Pool sind die aktuellen
-        Importe – alte Zeilen tragen Vereine und Zahlen der Vorsaison.
-        """
-        from collections import Counter
+    def _vergleich_basis(self, min_minutes):
+        """Gemeinsame Grundlage von Liga- und CL-Vergleich: Brett-Elf (samt
+        Pins), bewertete Export-Zeilen, Referenz und aktueller Pool – alte
+        Zeilen tragen Vereine und Zahlen der Vorsaison."""
         tb = self.tactic_board()
         if not tb.get("ok"):
             return tb
@@ -902,25 +898,105 @@ class Api:
         ligen = {int(e["eid"]): e["league"] for e in export
                  if e.get("eid") and e.get("league")}
         moneyball.add_scores(rows, referenz, ligen)
-        eids = self._squad_eids(conn)
-        liga = Counter(p.get("league") for p in rows
-                       if int(p["eid"]) in eids and p.get("league")).most_common(1)
-        if not liga:
-            return {"ok": False, "error": "Liga des eigenen Kaders unbekannt."}
         stand = self._pool_stand(conn)
         pool = [p for p in rows if not stand or (p.get("imported_at") or "") >= stand]
         verein = db.get_setting(conn, "own_club", "") or ""
-        zeilen = tactics.liga_vergleich(elf, pool, referenz, liga[0][0], verein,
-                                        teams=tactics.team_strength(export),
-                                        min_minutes=max(90, int(min_minutes)))
         # stand = Grenze der Vergleichsmenge (Tooltip); daten_stand = neuester
         # Import darin, kader_stand = Stand der eigenen Elf. Aus der Grenze
         # allein las die Oberflaeche "Stand 19.09.", importiert war am 22.09.
-        return {"ok": True, "liga": liga[0][0], "verein": verein, "stand": stand,
+        kopf = {"verein": verein, "stand": stand,
                 "daten_stand": max((p.get("imported_at") or "" for p in pool),
                                    default="") or None,
                 "kader_stand": db.get_setting(conn, "squad_imported_at", "") or None,
-                "positionen": zeilen, "min_minutes": int(min_minutes)}
+                "min_minutes": int(min_minutes)}
+        return {"ok": True, "conn": conn, "elf": elf, "rows": rows,
+                "referenz": referenz, "pool": pool, "teams": tactics.team_strength(export),
+                "verein": verein, "kopf": kopf}
+
+    def league_comparison(self, min_minutes=450):
+        """Eigene Elf je Position gegen die eigene Liga (tactics.liga_vergleich).
+
+        Die Elf kommt aus dem Brett (automatische Aufstellung samt Pins), die
+        Liga ist die haeufigste im eigenen Kader, der Pool sind die aktuellen
+        Importe (_vergleich_basis).
+        """
+        from collections import Counter
+        b = self._vergleich_basis(min_minutes)
+        if not b.get("ok"):
+            return b
+        eids = self._squad_eids(b["conn"])
+        liga = Counter(p.get("league") for p in b["rows"]
+                       if int(p["eid"]) in eids and p.get("league")).most_common(1)
+        if not liga:
+            return {"ok": False, "error": "Liga des eigenen Kaders unbekannt."}
+        zeilen = tactics.liga_vergleich(b["elf"], b["pool"], b["referenz"], liga[0][0],
+                                        b["verein"], teams=b["teams"],
+                                        min_minutes=max(90, int(min_minutes)))
+        return dict(b["kopf"], ok=True, liga=liga[0][0], positionen=zeilen)
+
+    # ------------------------------------------------------ CL-Niveau
+    # Die 8 Vergleichsvereine (typisch: CL-Viertelfinalisten der letzten
+    # Saison) legt der Nutzer fest; aus den Daten geschaetzt mass die Auswahl
+    # unser Scouting statt der Vereine (siehe tactics.cl_vergleich).
+    CL_SETTING = "cl_referenz_vereine"
+    CL_SOLL = 8
+
+    def _cl_liste(self, conn):
+        import json
+        try:
+            return [str(v) for v in json.loads(db.get_setting(conn, self.CL_SETTING, "[]") or "[]")]
+        except Exception:
+            return []
+
+    def cl_clubs(self):
+        """Gewaehlte CL-Vergleichsvereine plus Auswahl (Vereine im Export mit
+        Spielerzahl, aktuelle Zeilen zuerst gezaehlt)."""
+        from collections import Counter
+        conn = self._db()
+        stand = self._pool_stand(conn) or ""
+        export = db.load_export(conn)
+        aktuell = Counter(e.get("club") for e in export
+                          if e.get("club") and (e.get("imported_at") or "") >= stand)
+        eigener = db.get_setting(conn, "own_club", "") or ""
+        return {"ok": True, "vereine": self._cl_liste(conn), "soll": self.CL_SOLL,
+                "min_mit_daten": tactics.CL_MIN_VEREINE, "eigener": eigener,
+                "auswahl": [{"club": c, "n": n} for c, n in aktuell.most_common()
+                            if c != eigener]}
+
+    def set_cl_clubs(self, clubs):
+        """CL-Vergleichsvereine festlegen (hoechstens CL_SOLL, ohne den eigenen)."""
+        import json
+        conn = self._db()
+        eigener = db.get_setting(conn, "own_club", "") or ""
+        liste = []
+        for c in clubs or []:
+            c = str(c).strip()
+            if c and c != eigener and c not in liste:
+                liste.append(c)
+        if len(liste) > self.CL_SOLL:
+            return {"ok": False, "error": f"Höchstens {self.CL_SOLL} Vereine."}
+        db.set_setting(conn, self.CL_SETTING, json.dumps(liste, ensure_ascii=False))
+        return {"ok": True, "vereine": liste}
+
+    def cl_comparison(self, min_minutes=450):
+        """Eigene Elf je Position gegen die CL-Vergleichsvereine
+        (tactics.cl_vergleich). Unter CL_MIN_VEREINE Vereinen mit Daten ist
+        eine Position "keine Aussage"; fehlende_vereine sagt, welche Kader
+        noch exportiert werden muessen."""
+        conn = self._db()
+        vereine = self._cl_liste(conn)
+        if not vereine:
+            return {"ok": False, "keine_vereine": True,
+                    "error": "Noch keine CL-Vergleichsvereine festgelegt."}
+        b = self._vergleich_basis(min_minutes)
+        if not b.get("ok"):
+            return b
+        zeilen = tactics.cl_vergleich(b["elf"], b["pool"], b["referenz"], vereine,
+                                      b["verein"], teams=b["teams"],
+                                      min_minutes=max(90, int(min_minutes)))
+        return dict(b["kopf"], ok=True, vereine=[v for v in vereine if v != b["verein"]],
+                    min_mit_daten=tactics.CL_MIN_VEREINE, positionen=zeilen,
+                    mit_aussage=sum(1 for z in zeilen if z["aussage"]))
 
     # ------------------------------------------------ manuelle Aufstellung
     # Pins: {slot_key: eid}. Die Automatik bleibt der Vorschlag, ein Pin

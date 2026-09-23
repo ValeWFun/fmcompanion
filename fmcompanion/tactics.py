@@ -928,6 +928,55 @@ def liga_vergleich(elf, pool, referenz, liga, verein, teams=None,
     Mittel der beiden Stammspieler mit dem Mittel der zwei Besten je Verein;
     Vereine mit nur einem Spieler in den Daten zaehlen dort mit diesem einen.
     """
+    return _positionsvergleich(
+        elf, pool, referenz,
+        lambda p: p.get("league") == liga and p.get("club") != verein,
+        teams, min_minutes)
+
+
+# CL-Niveau: dieselbe Rechnung, aber gegen eine FESTE Liste von 8 Vereinen
+# (Einstellung, typischerweise die CL-Viertelfinalisten der letzten Saison).
+# Aus den Daten geschaetzt taugte die Auswahl nicht – sie mass unser Scouting,
+# nicht die Vereine (Vorpruefung 23.09.: Nottingham Forest vorn, Bayern, Inter
+# und Napoli gar nicht dabei). Messlatte ist der Median der Vereinswerte. Unter
+# CL_MIN_VEREINE Vereinen mit Daten ist das "keine Aussage"; die Zeile nennt die
+# fehlenden, damit klar ist, welchen Kader man noch exportieren muss.
+CL_MIN_VEREINE = 6
+
+
+def cl_vergleich(elf, pool, referenz, vereine, verein, teams=None,
+                 min_minutes=450):
+    """Je Position: eigene Elf gegen die festgelegten CL-Vergleichsvereine.
+
+    vereine: Vereinsnamen wie im Export; der eigene Verein zaehlt nie mit.
+    Zusaetzlich zu liga_vergleich je Zeile: vereine_soll, fehlende_vereine,
+    aussage (bool), messlatte (Median oder None) und abstand (eigen − Messlatte).
+    """
+    ref = {v for v in (vereine or []) if v and v != verein}
+    zeilen = _positionsvergleich(elf, pool, referenz,
+                                 lambda p: p.get("club") in ref, teams, min_minutes)
+    for z in zeilen:
+        mit = {v["club"] for v in z["vereine"]}
+        werte = sorted(v["wert"] for v in z["vereine"])
+        z["vereine_mit_daten"] = len(mit)          # ohne den eigenen Verein
+        z["vereine_soll"] = len(ref)
+        z["fehlende_vereine"] = sorted(ref - mit)
+        z["aussage"] = len(mit) >= CL_MIN_VEREINE
+        if z["aussage"]:
+            n = len(werte)
+            z["messlatte"] = round(werte[n // 2] if n % 2 else
+                                   (werte[n // 2 - 1] + werte[n // 2]) / 2, 1)
+        else:
+            z["messlatte"] = None
+        z["abstand"] = (round(z["wert"] - z["messlatte"], 1)
+                        if z["messlatte"] is not None and z["wert"] is not None else None)
+    return zeilen
+
+
+def _positionsvergleich(elf, pool, referenz, gehoert_dazu, teams=None,
+                        min_minutes=450):
+    """Gemeinsamer Kern von Liga- und CL-Vergleich: je Position die eigene Elf
+    gegen den jeweils besten Spieler jedes Vereins, der gehoert_dazu(p) erfuellt."""
     slots = {s["key"]: s for s in FORMATION}
     out = []
     for key, label, skeys in LIGA_POSITIONEN:
@@ -935,7 +984,7 @@ def liga_vergleich(elf, pool, referenz, liga, verein, teams=None,
         dists, _ = slot_dists(slot, referenz)
         je_verein, alle = {}, []
         for p in pool:
-            if p.get("league") != liga or p.get("club") == verein:
+            if not gehoert_dazu(p):
                 continue
             if (p.get("minutes") or 0) < min_minutes or p.get("score") is None:
                 continue
@@ -1361,9 +1410,16 @@ def meldeliste(kader, start, seit=None, ref_year=None):
         "pl": {"nicht_heimisch": nicht, "max_nicht_heimisch": PL_MAX_NICHT_HEIMISCH,
                "heimisch": heim, "u21": zaehl["u21"], "unbekannt": zaehl["unbekannt"],
                "ueber_21": ueber_21, "kader_max": kader_max,
-               "ok": nicht <= PL_MAX_NICHT_HEIMISCH and ueber_21 <= kader_max,
+               # Mit unbekanntem Status laesst sich nichts sicher sagen – None
+               # statt False, sonst meldete die App einen Verstoss, der nur an
+               # fehlenden Daten haengt (vor dem ersten Import mit der Spalte).
+               "ok": (None if zaehl["unbekannt"] else
+                      nicht <= PL_MAX_NICHT_HEIMISCH and ueber_21 <= kader_max),
                "text": (f"PL: {nicht}/{PL_MAX_NICHT_HEIMISCH} Nicht-Heimische über 21, "
-                        f"{heim} Heimische")},
+                        f"{heim} Heimische"
+                        + (f", {zaehl['unbekannt']} ohne Eigengewächs-Status – "
+                           f"Kader-Export mit der Spalte „Status Eigengewächs“ importieren"
+                           if zaehl["unbekannt"] else ""))},
         "cl": {"verein_15": verein, "land_15": land, "pruefen_0_21": pruefen,
                "pruefen_namen": [p.get("name") for p in offen],
                # sichere Untergrenze; bis zu liste_a_bis, falls die "(0–21)"-
