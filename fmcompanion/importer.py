@@ -28,26 +28,104 @@ COLUMNS = {
     "interceptions": ["AbB"], "key_passes": ["EntP(S)"],
     "clearances": ["Klär.", "Klär"], "headers_won": ["Kopf G"],
     "headers_total": ["Kopf V"], "losses_p90": ["Ballverl/90"],
+    "recoveries_p90": ["Ballgew/90"],
+    # Elfmetertore: ohne sie sind "npTore" schlicht Tore (pen_goals war fest 0)
+    "pen_goals": ["11m-Tor"],
+    # Torhueter: Gegentore und verhinderte Tore/90 – vorher RAM-only, damit
+    # stand jeder gescoutete Keeper mit halbem Profil da. 'Par %' und 'xSv %'
+    # BEWUSST NICHT: FM schreibt dort Unsinn in den Export (-1 %, -903 %).
+    "conceded": ["GegT"], "gp_p90": ["xG verh/90"],
+    # Fluegel/OM-Profil: Chancen kreiert/90 und Tore aus der Distanz
+    "chances_p90": ["Ch/90"], "long_goals": ["Tore durch Fernschüsse"],
+    "blocks": ["Blk"],                     # geblockte Schuesse, Saisonsumme
+    "errors": ["T Feh"],                   # Fehler, die zu Gegentoren fuehrten
+    # Aussenverteidiger: Flanken (angekommen / versucht, Saisonsummen) und
+    # Sprints (nur als /90 im Export). Torwart: Elfmeter fuers Abzeichen.
+    "crosses_ok": ["Fla A"], "crosses_try": ["Fla V"],
+    "sprints_p90": ["Sprints/90"],
+    "pen_saved": ["Parierte Elfer"], "pen_faced": ["Elfer gesamt"],
+    # Paraden, von FM dreigeteilt: 'Sag' = sicher gehalten, 'Spa' = pariert
+    # (abgewehrt), 'Sgh' = gehalten/festgehalten. Ihre Summe sind die Paraden;
+    # Paraden + Gegentore = Schuesse aufs Tor. Daraus entstehen die
+    # Paradenquote und "verhinderte Tore je Schuss" – beides berechnet, weil
+    # FMs eigene Spalten 'Par %' und 'xSv %' im Export kaputt sind.
+    "saves_tipped": ["Sag"], "saves_parried": ["Spa"], "saves_held": ["Sgh"],
+    "clean_sheets": ["Zu-Null-Spiele", "Clean Sheets"],
+    # Sichtbare Stammdaten ohne Zahl: die Persoenlichkeits-Beschreibung und
+    # der Medienumgang stehen auf dem Spielerprofil; verdeckte Werte dahinter
+    # werden NICHT gelesen (siehe charakter.py). Starker Fuss fuer Seiten-
+    # fragen (invertierter Fluegel, linker Innenverteidiger), Info fuer die
+    # Statuskuerzel (Ver = verletzt, Trn = Transferliste, Unz = unzufrieden).
+    "personality": ["Persönlichkeit", "Personality"],
+    "media": ["Medienumgang", "Media Handling"],
+    "foot": ["Starker Fuß", "Preferred Foot"],
+    "info": ["Info"],
+    "height": ["Größe", "Height"],
 }
+# Textfelder, die roh (bereinigt) uebernommen werden; leere Platzhalter -> None
+_TEXT = ["personality", "media", "foot", "info"]
+_TEXT_LEER = {"", "-", "Scouting erforderlich", "Unbekannt"}
 # ganzzahlige Statistik-Felder
 _STAT_INT = ["duels", "duels_total", "shots_total", "shots_on", "pass_try",
              "pass_ok", "dribbles", "prog_passes", "press_win", "press_try",
              "interceptions", "key_passes", "clearances", "headers_won",
-             "headers_total"]
+             "headers_total", "blocks", "errors",
+             "crosses_ok", "crosses_try", "pen_saved", "pen_faced",
+             "saves_tipped", "saves_parried", "saves_held", "clean_sheets"]
 
 
 def _clean(s):
     return re.sub(r"<.*?>", "", s or "").strip()
 
 
+def _dezimal(s):
+    """Zahlstring -> float, unabhaengig vom Zahlformat des Exports.
+
+    FM formatiert Zahlen nach der Spracheinstellung des SPIELS, und die muss
+    nicht zur Sprache der Spaltentitel passen: die Exporte aus diesem Savegame
+    haben deutsche Ueberschriften ('Tore', 'Ø Note') und englische Zahlen
+    ('2,198' Minuten, '6.54' Note). Vorher wurde stur deutsch angenommen und
+    jedes Komma zum Dezimalpunkt gemacht – aus 2198 Minuten wurde int('2.198')
+    und damit None. Betroffen war jeder Spieler ueber 999 Minuten, also genau
+    die Stammspieler; ebenso 'Ps A'/'Pas V' und alle Marktwerte mit Nachkomma
+    ('€17.5Mio' wurde zu 175 Mio).
+
+    Erkannt wird deshalb pro Wert am ZULETZT stehenden Trenner: folgen ihm
+    genau drei Ziffern, ist es ein Tausendertrenner, sonst ein Dezimaltrenner.
+    FM exportiert nie drei Nachkommastellen, damit ist die Regel eindeutig und
+    liest beide Formate ('2.198' wie '2,198' -> 2198, '6,54' wie '6.54' -> 6.54).
+    """
+    t = re.match(r"[+-]?[\d.,]+", (s or "").replace(" ", "").replace("\xa0", ""))
+    if not t:
+        return None
+    t = t.group(0).rstrip(".,")
+    letzte = max(t.rfind("."), t.rfind(","))
+    if letzte < 0:
+        ganz, rest = t, ""
+    elif len(t) - letzte - 1 == 3:            # '2,198' / '2.198' -> Tausender
+        ganz, rest = t.replace(".", "").replace(",", ""), ""
+    else:
+        ganz, rest = t[:letzte].replace(".", "").replace(",", ""), t[letzte + 1:]
+    try:
+        return float(f"{ganz}.{rest}" if rest else ganz)
+    except ValueError:
+        return None
+
+
 def _num(s, cast=float):
     s = _clean(s)
     if not s or s in ("-", "N/A"):
         return None
-    try:
-        return cast(s.replace(",", "."))
-    except ValueError:
-        return None
+    v = _dezimal(s)
+    return None if v is None else cast(v)
+
+
+def _eins(s):
+    """'30 (2)' -> 32. FM schreibt Startelfeinsaetze und Einwechslungen in eine
+    Zelle; int() scheiterte daran und liess 'apps' leer."""
+    s = _clean(s)
+    m = re.match(r"(\d+)(?:\s*\((\d+)\))?", s or "")
+    return int(m.group(1)) + int(m.group(2) or 0) if m else None
 
 
 def parse_money(s):
@@ -68,14 +146,33 @@ def _one_money(s):
     num, unit = m.group(1), m.group(2)
     mult = {"Mrd": 1e9, "B": 1e9, "Mio": 1e6, "M": 1e6,
             "Tsd": 1e3, "K": 1e3, None: 1}.get(unit, 1)
-    if unit in ("Mrd", "Mio", "Tsd", "M", "K", "B"):     # Komma = Dezimal
-        num = num.replace(".", "").replace(",", ".")
-    else:                                                # reine Zahl: Trenner weg
-        num = num.replace(".", "").replace(",", "")
+    v = _dezimal(num)               # erkennt Tausender- vs. Dezimaltrenner selbst
+    return None if v is None else v * mult
+
+
+def diagnose(path):
+    """Klartext, warum eine Datei keine Spieler liefert – oder None.
+
+    Haeufigster Fall: die Liste wurde mit FMs Standard-Scoutingansicht
+    exportiert (Info, Name, Verein, Position, Alter, Transferwert ...) statt
+    mit der Statistik-Ansicht. Dann fehlt die EID, ueber die jeder Import
+    laeuft, und es gibt auch keine einzige Kennzahl – 'keine Spieler gefunden'
+    sagte dazu nichts. Passiert im Winter der 3. Saison mit neun Dateien.
+    """
     try:
-        return float(num) * mult
-    except ValueError:
-        return None
+        with open(path, encoding="utf-8", errors="replace") as f:
+            kopf = [_clean(h) for h in re.findall(r"<th>(.*?)</th>", f.read(), re.S)]
+    except OSError as e:
+        return f"Datei nicht lesbar: {e}"
+    if not kopf:
+        return "keine Tabelle in der Datei"
+    if not any(n in kopf for n in COLUMNS["eid"]):
+        return (f"keine EID-Spalte ({len(kopf)} Spalten: {', '.join(kopf[:6])} …) – "
+                f"die Liste wurde mit der Standardansicht exportiert. In FM die "
+                f"Statistik-Ansicht mit EID wählen und neu exportieren.")
+    if not any(n in kopf for n in COLUMNS["minutes"]):
+        return "EID vorhanden, aber keine Statistikspalten – falsche Ansicht exportiert"
+    return None
 
 
 def parse_export(path):
@@ -120,12 +217,51 @@ def parse_export(path):
             "xa": _num(g(row, "xa")),
             "minutes": _num(g(row, "minutes"), int),
             "rating": _num(g(row, "rating")),
-            "apps": _num(g(row, "apps"), int),
+            "apps": _eins(g(row, "apps")),
         }
         for f in _STAT_INT:
             p[f] = _num(g(row, f), int)
         lp90 = _num(g(row, "losses_p90"))       # nur /90 im Export -> Total ableiten
         m = p["minutes"] or 0
         p["losses"] = round((lp90 or 0) * m / 90) if m else None
+        # Ballgewinne genauso: der Export kennt nur die /90-Rate. Bis hierher
+        # waren sie RAM-only, und jeder Export-Spieler stand in der Vereins-DNA
+        # (Ballgewinner) ohne Wert da.
+        rp90 = _num(g(row, "recoveries_p90"))
+        p["recoveries"] = round((rp90 or 0) * m / 90) if m else None
+        p["pen_goals"] = _num(g(row, "pen_goals"), int) or 0
+        # Torhueter: xGA wird aus Gegentoren + verhinderten Toren rekonstruiert,
+        # weil die Score-Engine mit (xga - conceded) rechnet. 'xG verh/90' ist
+        # FMs eigene Goals-Prevented-Rate; xGP im Export ist derselbe Wert als
+        # Saisonsumme (an Restes gegengeprueft).
+        p["conceded"] = _num(g(row, "conceded"), int)
+        gp90 = _num(g(row, "gp_p90"))
+        p["xga"] = (round((p["conceded"] or 0) + (gp90 or 0) * m / 90, 2)
+                    if (m and p["conceded"] is not None) else None)
+        # Ligen ohne Detailstatistik (im Save: Saudi-Arabien) exportiert FM
+        # nicht als '-', sondern als 0: null Paraden bei 40 Gegentoren und
+        # 'xG verh/90' exakt 0,00. Ein Torwart mit diesen Nullen stuende in
+        # der Paradenquote bei 0 % und bei "verhindert" auf dem Schnitt –
+        # beides Aussagen ueber Daten, die es nicht gibt. Deshalb: keine
+        # Paraden bei mindestens zehn Gegentoren = keine Detailstatistik,
+        # und dann bleiben Paraden UND xGA leer.
+        saves = sum((p.get(k) or 0) for k in ("saves_tipped", "saves_parried", "saves_held"))
+        if p["conceded"] is not None and p["conceded"] >= 10 and saves == 0:
+            for k in ("saves_tipped", "saves_parried", "saves_held"):
+                p[k] = None
+            p["xga"] = None
+        for f in _TEXT:
+            t = _clean(g(row, f))
+            p[f] = None if t in _TEXT_LEER else t
+        # '189 cm' -> 189
+        p["height"] = _num(g(row, "height"), int)
+        # Chancen kreiert: nur als /90 im Export -> Saisonsumme ableiten
+        ch90 = _num(g(row, "chances_p90"))
+        p["chances"] = round((ch90 or 0) * m / 90) if (m and ch90 is not None) else None
+        p["long_goals"] = _num(g(row, "long_goals"), int)
+        # Sprints: einziges Laufmass, das im Export funktioniert ('Lauf/90' ist
+        # ueberall 0.0km). Nur als /90 -> Saisonsumme ableiten.
+        sp90 = _num(g(row, "sprints_p90"))
+        p["sprints"] = round((sp90 or 0) * m / 90) if (m and sp90 is not None) else None
         players.append(p)
     return players

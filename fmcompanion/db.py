@@ -196,13 +196,23 @@ EXPORT_COLS = ["name", "position", "age", "club", "league", "nation",
                "duels", "duels_total", "shots_total", "shots_on", "pass_try",
                "pass_ok", "dribbles", "prog_passes", "press_win", "press_try",
                "interceptions", "key_passes", "clearances", "headers_won",
-               "headers_total", "losses"]
+               "headers_total", "losses", "recoveries",
+               "pen_goals", "conceded", "xga", "chances", "long_goals", "blocks",
+               "errors", "crosses_ok", "crosses_try", "sprints",
+               "pen_saved", "pen_faced",
+               # Paraden (dreigeteilt) und Zu-Null-Spiele der Torhueter
+               "saves_tipped", "saves_parried", "saves_held", "clean_sheets",
+               # sichtbare Stammdaten: Persoenlichkeit, Medienumgang, starker
+               # Fuss, Statuskuerzel, Groesse (cm)
+               "personality", "media", "foot", "info", "height"]
+# Spalten, die Text tragen – alles andere ist REAL
+EXPORT_TEXT = {"name", "position", "club", "league", "nation",
+               "personality", "media", "foot", "info"}
 
 
 def _init_export(conn):
     cols = ", ".join(
-        f"{c} {'TEXT' if c in ('name','position','club','league','nation') else 'REAL'}"
-        for c in EXPORT_COLS)
+        f"{c} {'TEXT' if c in EXPORT_TEXT else 'REAL'}" for c in EXPORT_COLS)
     conn.execute(f"""CREATE TABLE IF NOT EXISTS export_players (
         eid INTEGER PRIMARY KEY, imported_at TEXT, {cols})""")
     # Wertverlauf: je Import eine Zeile (nicht ueberschreiben)
@@ -214,7 +224,7 @@ def _init_export(conn):
             conn.execute("PRAGMA table_info(export_players)").fetchall()}
     for c in EXPORT_COLS:                     # bestehende DBs nachziehen
         if c not in have:
-            typ = "TEXT" if c in ("name", "position", "club", "league", "nation") else "REAL"
+            typ = "TEXT" if c in EXPORT_TEXT else "REAL"
             conn.execute(f"ALTER TABLE export_players ADD COLUMN {c} {typ}")
     conn.commit()
 
@@ -335,6 +345,37 @@ def pool_players(conn, pids=None):
 _indexed = set()
 
 
+def squad_pids_expand(conn, pids):
+    """Gemerkte Kader-IDs ueber die EID auf alle Datensaetze desselben Spielers
+    ausweiten.
+
+    Der eigene Kader wird als RAM-player_id gespeichert, und die ist NICHT
+    stabil: FM fuehrt je Wettbewerb einen eigenen Stat-Record mit eigener id,
+    und nach dem Neuladen eines Spielstands verschieben sich die ids ohnehin.
+    Dadurch zeigte der gemerkte Kader auf Pavlidis' 14-Minuten-Pokaleintrag
+    statt auf seine 256 Saisonminuten – das Taktikbrett bewertete ihn mit 21
+    statt 83, und zwar auf der Startseite.
+
+    Aufgeloest wird ueber den NEUESTEN Snapshot. Dessen Zeilen liegen dank des
+    Primaerschluessels (snapshot_id, player_id) beieinander, ein eigener Index
+    auf eid ist dafuer nicht noetig. Zurueck kommen die urspruenglichen ids
+    PLUS alle weiteren desselben Spielers; welcher davon gewinnt, entscheidet
+    danach die Entdopplung nach Minuten.
+    """
+    pids = {int(p) for p in (pids or ())}
+    latest = latest_snapshot_id(conn)
+    if latest is None or not pids:
+        return pids
+    rows = conn.execute(
+        "SELECT player_id, eid FROM player_stats WHERE snapshot_id = ?",
+        (latest,)).fetchall()
+    eid_von = {r["player_id"]: r["eid"] for r in rows if r["eid"]}
+    gesuchte_eids = {eid_von[p] for p in pids if p in eid_von}
+    if not gesuchte_eids:
+        return pids
+    return pids | {r["player_id"] for r in rows if r["eid"] in gesuchte_eids}
+
+
 def _ensure_indexes(conn):
     """Indizes, ohne die die Historie quadratisch bremst. Werden erst angelegt,
     wenn sie gebraucht werden – bei 1,1 Mio. Zeilen dauert das ein paar
@@ -347,6 +388,11 @@ def _ensure_indexes(conn):
         "ON player_stats(player_id, snapshot_id)",
         "CREATE INDEX IF NOT EXISTS ix_sstats_player "
         "ON season_stats(player_id, snapshot_id)",
+        # form_trend() sucht ueber die EID, nicht ueber die player_id (die ist
+        # je Wettbewerb verschieden). Ohne diesen Index scannt jede Formkurve
+        # die ganze Tabelle – gemessen 1,0-1,4 s je Taktikbrett.
+        "CREATE INDEX IF NOT EXISTS ix_pstats_eid "
+        "ON player_stats(eid, snapshot_id)",
     ):
         try:
             conn.execute(sql)
@@ -423,6 +469,78 @@ def player_history(conn, player_id):
         JOIN snapshots s ON s.id = p.snapshot_id
         WHERE p.player_id = ? ORDER BY s.id""", (player_id,)).fetchall()
     return [dict(r) for r in rows]
+
+
+FORM_MIN_DELTA = 180       # so viele neue Minuten braucht ein Formurteil
+FORM_SCHWELLE = 0.15       # ab dieser Notendifferenz zeigt der Pfeil
+
+
+def form_trend(conn, eids, max_snapshots=400):
+    """Formkurve je Spieler: Note der zuletzt gespielten Minuten gegen den
+    Saisonschnitt. Rueckgabe {eid: {...}}, Spieler ohne Urteil fehlen.
+
+    Drei Eigenheiten der Snapshot-Daten machen das noetig:
+
+    1. Je Spieler steht pro Snapshot EINE ZEILE JE WETTBEWERB (Liga, Pokal,
+       Champions League). Erst die Summe ueber alle ergibt die Saison, deshalb
+       wird je Snapshot aggregiert und die Note ueber die Minuten gewichtet.
+    2. `name` ist als Schluessel unbrauchbar - mehrere Spieler teilen sich
+       Namen, und die Wettbewerbszeilen sehen gleich aus. Gejoint wird ueber
+       `eid`, die zu 98,7 % gefuellt und stabil ist.
+    3. Die Reihe ist NICHT monoton: wird der Spielstand neu geladen oder eine
+       Saison beendet, fallen die Minuten zurueck. Ausgewertet wird deshalb nur
+       die LETZTE durchgehend steigende Strecke.
+
+    Innerhalb dieser Strecke laesst sich die Note der neuen Minuten exakt
+    herausrechnen: Saisonnote und Minuten sind an beiden Enden bekannt, also
+    ist (Note_neu * Min_neu - Note_alt * Min_alt) / (Min_neu - Min_alt) der
+    Schnitt genau der Spiele dazwischen. Das ist echte Form, nicht der traege
+    Saisonschnitt.
+    """
+    eids = [int(e) for e in eids if e]
+    if not eids:
+        return {}
+    _ensure_indexes(conn)
+    ph = ",".join("?" * len(eids))
+    rows = conn.execute(f"""
+        SELECT ps.eid AS eid, ps.snapshot_id AS sid, s.taken_at AS taken_at,
+               SUM(ps.minutes) AS minuten, SUM(ps.goals) AS tore,
+               SUM(ps.rating * ps.minutes) AS notensumme
+        FROM player_stats ps JOIN snapshots s ON s.id = ps.snapshot_id
+        WHERE ps.eid IN ({ph}) AND ps.minutes > 0
+        GROUP BY ps.eid, ps.snapshot_id
+        HAVING SUM(ps.minutes) > 0
+        ORDER BY ps.eid, s.taken_at""", eids).fetchall()
+
+    je_spieler = {}
+    for r in rows:
+        je_spieler.setdefault(r["eid"], []).append(
+            (r["taken_at"], float(r["minuten"]),
+             float(r["notensumme"]) / float(r["minuten"]), float(r["tore"] or 0)))
+
+    raus = {}
+    for eid, reihe in je_spieler.items():
+        reihe = reihe[-max_snapshots:]
+        # letzte durchgehend steigende Strecke ruecklaufend suchen
+        ende = len(reihe) - 1
+        start = ende
+        while start > 0 and reihe[start - 1][1] <= reihe[start][1]:
+            start -= 1
+        min_a, note_a = reihe[start][1], reihe[start][2]
+        min_b, note_b, tore_b = reihe[ende][1], reihe[ende][2], reihe[ende][3]
+        delta_min = min_b - min_a
+        if delta_min < FORM_MIN_DELTA:
+            continue                      # zu wenig neue Spielzeit fuer ein Urteil
+        note_neu = (note_b * min_b - note_a * min_a) / delta_min
+        diff = note_neu - note_b
+        raus[eid] = {
+            "form_note": round(note_neu, 2), "saison_note": round(note_b, 2),
+            "diff": round(diff, 2),
+            "richtung": 1 if diff > FORM_SCHWELLE else (-1 if diff < -FORM_SCHWELLE else 0),
+            "minuten": int(delta_min), "tore": int(tore_b - reihe[start][3]),
+            "seit": reihe[start][0][:16], "punkte": ende - start + 1,
+        }
+    return raus
 
 
 def snapshot_count(conn):

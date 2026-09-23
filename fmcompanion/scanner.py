@@ -139,7 +139,8 @@ def _find_records(regions, id_set, counts=None):
       u16@M-10 == 1                     in allen Ground-Truth-Records konstant
       u16@M+30 == 0                     Minuten sind u16, High-Half stets 0
       f32@M+0 == f32@M+12               gespiegeltes xG-Paar
-      f32@M+4 == f32@M+8                gespiegeltes xA-Paar   (beide 0 erlaubt!)
+      f32@M+4 und f32@M+8               beide >= 0 und < 60 – NICHT auf
+                                        Gleichheit pruefen, siehe unten
       1 <= Minuten <= 6000, 0 < PID <= MAX_PID
       angekommen <= versucht bei Paessen, Schuessen, Zweikaempfen,
       Kopfbaellen und Pressing (Monotonie echter Zaehlerpaare)
@@ -173,8 +174,19 @@ def _find_records(regions, id_set, counts=None):
         h, q = M // 2, M // 4
         ok = u16v[h + 15] == 0                          # M+30 (Minuten-High)
         xg, xa1, xa2, xg2 = f32v[q], f32v[q + 1], f32v[q + 2], f32v[q + 3]
-        ok &= (xg == xg2) & (xa1 == xa2)
+        # M+8 ist KEIN Spiegel von xA. Die frueher hier stehende Bedingung
+        # xa1 == xa2 hat rund ein Drittel aller echten Records verworfen –
+        # bei Ryerson (Dortmund, 29.10.2025) genau den Bundesliga-Record:
+        #   M+0 0.560714 (xG) · M+4 0.321742 (xA) · M+8 0.019950 · M+12 0.560714
+        # Gegen die Spielerstatistik im Spiel geprueft: 8 Einsaetze, 581 Min,
+        # 1 Tor, xG 0.56, Note 7.11 – der Record ist echt, nur M+8 traegt ein
+        # eigenes Feld. In den meisten Records steht dort zufaellig derselbe
+        # Wert wie in M+4, deshalb fiel es lange nicht auf. Was M+8 bedeutet,
+        # ist offen; solange das so ist, wird darauf nur auf einen sinnvollen
+        # Wertebereich geprueft und keine Ordnung unterstellt.
+        ok &= (xg == xg2)
         ok &= (xg >= 0) & (xg < 60) & (xa1 >= 0) & (xa1 < 60)
+        ok &= (xa2 >= 0) & (xa2 < 60)
         mins = u16v[h + 14]
         ok &= (mins >= 1) & (mins <= 6000)
         pid = u32v[(M - 24) // 4]
@@ -408,8 +420,13 @@ def detect_season_apps(hist, ceiling=60):
 
 
 def _plausible(r):
+    # Die Note faengt den Rest ab, den der gelockerte xA-Anker durchlaesst:
+    # FM-Noten liegen zwischen 1 und 10. Live gefunden an "Brandon Ramires"
+    # (11 Einsaetze auf 15 Minuten, Note 77,60) – Fuellspeicher, der alle
+    # Zaehler-Bedingungen besteht, weil dort ueberall 0 steht.
     return (r["pass_ok"] <= r["pass_try"] and r["goals"] <= 25
-            and r["shots_on"] <= r["minutes"] // 6 + 3)
+            and r["shots_on"] <= r["minutes"] // 6 + 3
+            and (not r["rated"] or 1.0 <= r["rating"] <= 10.0))
 
 
 def _is_current(r, limit):
