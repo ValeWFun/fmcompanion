@@ -41,21 +41,24 @@ DIMS = {
     "Abfangen": ("int_p90", lambda p: f"{p['int_p90']:.2f} abgefangen/90 ({int(p.get('interceptions') or 0)} gesamt)"),
     "Ballgewinne": ("rec_p90", lambda p: f"{p['rec_p90']:.2f} Ballgewinne/90"),
     "Dribbler": ("dribbles_p90", lambda p: f"{p['dribbles_p90']:.2f} Dribblings/90"),
-    "Zweikampf": ("duel_pct", lambda p: f"{p['duel_pct']}% Zweikämpfe ({p['duels_p90']:.1f}/90)"),
+    # Zweikampf als gewonnene Duelle/90 – die Zweikampfquote ist zwischen zwei
+    # Saisonhälften Rauschen (Split-Half r 0,01–0,10) und keine Stärke.
+    "Zweikampf": ("duels_p90", lambda p: f"{p['duels_p90']:.1f} gewonnene Zweikämpfe/90"),
     "Kopfball": ("header_pct", lambda p: f"{p['header_pct']}% Kopfbälle"),
     "Note": ("rating_adj", lambda p: f"Ø {p['rating']:.2f}"),
 }
-# Torhüter haben eigene Kennzahlen (siehe moneyball.PROFILES["tw"]).
+# Torhüter haben eigene Kennzahlen (siehe moneyball.PROFILES["tw"]). Kein
+# Shot-Stopping und keine Paradenquote: beides wiederholt sich zwischen zwei
+# Saisonhälften nicht und wäre als „Stärke“ nur Rauschen. Die NüE zählt im
+# Perzentil geschrumpft (note_resid_s), angezeigt wird der rohe Wert.
 DIMS_TW = {
-    "Note über Erwartung": ("note_resid", lambda p: f"NüE {p['note_resid']:+.2f}"),
-    "Shot-Stopping": ("gp_shot", lambda p: f"{p['gp_shot']:.1f} verhindert je 100 Schüsse"),
-    "Paradenquote": ("save_pct", lambda p: f"{p['save_pct']:.0f}% Paraden"),
+    "Note über Erwartung": ("note_resid_s", lambda p: f"NüE {p['note_resid']:+.2f}"),
     "Note": ("rating_adj", lambda p: f"Ø {p['rating']:.2f}"),
 }
 # Quoten zählen nur bei genug Volumen: 100 % Kopfbälle aus zwei Duellen sind
 # keine Stärke. Kennzahl -> Volumenfeld; verlangt wird mindestens der Median der
 # Vergleichsspieler dieser Position.
-VOLUMEN = {"duel_pct": "duels_p90", "header_pct": "headers_total"}
+VOLUMEN = {"header_pct": "headers_total"}
 
 PEER_MIN_MINUTEN = 900      # Vergleichsspieler für Stärken-Perzentile
 LIGA_MIN_MINUTEN = 450      # Mindestminuten des Ligavergleichs (wie carries.py)
