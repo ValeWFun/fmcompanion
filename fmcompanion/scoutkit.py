@@ -23,7 +23,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from fmcompanion import db, moneyball, tactics
+from fmcompanion import db, moneyball, tactics, valuemodel
 
 # Ligavergleich (Api.league_comparison) kennt nur eine Zeile je Positionsgruppe:
 # beide Innenverteidiger und beide Sechser teilen sich Niveau. Stimmt nur, solange
@@ -59,6 +59,12 @@ VOLUMEN = {"duel_pct": "duels_p90", "header_pct": "headers_total"}
 
 PEER_MIN_MINUTEN = 900      # Vergleichsspieler für Stärken-Perzentile
 LIGA_MIN_MINUTEN = 450      # Mindestminuten des Ligavergleichs (wie carries.py)
+# Ab diesem Tag im Jahr gehoeren die Zahlen eines Exports zur Saison, die im
+# selben Jahr begonnen hat (ab Juli); davor zur Saison des Vorjahres. Sommer-
+# Exporte liegen bei Tag ~134 (beendete Saison), Winter-Exporte um den
+# Jahreswechsel (laufende Saison). Nicht zu verwechseln mit
+# tactics.SAISON_AB_TAG (Meldeliste: ab Mai wird fuer die NAECHSTE gemeldet).
+STAT_SAISON_AB_TAG = 182
 
 
 def _pz(werte, v):
@@ -108,15 +114,18 @@ class Kit:
 
         self.kader_eids = api._squad_eids(conn)
         self.stand = api._pool_stand(conn)
-        self.ref_year = ry = api._ref_year(conn)
+        # Bezugsdatum nur LESEN: _bezug kalibriert sonst nach, und das waere
+        # ein Schreibzugriff (siehe app._kalibrieren)
+        self.bezug = api._bezug(conn, kalibrieren=False)
+        self.ref_year = self.bezug["ref_year"]
         self.export = db.load_export(conn)
 
         # Reihenfolge wie im Taktikbrett: anreichern, Referenz bilden, dann
         # Scores gegen die Referenz (add_scores ergänzt die Zeilen in place).
         self.rows = moneyball.enrich(
             [api._export_row_to_player(e) for e in self.export if e.get("eid")],
-            ref_year=ry)
-        self.kohorte = moneyball.enrich(db.cohort_load(conn), ref_year=ry)
+            **self.bezug)
+        self.kohorte = moneyball.enrich(db.cohort_load(conn), **self.bezug)
         self.referenz = self.rows + self.kohorte
         self.ligen = {int(e["eid"]): e["league"] for e in self.export
                       if e.get("eid") and e.get("league")}
@@ -137,7 +146,9 @@ class Kit:
         vergleich = api.league_comparison(LIGA_MIN_MINUTEN)
         self.niveau = {z["key"]: z for z in vergleich.get("positionen", [])}
         self._peers = {}            # je Slot einmal berechnet (siehe _peers_von)
-        self._fair = None           # kommt mit D1 (valuemodel.fair_values)
+        self._fair = None           # valuemodel.fair_values, erst bei Bedarf
+        self.fair_modell = None
+        self._staende_cache = None  # Import-Historie je Spieler (zwei_saisons)
 
     # ------------------------------------------------------------ Leistung
     def slot_leistung(self, p, slot_key):
@@ -250,14 +261,215 @@ class Kit:
 
     # ------------------------------------------------------------ Fair Value
     def fair(self, eid):
-        """Marktwert gegen Fair Value als fertiges Urteil – NOCH NICHT VERFÜGBAR.
+        """Marktwert gegen Fair Value als fertiges Urteil, oder None.
 
-        Platzhalter: liefert immer None, bis valuemodel.fair_values (D1) die
-        fertigen Felder liefert. Später gibt die Methode
         {"markt_mio", "fair_mio", "abweichung_pct", "urteil", "text",
-        "verlaesslich"} zurück, aus fair_value_m, value_delta_pct, fair_urteil,
-        fair_text und value_reliable – nur umbenannt, nichts wird selbst
-        gerechnet. Torhüter und Spieler ohne Minuten/Note bekommen None.
+        "verlaesslich"} aus valuemodel.fair_values – nur umbenannt, nichts wird
+        selbst gerechnet. Torhüter und Spieler ohne Minuten/Note bekommen None.
         Nie eine nackte Prozentzahl ausgeben: positiv heißt unterbewertet.
         """
-        return None
+        if self._fair is None:
+            self._fair, self.fair_modell = valuemodel.fair_values(self.export)
+        fv = self._fair.get(int(eid))
+        if not fv:
+            return None
+        markt = next((e.get("value") for e in self.export
+                      if e.get("eid") and int(e["eid"]) == int(eid)), None)
+        return {"markt_mio": round(markt / 1e6, 1) if markt else None,
+                "fair_mio": fv["fair_value_m"], "abweichung_pct": fv["value_delta_pct"],
+                "urteil": fv["fair_urteil"], "text": fv["fair_text"],
+                "verlaesslich": fv["value_reliable"]}
+
+    # ------------------------------------------------- Zwei Saisons (D11 a)
+    # Zaehlwerte, die sich ueber Teile addieren lassen. Nicht dabei: Zustaende
+    # (Alter, Marktwert, Gehalt, Note, Groesse, Ablöseforderung) – die kommen
+    # aus dem aktuellen Stand, die Note minutengewichtet.
+    NICHT_SUMMIERBAR = {"age", "value", "wage", "rating", "height", "transfer_fee"}
+    # Zaehlwerte, deren /90-Rate die Score-Engine (moneyball._score_metrics,
+    # adj) bzw. der Positions-Fit (tactics.SKALIERBAR) mit dem Liga-
+    # Koeffizienten multipliziert. Tore/xG/xGA werden gesondert behandelt.
+    MB_SKALIERT = {"assists", "press_win", "interceptions", "prog_passes",
+                   "clearances", "xa", "dribbles", "key_passes", "chances",
+                   "duels", "recoveries", "blocks", "headers_won", "crosses_ok",
+                   "sprints"}
+    TAKTIK_SKALIERT = {"xa", "key_passes", "prog_passes", "dribbles",
+                       "recoveries", "interceptions", "press_win", "duels"}
+
+    def _staende(self):
+        """{eid: [Stand, …]} aller Statistik-Staende der Import-Historie,
+        chronologisch, je Stand mit 'saison' = Startjahr der Saison, zu der
+        die Zahlen gehoeren.
+
+        Die Saison kommt aus dem Spieldatum des Imports (moneyball.bezugsdatum
+        ueber RAM-Geburtsjahr + Export-Alter): Sommer-Exporte (Tag ~134) tragen
+        die gerade beendete Saison, Winter-Exporte die laufende. So bleibt ein
+        alter Stand, dessen Spieler seither nicht mehr exportiert wurde, in
+        SEINER Saison und wird nie als Vorsaison missverstanden.
+        """
+        if self._staende_cache is not None:
+            return self._staende_cache
+        self._staende_cache = {}
+        if not db._hat_tabelle(self.conn, "export_importe"):
+            return self._staende_cache
+        geburt = db.geburtsdaten(self.conn)
+        importe = {i["id"]: i for i in db.export_importe(self.conn)
+                   if "minutes" in i["felder"]}
+        je_import = {}
+        for r in self.conn.execute("SELECT * FROM export_stand").fetchall():
+            if r["import_id"] in importe and r["minutes"] is not None:
+                je_import.setdefault(r["import_id"], []).append(dict(r))
+        saison = {}
+        for iid, zeilen in je_import.items():
+            paare = [(*geburt[int(z["eid"])], z["age"]) for z in zeilen
+                     if int(z["eid"]) in geburt and z.get("age")]
+            jahr, tag = moneyball.bezugsdatum(paare)
+            saison[iid] = (None if not jahr else
+                           jahr if (tag is None or tag >= STAT_SAISON_AB_TAG) else jahr - 1)
+        for iid in sorted(je_import, key=lambda i: (importe[i]["imported_at"], i)):
+            for z in je_import[iid]:
+                z["imported_at"], z["saison"] = importe[iid]["imported_at"], saison[iid]
+                liste = self._staende_cache.setdefault(int(z["eid"]), [])
+                # mehrere Dateien eines Laufs (Sechser- UND Achterliste): ein Stand
+                if liste and liste[-1]["imported_at"] == z["imported_at"]:
+                    liste[-1] = z
+                else:
+                    liste.append(z)
+        return self._staende_cache
+
+    @staticmethod
+    def _vereinslaeufe(staende):
+        """Staende EINER Saison -> je Vereinsstation der letzte Stand.
+
+        Der Export zaehlt nach einem Wechsel nur die Zeit beim aktuellen
+        Verein (Transfer wie Leihe; an Winter3 gegen Summer3 gemessen: Shpendi
+        Forest 1678 -> United 722 Minuten), innerhalb eines Vereins addiert er
+        auf. Saisonsumme = Summe der letzten Staende je Station.
+        """
+        laeufe = []
+        for s in staende:
+            if laeufe and laeufe[-1]["club"] == s["club"]:
+                laeufe[-1] = s
+            else:
+                laeufe.append(s)
+        return laeufe
+
+    def _aus_teilen(self, basis, teile):
+        """Kombinierte Zeile aus mehreren Teilen -> (zeile_score, zeile_fit).
+
+        Summiert werden die Zaehlwerte; Raten ergeben sich daraus minuten-
+        gewichtet, Quoten aus den Summen. Liga-Koeffizient und Noten-Offset
+        gelten JE TEIL: die Engine rechnet mit dem Koeffizienten der aktuellen
+        Liga, deshalb wird jeder Teil vorher auf ihn umgerechnet
+        (Zaehlwert x Koeff_Teil / Koeff_aktuell, Note - Offset_Teil +
+        Offset_aktuell). Weil Score-Engine und Positions-Fit nicht dieselben
+        Kennzahlen skalieren, entstehen zwei Zeilen: eine fuer den Score, eine
+        fuer den Fit. Tore und xG skaliert die Engine ohne Elfmeter, xGA nur
+        als Differenz zu den Gegentoren. Naeherung bleibt nur bei Wechslern
+        zwischen Ligen fuer "Eiskaelte" (Tore ueber xG) und den Fernschuss-
+        anteil – beide rechnen mit den umgerechneten Toren.
+        """
+        liga = basis.get("league")
+        c_jetzt = moneyball.league_coeff(liga)
+        off_jetzt = moneyball.note_offset(liga)
+        summe = [c for c in db.EXPORT_COLS
+                 if c not in db.EXPORT_TEXT and c not in self.NICHT_SUMMIERBAR]
+        mb, fit = dict(basis), dict(basis)
+        for c in summe:
+            werte = [t.get(c) for t in teile]
+            if any(v is None for v in werte):
+                mb[c] = fit[c] = None
+                continue
+            mb[c] = fit[c] = 0.0
+            for t, v in zip(teile, werte):
+                f = moneyball.league_coeff(t.get("league")) / c_jetzt
+                mb[c] += v * f if c in self.MB_SKALIERT else v
+                fit[c] += v * f if c in self.TAKTIK_SKALIERT else v
+        # Sonderfaelle: Tore/xG (Engine ohne Elfmeter, Fit mit), xGA (Differenz)
+        for c, zeile in (("goals", mb), ("xg", mb), ("goals", fit), ("xg", fit), ("xga", mb), ("xga", fit)):
+            if zeile.get(c) is None:
+                continue
+            zeile[c] = 0.0
+            for t in teile:
+                f = moneyball.league_coeff(t.get("league")) / c_jetzt
+                v, pen, conc = t.get(c) or 0, t.get("pen_goals") or 0, t.get("conceded") or 0
+                if c == "xga":
+                    zeile[c] += conc + (v - conc) * f
+                elif zeile is mb:
+                    fest = pen if c == "goals" else 0.76 * pen
+                    zeile[c] += fest + (v - fest) * f
+                else:
+                    zeile[c] += v * f
+        m = sum(t.get("minutes") or 0 for t in teile)
+        noten = [(t.get("minutes") or 0, t.get("rating"), t.get("league")) for t in teile]
+        if m and all(r for _, r, _ in noten):
+            note = sum(mi * (r - moneyball.note_offset(lg) + off_jetzt)
+                       for mi, r, lg in noten) / m
+            mb["rating"] = fit["rating"] = note
+        return mb, fit
+
+    def zwei_saisons(self):
+        """Vorsaison und laufende Saison gemeinsam bewertet – nur Analyse (D11 a).
+
+        Je Spieler aus Pool und Kader:
+          saison_jetzt / saison_vor : Startjahr der Saisons (siehe _staende)
+          teile_jetzt / teile_vor   : Vereinsstationen je Saison
+                                      [{imported_at, club, league, minutes}]
+          minuten_jetzt / minuten_vor
+          wechsel_in_saison : mehr als eine Station in der laufenden Saison
+          luecke            : Spiele zwischen letztem Export beim alten Verein
+                              und dem Wechsel fehlen (bei jedem Wechsel in
+                              einer Saison) – die Summe ist eine Untergrenze
+          ligawechsel       : Teile aus anderen Ligen; Koeffizient und Noten-
+                              Offset sind je Teil umgerechnet (exakt bis auf
+                              Eiskaelte/Fernschussanteil, siehe _aus_teilen)
+          jetzt   : Zeile des Kits (nur der letzte Stand – nach einem Wechsel
+                    nur die Zeit beim neuen Verein!)
+          saison  : laufende Saison ueber alle Stationen, bewertet (oder None)
+          kombi   : laufende + Vorsaison, bewertet (oder None)
+        saison/kombi sind Zeilen fuer den Fit mit dem Score der Score-Zeile –
+        kit.slot_leistung(eintrag["kombi"], slot_key) funktioniert damit direkt.
+        Die bestehende Bewertung aendert sich nicht.
+        """
+        staende = self._staende()
+        roh = {int(e["eid"]): e for e in self.export if e.get("eid")}
+        aus, zu_scoren = [], []
+
+        def teil_info(t):
+            return {k: t.get(k) for k in ("imported_at", "club", "league", "minutes")}
+
+        for p in self.pool + self.kader:
+            e = int(p["eid"])
+            st = staende.get(e) or []
+            s_jetzt = st[-1]["saison"] if st else None
+            jetzt = self._vereinslaeufe([s for s in st if s["saison"] == s_jetzt]) if st else []
+            vor = (self._vereinslaeufe([s for s in st if s["saison"] == s_jetzt - 1])
+                   if s_jetzt is not None else [])
+            teile = vor + jetzt
+            liga = p.get("league")
+            eintrag = {"eid": e, "name": p.get("name"),
+                       "saison_jetzt": s_jetzt, "saison_vor": s_jetzt - 1 if vor else None,
+                       "teile_jetzt": [teil_info(t) for t in jetzt],
+                       "teile_vor": [teil_info(t) for t in vor],
+                       "minuten_jetzt": sum(t.get("minutes") or 0 for t in jetzt) if jetzt else None,
+                       "minuten_vor": sum(t.get("minutes") or 0 for t in vor) if vor else None,
+                       "wechsel_in_saison": len(jetzt) > 1,
+                       "luecke": len(jetzt) > 1 or len(vor) > 1,
+                       "ligawechsel": any(t.get("league") != liga for t in teile),
+                       "jetzt": p, "saison": None, "kombi": None}
+            aus.append(eintrag)
+            if e not in roh:
+                continue
+            if len(jetzt) > 1:
+                zu_scoren.append((eintrag, "saison", self._aus_teilen(roh[e], jetzt)))
+            if vor and jetzt:
+                zu_scoren.append((eintrag, "kombi", self._aus_teilen(roh[e], teile)))
+        if zu_scoren:
+            als_spieler = self.api._export_row_to_player
+            mb = moneyball.enrich([als_spieler(z[2][0]) for z in zu_scoren], **self.bezug)
+            fit = moneyball.enrich([als_spieler(z[2][1]) for z in zu_scoren], **self.bezug)
+            moneyball.add_scores(mb, self.referenz, self.ligen)
+            for (eintrag, feld, _), z_mb, z_fit in zip(zu_scoren, mb, fit):
+                for k in ("score", "score_parts", "profile_label", "talent", "prospect"):
+                    z_fit[k] = z_mb.get(k)
+                eintrag[feld] = z_fit
+        return aus

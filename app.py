@@ -42,6 +42,9 @@ class Api:
         # das Umschalten zwischen den Suchmodi nicht jedes Mal 30.000 Zeilen
         # neu anreichert. Unterstrich, sonst spiegelt pywebview das nach JS.
         self._repl_cache = None
+        # Kader-Datei, die auf eine Rueckfrage (Vereinswechsel?) wartet.
+        # Unterstrich: der Pfad soll nicht nach JS gespiegelt werden.
+        self._kader_offen = None
 
     def _db(self):
         conn = getattr(self._local, "conn", None)
@@ -140,8 +143,11 @@ class Api:
 
     BEZUG_VERSION = "2"        # Kalibrierung nach moneyball.bezugsdatum (Sept. 2026)
 
-    def _bezug(self, conn):
+    def _bezug(self, conn, kalibrieren=True):
         """Bezugsdatum fuers Alter: {"ref_year", "ref_day"} fuer moneyball.enrich.
+
+        kalibrieren=False fuer rein lesende Aufrufer (Scoutkit): dann wird
+        nur gelesen, auch wenn der Cache noch aus der alten Logik stammt.
 
         Der RAM liefert das GEBURTSDATUM, nicht das Alter – ohne aktuelles
         Spieldatum ist es wertlos. Das Spieldatum liess sich im Speicher nicht
@@ -151,7 +157,7 @@ class Api:
         manual = int(db.get_setting(conn, "season_year", 0) or 0)
         if manual:
             return {"ref_year": manual, "ref_day": None}
-        if db.get_setting(conn, "bezug_version", "") != self.BEZUG_VERSION:
+        if kalibrieren and db.get_setting(conn, "bezug_version", "") != self.BEZUG_VERSION:
             # Einmal nachkalibrieren, wenn der Cache noch aus der alten Logik
             # stammt (Median ueber alle Zeilen, 2025 statt 2028) – sonst
             # stimmten Alter und U21-Grenze bis zum naechsten Import nicht.
@@ -619,7 +625,7 @@ class Api:
         except Exception:
             return set()
 
-    def _squad_from_players(self, conn, players):
+    def _squad_from_players(self, conn, players, wechsel_ok=False):
         """Kader aus einer Export-Datei: alle Spieler des Hauptvereins.
 
         Der Hauptverein ist der haeufigste in der Datei. Wer einen anderen
@@ -630,8 +636,13 @@ class Api:
         Spielern in der Datei, gewinnt er gegen den haeufigsten: eine
         Scoutingliste, die versehentlich als Kader importiert wird, soll den
         Kader nicht auf RB Leipzig umstellen, nur weil dort zufaellig die
-        meisten Zeilen herkommen. Ein echter Vereinswechsel laeuft weiter
-        ueber den Export des NEUEN Vereins – der alte hat darin keine elf.
+        meisten Zeilen herkommen.
+
+        Ist die Datei der Kader eines ANDEREN Vereins, wechselt der eigene
+        Verein nur mit wechsel_ok – sonst kommt eine Rueckfrage zurueck. Seit
+        im Winter die Kader der CL-Vergleichsvereine exportiert werden, sieht
+        so eine Datei aus wie Team.html; ueber den falschen Knopf importiert,
+        haette sie den eigenen Kader lautlos auf FC Bayern umgestellt.
         """
         from collections import Counter
         clubs = Counter(p.get("club") for p in players if p.get("club"))
@@ -646,6 +657,16 @@ class Api:
         if len(eids) < 11:
             return {"ok": False, "error": f"Nur {len(eids)} Spieler von {verein} "
                                           f"in der Datei – das ist kein Kader."}
+        if bisher and verein != bisher and not wechsel_ok:
+            frage = (f"Die Datei ist der Kader von {verein}, nicht von {bisher}. "
+                     f"Als eigenen Kader übernehmen (Vereinswechsel)?")
+            # 'error' fuer Oberflaechen, die die Rueckfrage nicht kennen
+            return {"ok": False, "rueckfrage": "vereinswechsel", "frage": frage,
+                    "error": frage + " Bis zur Bestätigung ist nichts geändert.",
+                    "verein_datei": verein, "verein_bisher": bisher,
+                    "anzahl": len(eids),
+                    "hinweis": ("Die Spieler sind wie bei „Import“ eingelesen; "
+                                "Kader und eigener Verein sind unverändert.")}
         return self._set_squad(conn, verein, eids, len(players) - len(eids))
 
     def _set_squad(self, conn, verein, eids, verliehen=0):
@@ -718,10 +739,34 @@ class Api:
             return {"ok": False, "error": importer.diagnose(path)
                     or "Keine Spieler in der Datei gefunden."}
         conn = self._db()
+        # Die Daten werden in jedem Fall eingelesen – auch der Kader eines
+        # fremden Vereins ist als Liste wertvoll (CL-Vergleich).
         db.save_export(conn, players, felder, datei=os.path.basename(path))
         res = self._squad_from_players(conn, players)
+        self._kader_offen = path if res.get("rueckfrage") else None
         self._kalibrieren(conn)             # erst jetzt steht der neue _pool_stand
         return res
+
+    def import_squad_confirm(self):
+        """Rueckfrage bestaetigt: die zuletzt gewaehlte Kader-Datei wird der
+        eigene Kader, auch wenn sie einem anderen Verein gehoert
+        (Vereinswechsel). Die Daten sind schon eingelesen."""
+        path, self._kader_offen = self._kader_offen, None
+        if not path:
+            return {"ok": False, "error": "Keine offene Rückfrage zum Kader-Import."}
+        try:
+            players = importer.parse_export(path)
+        except Exception as e:
+            return {"ok": False, "error": f"Datei nicht mehr lesbar: {e}"}
+        conn = self._db()
+        res = self._squad_from_players(conn, players, wechsel_ok=True)
+        self._kalibrieren(conn)
+        return res
+
+    def import_squad_cancel(self):
+        """Rueckfrage verworfen: Kader und eigener Verein bleiben, wie sie sind."""
+        self._kader_offen = None
+        return {"ok": True}
 
     def import_squad(self):
         """Dialog: Export des EIGENEN Vereins waehlen -> das ist der Kader."""
@@ -1285,6 +1330,7 @@ class Api:
                  "name": r.get("name"), "club": r.get("club"),
                  "league": r.get("league"), "position": r.get("position"),
                  "age": r.get("age"), "foot": r.get("foot"),
+                 "fuss_passung": tactics.fuss_passung(r.get("foot"), slot_key),
                  "minutes": r.get("minutes"), "rating": r.get("rating"),
                  "stand": r.get("imported_at"), "im_kader": e in eids,
                  "charakter": r.get("pers_score"),
@@ -1383,7 +1429,7 @@ class Api:
                 "teile": b["teile"], "verlaesslich": b["verlaesslich"],
                 "carry": b["carry"]}, anfrage_id=anfrage))
         return {"ok": True,
-                "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "duty")},
+                "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz", "duty")},
                 "vergleichsbasis": basis, "char_gewicht": tactics.CHAR_GEWICHT,
                 "spieler": spieler}
 
@@ -1606,7 +1652,13 @@ def main():
         width=1280, height=820, min_size=(960, 600),
         background_color="#0b0e12",   # --bg (dunkel): kein heller Blitz beim Start
     )
-    webview.start(api._boot)
+    # pywebview 6 startet sonst im InPrivate-Modus (private_mode=True) und
+    # loescht den WebView-Datenordner beim Beenden – die Hell/Dunkel-Wahl und
+    # alles andere im localStorage ueberlebte keinen Neustart. Eigener Ordner
+    # unter %APPDATA%, damit nichts mit anderen pywebview-Apps geteilt wird.
+    speicher = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
+                            "FMCompanion", "webview")
+    webview.start(api._boot, private_mode=False, storage_path=speicher)
 
 
 if __name__ == "__main__":
