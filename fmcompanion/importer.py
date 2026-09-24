@@ -73,9 +73,56 @@ COLUMNS = {
     "foot": ["Starker Fuß", "Preferred Foot"],
     "info": ["Info"],
     "height": ["Größe", "Height"],
+    # Spielbilanz: Siege, Unentschieden, Niederlagen in den Spielen, in denen
+    # der Spieler eingesetzt war, Einwechslungen eingeschlossen. An test.html
+    # (Sept. 2026) geprueft: S + U + Niederlage = Eins (Rugai 16+8+8 = 32,
+    # Ray Jones 0+1+0 = "0 (1)"). "defeats", weil "losses" die Ballverluste
+    # sind. Die Siegquote rechnet sich hieraus – 'SiegQ' ist kaputt.
+    "wins": ["S"], "draws": ["U"], "defeats": ["Niederlage"],
+    # Vertragsende und Geburtsdatum, gespeichert als ISO-Datum (_datum). Mit
+    # dem Geburtsdatum ist der U21-Stichtag der Meldeliste exakt.
+    "contract_end": ["Endet", "Expires"],
+    "birth_date": ["Geb.", "DoB"],
+    # Staerke je Fuss als Stufenwort ("Sehr stark", "Passabel", "Schwach");
+    # gespeichert wird das Wort, die Rangfolge macht tactics.fuss_rang –
+    # so aendert eine bestaetigte Stufenliste nichts an gespeicherten Daten.
+    "foot_right": ["Rechter Fuß", "Right Foot"],
+    "foot_left": ["Linker Fuß", "Left Foot"],
+    "transfer_status": ["Transferstatus", "Transfer Status"],
+    # Tore gegen bzw. fuer das TEAM, waehrend der Spieler auf dem Platz steht,
+    # je 90 Minuten (Plus/Minus). Gezaehlt werden alle Pflichtspiele samt
+    # Supercup, keine Testspiele. Am Man-Utd-Kader gegen den echten Spielplan
+    # bestaetigt (24.09.2026): Kotarski mit 990 Min = genau 38:5 aus allen 11
+    # Pflichtspielen, die Summe ueber den Kader = 11 x Teamtore bzw.
+    # -gegentore. Kleine Minuten erzeugen Ausreisser (73 Min -> 8,63).
+    # Kalenderjahr-Ligen (Brasilien) sind noch nicht geprueft. Gespeichert
+    # als ZAEHLWERTE team_tore_on/team_gt_on (Rate x Min / 90, gerundet):
+    # nur Zaehlwerte lassen sich fuer Halbserien subtrahieren (Summer -
+    # Winter), wie Tore oder Paesse. NICHT in Berechnungen und NICHT in der
+    # Anzeige, bis der Datenanalyst sein Plus/Minus-Verfahren festgelegt hat.
+    "team_gt_p90": ["TGgt/90"], "team_tore_p90": ["Ttor/90"],
 }
+# Spalten, die NIE gelesen werden, auch nicht als Text – jede mit Grund. Ein
+# Alias in COLUMNS, der hier steht, faellt beim Laden des Moduls auf.
+NIE_LESEN = {
+    # Regel 2 (CLAUDE.md): "Gut - Gut", "Hervorragend - Hervorragend" ist die
+    # verbale Scout-Einschaetzung von Faehigkeit und Potenzial, also die
+    # verdeckten CA/PA in Worten. Ebenso Faehigkeit/Potenzial der Standard-
+    # Scoutingansicht.
+    "Eignung": "Regel 2: Scout-Einschätzung von Fähigkeit und Potenzial",
+    "Fähigkeit": "Regel 2: verdeckte aktuelle Fähigkeit",
+    "Potenzial": "Regel 2: verdecktes Potenzial",
+    # Im Export kaputt (dasselbe Muster wie die Paradenquoten): 'SiegQ' steht
+    # ueberall auf 0 %, obwohl S > 0 – die Quote kommt aus S/U/Niederlage.
+    "SiegQ": "kaputt: überall 0 %, aus S/U/Niederlage rechnen",
+    "Par %": "kaputt: -1 %, -626 %, -903 %",
+    "xSv %": "kaputt: -1 %, -626 %, -903 %",
+}
+_verboten = {n for names in COLUMNS.values() for n in names} & set(NIE_LESEN)
+assert not _verboten, f"Spalten in COLUMNS, die nie gelesen werden duerfen: {_verboten}"
 # Textfelder, die roh (bereinigt) uebernommen werden; leere Platzhalter -> None
-_TEXT = ["personality", "media", "foot", "info", "homegrown"]
+_TEXT = ["personality", "media", "foot", "info", "homegrown",
+         "foot_right", "foot_left", "transfer_status"]
 _TEXT_LEER = {"", "-", "Scouting erforderlich", "Unbekannt"}
 # ganzzahlige Statistik-Felder
 _STAT_INT = ["duels", "duels_total", "shots_total", "shots_on", "pass_try",
@@ -135,9 +182,17 @@ def _num(s, cast=float):
 def _eins(s):
     """'30 (2)' -> 32. FM schreibt Startelfeinsaetze und Einwechslungen in eine
     Zelle; int() scheiterte daran und liess 'apps' leer."""
-    s = _clean(s)
-    m = re.match(r"(\d+)(?:\s*\((\d+)\))?", s or "")
-    return int(m.group(1)) + int(m.group(2) or 0) if m else None
+    start, ein = _eins_getrennt(s)
+    return None if start is None else start + ein
+
+
+def _eins_getrennt(s):
+    """'41 (4)' -> (41, 4), '32' -> (32, 0), '-' -> (None, None).
+
+    Getrennt, weil eine Siegbilanz mit spaeten Einwechslungen etwas anderes
+    misst als eine aus Startelfeinsaetzen (Datenanalyst, D17)."""
+    m = re.match(r"(\d+)(?:\s*\((\d+)\))?", _clean(s) or "")
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else (None, None)
 
 
 def parse_money(s):
@@ -148,6 +203,55 @@ def parse_money(s):
     vals = [_one_money(p) for p in s.split(" - ")]
     vals = [v for v in vals if v is not None]
     return int(sum(vals) / len(vals)) if vals else None
+
+
+def parse_money_spanne(s):
+    """Transferwert als Spanne: '€120K - €1.2Mio' -> (120000, 1200000),
+    '€5Mio' -> (5000000, 5000000), '-' / 'Unbekannt' -> (None, None).
+
+    FM zeigt den Wert als Spanne, deren Breite den Wissensstand zeigt: Faktor
+    10 heisst kaum gescoutet. parse_money (Feld 'value') bleibt der Mittelwert.
+    """
+    s = _clean(s)
+    vals = [_one_money(t) for t in s.split(" - ")] if s and s != "-" else []
+    vals = [int(v) for v in vals if v is not None]
+    return (min(vals), max(vals)) if vals else (None, None)
+
+
+_DATUM = re.compile(r"(\d{1,2})[./-](\d{1,2})[./-](\d{4})")
+
+
+def _datumsfolge(werte):
+    """'dmy' oder 'mdy' fuer die Datumsspalten EINER Datei.
+
+    Wie beim Zahlformat folgt das Datum der Spracheinstellung des Spiels,
+    nicht der Sprache der Spaltentitel. Entschieden wird an der ganzen Datei:
+    steht irgendwo vorn eine Zahl ueber 12, ist es Tag/Monat, steht sie nur
+    in der Mitte, Monat/Tag. Sonst Tag/Monat, wie in allen Exporten dieses
+    Spielstands ('30/6/2031').
+    """
+    vorn = mitte = False
+    for w in werte:
+        m = _DATUM.match(_clean(w))
+        if m:
+            vorn |= int(m.group(1)) > 12
+            mitte |= int(m.group(2)) > 12
+    return "mdy" if (mitte and not vorn) else "dmy"
+
+
+def _datum(s, folge="dmy"):
+    """'30/6/2031' oder '15/5/2002 (26 Jahre alt)' -> '2031-06-30' / '2002-05-15'
+    (ISO, sortier- und vergleichbar) oder None."""
+    from datetime import date
+    m = _DATUM.match(_clean(s))
+    if not m:
+        return None
+    a, b, jahr = (int(x) for x in m.groups())
+    tag, monat = (a, b) if folge == "dmy" else (b, a)
+    try:
+        return date(jahr, monat, tag).isoformat()
+    except ValueError:
+        return None
 
 
 def _one_money(s):
@@ -190,7 +294,7 @@ def diagnose(path):
 # COLUMNS-Eintraege, die nur als Quelle fuer ein abgeleitetes Feld dienen und
 # selbst nicht gespeichert werden.
 _NUR_QUELLE = {"eid", "losses_p90", "recoveries_p90", "gp_p90", "chances_p90",
-               "sprints_p90"}
+               "sprints_p90", "team_tore_p90", "team_gt_p90"}
 # Abgeleitete Felder und ALLE Spalten, aus denen sie entstehen. Fehlt eine
 # davon, steht im Feld ein Ersatzwert (xga waeren dann nackte Gegentore) –
 # es gilt deshalb als NICHT in der Datei enthalten und wird nicht gespeichert.
@@ -200,6 +304,15 @@ _ABGELEITET = {
     "xga": ("conceded", "gp_p90", "minutes"),
     "chances": ("chances_p90", "minutes"),
     "sprints": ("sprints_p90", "minutes"),
+    # Unter- und Obergrenze der Transferwert-Spanne
+    "value_min": ("value",),
+    "value_max": ("value",),
+    # Plus/Minus des Teams als Zaehlwerte (siehe COLUMNS)
+    "team_tore_on": ("team_tore_p90", "minutes"),
+    "team_gt_on": ("team_gt_p90", "minutes"),
+    # Startelfeinsaetze und Einwechslungen aus derselben Zelle wie 'apps'
+    "apps_start": ("apps",),
+    "apps_sub": ("apps",),
 }
 
 
@@ -240,6 +353,7 @@ def parse_export_felder(path):
         i = col.get(field)
         return row[i] if i is not None and i < len(row) else None
 
+    folge = _datumsfolge([g(r, f) for r in rows for f in ("contract_end", "birth_date")])
     players = []
     for row in rows:
         eid = _clean(g(row, "eid"))
@@ -308,5 +422,17 @@ def parse_export_felder(path):
         # ueberall 0.0km). Nur als /90 -> Saisonsumme ableiten.
         sp90 = _num(g(row, "sprints_p90"))
         p["sprints"] = round((sp90 or 0) * m / 90) if (m and sp90 is not None) else None
+        # Spielbilanz ('-' ohne Einsatz -> None) und Datumsfelder
+        for f in ("wins", "draws", "defeats"):
+            p[f] = _num(g(row, f), int)
+        p["apps_start"], p["apps_sub"] = _eins_getrennt(g(row, "apps"))
+        # Plus/Minus des Teams als Zaehlwerte, noch ungenutzt (siehe COLUMNS).
+        # Kotarski: 3,45 x 990 / 90 = 37,95 -> 38 Tore, 0,45 x 11 -> 5 Gegentore.
+        for f, quelle in (("team_tore_on", "team_tore_p90"), ("team_gt_on", "team_gt_p90")):
+            r90 = _num(g(row, quelle))
+            p[f] = round(r90 * m / 90) if (m and r90 is not None) else None
+        p["contract_end"] = _datum(g(row, "contract_end"), folge)
+        p["birth_date"] = _datum(g(row, "birth_date"), folge)
+        p["value_min"], p["value_max"] = parse_money_spanne(g(row, "value"))
         players.append(p)
     return players, felder

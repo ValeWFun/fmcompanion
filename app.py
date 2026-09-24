@@ -762,6 +762,7 @@ class Api:
         self._kader_offen = path if res.get("rueckfrage") else None
         self._kalibrieren(conn)             # erst jetzt steht der neue _pool_stand
         self._rechen_neu()
+        res["hinweise"] = self._import_hinweise(players)
         return res
 
     def import_squad_confirm(self):
@@ -1210,6 +1211,10 @@ class Api:
     STUERMER_HINWEIS = ("Stürmerzahlen wandern nach einem Vereinswechsel kaum mit "
                         "(Split-Half r 0,07–0,16, kleine Stichprobe) – die Torgefahr "
                         "hängt stark an der Chancenzufuhr des Vereins.")
+    # Transferwert-Spanne breiter als Faktor 3 (Obergrenze / Untergrenze):
+    # der eigene Verein kennt den Spieler kaum, der Preis ist unsicher.
+    SPANNE_UNSICHER = 3.0
+    PREIS_UNSICHER_TEXT = "kaum gescoutet – Preis unsicher"
 
     def _planer_gespeichert(self, conn):
         import json
@@ -1305,11 +1310,28 @@ class Api:
         fee, wert = e.get("transfer_fee"), e.get("value")
         betrag, quelle = ((fee, "forderung") if fee else (wert, "marktwert") if wert
                           else (None, None))
+        # Transferwert-Spanne (D17): der Mittelwert bleibt die Naeherung, die
+        # Spanne zeigt den Wissensstand. Ungünstiger Fall: wir zahlen die
+        # Obergrenze und bekommen die Untergrenze. Eine gesetzte Forderung
+        # hat Vorrang, dann gibt es keine Spanne.
+        lo, hi = e.get("value_min"), e.get("value_max")
+        faktor = round(hi / lo, 1) if (lo and hi) else None
+        if quelle == "marktwert":
+            unguenstig = (hi if richtung == "zugang" else lo) or wert
+        else:
+            unguenstig = betrag
         stuermer = bool(tactics.eligible(pl, st_slot)[0])
         return {"eid": int(e["eid"]), "name": e.get("name"), "club": e.get("club"),
                 "league": e.get("league"), "position": e.get("position"),
                 "age": e.get("age"), "value_m": round(wert / 1e6, 1) if wert else None,
-                "abloese": betrag, "abloese_quelle": quelle, "wage": e.get("wage"),
+                "value_min_m": round(lo / 1e6, 1) if lo else None,
+                "value_max_m": round(hi / 1e6, 1) if hi else None,
+                "spanne_faktor": faktor,
+                "preis_hinweis": ({"art": "kaum_gescoutet", "text": self.PREIS_UNSICHER_TEXT}
+                                  if (quelle == "marktwert" and faktor is not None
+                                      and faktor > self.SPANNE_UNSICHER) else None),
+                "abloese": betrag, "abloese_unguenstig": unguenstig,
+                "abloese_quelle": quelle, "wage": e.get("wage"),
                 "homegrown": e.get("homegrown"), "pl_status": pl.get("pl_status"),
                 "pl_text": pl.get("pl_text"), "pl_grenzfall": pl.get("pl_grenzfall"),
                 "stuermer": stuermer, "stand": e.get("imported_at"),
@@ -1414,9 +1436,13 @@ class Api:
             quelle = ("unbekannt" if q is None else "Marktwert (Näherung)" if q == "marktwert"
                       else "Ablöseforderung" if richtung == "zugang" else "unsere Forderung")
             zeilen.append({"eid": pers["eid"], "name": pers["name"], "richtung": richtung,
-                           "betrag": pers["abloese"], "quelle": quelle})
+                           "betrag": pers["abloese"], "betrag_unguenstig": pers["abloese_unguenstig"],
+                           "quelle": quelle})
         ausgaben = sum(z["betrag"] or 0 for z in zeilen if z["richtung"] == "zugang")
         einnahmen = sum(z["betrag"] or 0 for z in zeilen if z["richtung"] == "abgang")
+        # Ungünstiger Fall: Zugaenge zur Obergrenze, Abgaenge zur Untergrenze
+        aus_ung = sum(z["betrag_unguenstig"] or 0 for z in zeilen if z["richtung"] == "zugang")
+        ein_ung = sum(z["betrag_unguenstig"] or 0 for z in zeilen if z["richtung"] == "abgang")
         return {"name": name, "kader_anzahl": len(eids), "zugaenge": zug_p, "abgaenge": abg_p,
                 "warnungen": warn,
                 "brett": {"pins": brett["pins"], "slots": slots, "ueberzaehlig": ueber},
@@ -1428,7 +1454,11 @@ class Api:
                 "gehalt": {"woche": woche, "jahr": woche * 52, "heutiges_gehalt": bool(z_ok),
                            "ohne_gehalt": ohne},
                 "transfer": {"ausgaben": ausgaben, "einnahmen": einnahmen,
-                             "saldo": einnahmen - ausgaben, "zeilen": zeilen}}
+                             "saldo": einnahmen - ausgaben,
+                             "ausgaben_unguenstig": aus_ung, "einnahmen_unguenstig": ein_ung,
+                             "saldo_unguenstig": ein_ung - aus_ung,
+                             "kaum_gescoutet": sum(1 for p in zug_p + abg_p if p["preis_hinweis"]),
+                             "zeilen": zeilen}}
 
     @staticmethod
     def _planer_delta(li, re):
@@ -1474,7 +1504,9 @@ class Api:
                            "ab_schwelle_rechts": sl_r[key]["ab_schwelle"]} for key in sl_l],
                 "gehalt": {"woche": re["gehalt"]["woche"] - li["gehalt"]["woche"],
                            "jahr": re["gehalt"]["jahr"] - li["gehalt"]["jahr"]},
-                "transfer_saldo": re["transfer"]["saldo"] - li["transfer"]["saldo"]}
+                "transfer_saldo": re["transfer"]["saldo"] - li["transfer"]["saldo"],
+                "transfer_saldo_unguenstig": (re["transfer"]["saldo_unguenstig"]
+                                              - li["transfer"]["saldo_unguenstig"])}
 
     def planer_vergleich(self, links="Ist", rechts=None, min_minutes=450):
         """Zwei Szenarien nebeneinander – "Ist", gespeicherter Name, Vorlage
@@ -1905,7 +1937,17 @@ class Api:
         self._rechen_neu()
         n = len({p["eid"] for _, players, _ in geparst for p in players})
         return {"ok": True, "count": n, "dateien": dateien,
-                "zeilen": sum(d["spieler"] for d in dateien), "fehler": fehler}
+                "zeilen": sum(d["spieler"] for d in dateien), "fehler": fehler,
+                "hinweise": self._import_hinweise(
+                    [p for _, players, _ in geparst for p in players])}
+
+    @staticmethod
+    def _import_hinweise(players):
+        """Einmalige Hinweise zu einem Import: Werte, die gespeichert, aber
+        noch nicht eingeordnet werden koennen (Fuss-Stufen ohne Rangfolge)."""
+        return [f"Unbekannte Fußstufe „{w}“ ({n}×) – gespeichert, aber ohne "
+                f"Rangfolge; bitte in tactics.FUSS_STUFEN nachtragen."
+                for w, n in sorted(tactics.unbekannte_fussstufen(players).items())]
 
     def import_export(self):
         """Datei-Dialog (Mehrfachauswahl), importiert alle gewaehlten Exporte."""

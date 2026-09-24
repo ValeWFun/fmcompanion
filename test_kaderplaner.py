@@ -207,6 +207,45 @@ try:
     pruefe("ohne Fee und Marktwert: unbekannt", zu["quelle"] == "unbekannt" and zu["betrag"] is None)
     unveraendert("Abgangs-Rechnungen")
 
+    print("== B Transferwert-Spanne (D18) ==")
+    # z2 kaum gescoutet (Faktor 4), a1 gut gescoutet (Faktor 1,5), z1 mit
+    # Forderung und trotzdem einer Spanne – die Forderung hat Vorrang.
+    for e, lo, hi in ((z2, 10e6, 40e6), (a1, 20e6, 30e6), (z1, 1e6, 90e6)):
+        conn.execute("UPDATE export_players SET value = ?, value_min = ?, value_max = ? "
+                     "WHERE eid = ?", ((lo + hi) / 2, lo, hi, e))
+    conn.commit()
+    r_s = api.planer_vergleich("Ist", {"zugaenge": [z1, z2], "abgaenge": [a1]})
+    unveraendert("Spannen-Rechnung")
+    pers = {p["eid"]: p for p in r_s["rechts"]["zugaenge"] + r_s["rechts"]["abgaenge"]}
+    zs = {z["eid"]: z for z in r_s["rechts"]["transfer"]["zeilen"]}
+    pruefe("Spanne in Mio und Faktor",
+           (pers[z2]["value_min_m"], pers[z2]["value_max_m"], pers[z2]["spanne_faktor"]) == (10.0, 40.0, 4.0),
+           str((pers[z2]["value_min_m"], pers[z2]["value_max_m"], pers[z2]["spanne_faktor"])))
+    pruefe("Faktor ueber 3: kaum gescoutet",
+           (pers[z2]["preis_hinweis"] or {}).get("text") == "kaum gescoutet – Preis unsicher")
+    pruefe("Faktor 1,5: kein Hinweis", pers[a1]["preis_hinweis"] is None)
+    pruefe("Forderung hat Vorrang: kein Preis-Hinweis trotz Faktor 90",
+           pers[z1]["preis_hinweis"] is None and zs[z1]["quelle"] == "Ablöseforderung")
+    pruefe("Mittelwert bleibt die Naeherung", zs[z2]["betrag"] == 25e6)
+    pruefe("ungünstig: Zugang zur Obergrenze", zs[z2]["betrag_unguenstig"] == 40e6)
+    pruefe("ungünstig: Abgang zur Untergrenze", zs[a1]["betrag_unguenstig"] == 20e6)
+    pruefe("ungünstig: Forderung bleibt Forderung", zs[z1]["betrag_unguenstig"] == von[z1]["transfer_fee"])
+    tr_s = r_s["rechts"]["transfer"]
+    pruefe("Bilanz ungünstig",
+           (tr_s["ausgaben_unguenstig"], tr_s["einnahmen_unguenstig"], tr_s["saldo_unguenstig"])
+           == (von[z1]["transfer_fee"] + 40e6, 20e6, 20e6 - von[z1]["transfer_fee"] - 40e6),
+           str((tr_s["ausgaben_unguenstig"], tr_s["einnahmen_unguenstig"])))
+    pruefe("Zahl der kaum Gescouteten", tr_s["kaum_gescoutet"] == 1)
+    pruefe("Delta: ungünstiger Saldo gegen Ist",
+           r_s["delta"]["transfer_saldo_unguenstig"] == tr_s["saldo_unguenstig"])
+    conn.execute("UPDATE export_players SET value_min = NULL, value_max = NULL WHERE eid = ?", (z2,))
+    conn.commit()
+    r_o = api.planer_vergleich("Ist", {"zugaenge": [z2]})
+    z_o = r_o["rechts"]["transfer"]["zeilen"][0]
+    pruefe("ohne Spanne (alter Import): ungünstig = Mittelwert, kein Faktor",
+           z_o["betrag_unguenstig"] == z_o["betrag"] == 25e6
+           and r_o["rechts"]["zugaenge"][0]["spanne_faktor"] is None)
+
     print("== B Pins ==")
     r3 = api.planer_vergleich("Ist", {"abgaenge": [st_kader[0]]})
     pruefe("Pin auf Abgang: Warnung mit Slot-Label", any(w.startswith("Pin auf Sturmspitze") for w in r3["rechts"]["warnungen"]), str(r3["rechts"]["warnungen"]))

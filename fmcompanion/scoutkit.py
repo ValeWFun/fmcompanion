@@ -287,7 +287,11 @@ class Kit:
     # Zaehlwerte, die sich ueber Teile addieren lassen. Nicht dabei: Zustaende
     # (Alter, Marktwert, Gehalt, Note, Groesse, Ablöseforderung) – die kommen
     # aus dem aktuellen Stand, die Note minutengewichtet.
-    NICHT_SUMMIERBAR = {"age", "value", "wage", "rating", "height", "transfer_fee"}
+    NICHT_SUMMIERBAR = {"age", "value", "wage", "rating", "height", "transfer_fee",
+                        # D17: die Wert-Spanne. Siege, Einsaetze und die
+                        # Teamtore mit dem Spieler sind Zaehlwerte und werden
+                        # summiert.
+                        "value_min", "value_max"}
     # Zaehlwerte, deren /90-Rate die Score-Engine (moneyball._score_metrics,
     # adj) bzw. der Positions-Fit (tactics.SKALIERBAR) mit dem Liga-
     # Koeffizienten multipliziert. Tore/xG/xGA werden gesondert behandelt.

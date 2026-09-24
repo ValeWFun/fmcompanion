@@ -1169,6 +1169,36 @@ assert not _ungewichtet, f"Archetyp auf ungewichteter Kennzahl: {sorted(_ungewic
 # Slot -> (Strenge, gewuenschte Seite)
 FUSS_REGEL = {"aml": ("streng", "Rechts"), "amr": ("streng", "Links"),
               "ivl": ("hinweis", "Links"), "ivr": ("hinweis", "Rechts")}
+# Staerke je Fuss (Export-Spalten 'Rechter Fuß'/'Linker Fuß') als Rangfolge,
+# 1 = sehr schwach bis 6 = sehr stark – ordinal, nie als Abstand rechnen.
+# Laut FM24-Experte (24.09.2026) sechs Stufen: Sehr schwach < Schwach <
+# Passabel < (Stufe 4) < Stark < Sehr stark. Belegt sind "Schwach",
+# "Passabel" und "Sehr stark". Das deutsche Wort fuer Stufe 4 ("Fairly
+# Strong") ist offen – "Ziemlich stark", "Recht stark" oder "Gut" – und wird
+# erst nachgetragen, wenn es in einem Export auftaucht. Bis dahin: None und
+# ein Hinweis beim Import (unbekannte_fussstufen). Gespeichert wird das Wort,
+# ein Nachtrag hier wirkt deshalb sofort, ohne neuen Import.
+FUSS_STUFEN = {"sehr schwach": 1, "schwach": 2, "passabel": 3,
+               "stark": 5, "sehr stark": 6,
+               "very weak": 1, "weak": 2, "reasonable": 3,
+               "fairly strong": 4, "strong": 5, "very strong": 6}
+
+
+def fuss_rang(stufe):
+    """'Sehr stark' -> 6, 'Passabel' -> 3, None/unbekannt -> None."""
+    return FUSS_STUFEN.get((stufe or "").strip().lower())
+
+
+def unbekannte_fussstufen(players):
+    """{Stufenwort: Anzahl} der Fuss-Werte ohne Rangfolge – fuer einen
+    einmaligen Hinweis beim Import statt stillem None."""
+    aus = {}
+    for p in players:
+        for f in ("foot_right", "foot_left"):
+            w = p.get(f)
+            if w and fuss_rang(w) is None:
+                aus[w] = aus.get(w, 0) + 1
+    return aus
 
 
 def fuss_passung(foot, slot_key):
@@ -1428,17 +1458,20 @@ def pl_status(p, start, seit=None, ref_year=None):
     """PL-Meldestatus eines Spielers BEI UNS -> (status, grenzfall).
 
     status: "u21", "heimisch", "braucht_platz" oder "unbekannt".
-    - U21: Geburtsjahr >= Saisonstart - 21. Das Geburtsjahr kommt aus dem RAM
-      (birth_year); fehlt es, aus dem Export-Alter – das laesst +-1 Jahr offen
-      (Geburtstag vor oder nach dem Export). Liegt die Grenze genau dazwischen,
-      ist es ein GRENZFALL und zaehlt vorsichtshalber als ueber 21.
+    - U21: Geburtsjahr >= Saisonstart - 21. Das Geburtsjahr kommt aus dem
+      Geburtsdatum des Exports (Spalte 'Geb.', seit D17) oder aus dem RAM
+      (birth_year) – beides exakt. Fehlt beides, aus dem Export-Alter – das
+      laesst +-1 Jahr offen (Geburtstag vor oder nach dem Export). Liegt die
+      Grenze genau dazwischen, ist es ein GRENZFALL und zaehlt vorsichtshalber
+      als ueber 21.
     - Heimisch: jeder homegrown-Wert (Verein wie Land). Er bezieht sich auf
       den Verein des Nutzers zum Exportzeitpunkt und zaehlt deshalb nur mit
       homegrown_stand ab `seit` (Vereinswechsel); ein Wert aus der Benfica-
       Zeit sagt ueber United nichts. Ohne verwertbaren Stand: "unbekannt".
     """
     grenze = start - 21 if start else None
-    by = p.get("birth_year")
+    gd = p.get("birth_date")                  # ISO 'JJJJ-MM-TT' aus dem Export
+    by = int(str(gd)[:4]) if gd and str(gd)[:4].isdigit() else p.get("birth_year")
     grenzfall = False
     if grenze is not None and by:
         u21 = int(by) >= grenze
