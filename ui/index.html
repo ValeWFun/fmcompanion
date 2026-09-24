@@ -1510,7 +1510,9 @@ async function doImport(){
       ? `${r.count} Spieler aus ${nd} Dateien importiert (${r.zeilen} Zeilen, Doppelte zusammengeführt).`
       : `${r.count} Export-Spieler importiert.`;
     if(r.fehler && r.fehler.length) txt += ` ⚠ ${r.fehler.length} Datei(en) übersprungen: ${r.fehler.join(" · ")}`;
-    st.textContent = txt;
+    // Hinweise des Importers (D17), z. B. eine unbekannte Fuß-Stufe – meist leer
+    if(r.hinweise && r.hinweise.length) txt += ` · Hinweis: ${r.hinweise.join(" · ")}`;
+    st.textContent = txt; st.title = txt;
     await loadData();
   }
   else st.textContent="⚠ "+((r&&r.error)||"Import abgebrochen");
@@ -1939,7 +1941,9 @@ async function importSquad(){
   if(r && r.rueckfrage === "vereinswechsel"){ kaderRueckfrage(r); return; }
   if(!r || !r.ok){ if(r && r.error) st.textContent = r.error; return; }
   st.textContent = `Kader importiert: ${r.anzahl} Spieler von ${r.verein}`
-    + (r.verliehen ? ` · ${r.verliehen} verliehene ausgelassen` : "");
+    + (r.verliehen ? ` · ${r.verliehen} verliehene ausgelassen` : "")
+    + (r.hinweise && r.hinweise.length ? ` · Hinweis: ${r.hinweise.join(" · ")}` : "");
+  st.title = st.textContent;
   TACT_SQUADS = null; TACT = null; TACT_SLOT = null; TACT_PID = null;
   renderTactic();
 }
@@ -2336,8 +2340,9 @@ const planGespeichert = n => ((PLAN_LISTE && PLAN_LISTE.szenarien) || []).find(s
 function planInfo(){
   const aus = [];
   const g = planGespeichert(PLAN.name), v = !g && planVorlage(PLAN.name);
-  if(v) aus.push(`<b>Vorlage.</b> ${esc2(v.hinweis || "")} Sie verschwindet mit dem nächsten Kader-Import;
-    Änderungen unter neuem Namen speichern.`);
+  // Der Vorlagentext nennt das Verschwinden oft schon selbst – dann nicht doppelt
+  if(v) aus.push(`<b>Vorlage.</b> ${esc2(v.hinweis || "")}${/verschwindet/i.test(v.hinweis || "")
+    ? "" : " Sie verschwindet mit dem nächsten Kader-Import;"} Änderungen unter neuem Namen speichern.`);
   if(g && g.veraltet) aus.push(`„${esc2(g.name)}“ ist auf dem Kader-Import vom ${datumKurz(g.kader_stand)} gespeichert.
     Gerechnet wird mit dem heutigen Kader – Zugänge, die inzwischen da sind, zählen nicht doppelt.`);
   const l = PLAN_LINKS !== "Ist" && planGespeichert(PLAN_LINKS);
@@ -2379,11 +2384,26 @@ const mioBetrag = v => v==null ? "–" : fmtMio(v/1e6);
 const saldoTxt = v => v==null || v===0 ? "–" : `≈ ${v>0?"+":"−"}${fmtMio(Math.abs(v)/1e6)}`;
 // Ablöse unbekannt (kein Marktwert, keine Forderung) fehlt in der Summe –
 // das steht dann dabei, statt die Bilanz stillschweigend zu schönen
+// Δ der Transferbilanz, darunter der ungünstige Fall, wenn er abweicht
+const planSaldoDelta = D => {
+  const d = D.transfer_saldo, u = D.transfer_saldo_unguenstig;
+  if(!d && !u) return "";
+  return planDelta(d, v => fmtMio(v/1e6)) + (u != null && u !== d
+    ? `<div class="cmraw" title="im ungünstigen Fall, Mio €">ungünstig ${u>0 ? "+" : u<0 ? "−" : "±"}${
+        (Math.abs(u)/1e6).toFixed(1).replace(".", ",")}</div>` : "");       // ohne Einheit: die Spalte bleibt schmal
+};
 const planSaldo = t => { if(!t) return "–";
   const ohne = (t.zeilen || []).filter(z => z.betrag == null).map(z => nachname(z.name));
   if(!t.ausgaben && !t.einnahmen && !ohne.length) return "–";
   const teile = [t.ausgaben ? `Ausgaben ${mioBetrag(t.ausgaben)}` : "", t.einnahmen ? `Einnahmen ${mioBetrag(t.einnahmen)}` : ""];
-  return `${saldoTxt(t.saldo)}<div class="cmraw">${teile.filter(Boolean).join(" · ")}</div>${
+  // Ungünstiger Fall (D18): Käufe zur Ober-, Verkäufe zur Untergrenze der
+  // Spanne – nur, wenn er vom Saldo abweicht (heute ohne Spannen: nie)
+  const u = t.saldo_unguenstig, n = t.kaum_gescoutet || 0;
+  const ung = u != null && u !== t.saldo
+    ? `<div class="cmraw" title="Im ungünstigen Fall: Käufe zur Obergrenze, Verkäufe zur Untergrenze der Spanne">ungünstig ${
+        u>0 ? "+" : "−"}${fmtMio(Math.abs(u)/1e6)}${
+        n ? ` <span style="white-space:nowrap">(${n} ${n===1 ? "Preis" : "Preise"} unsicher)</span>` : ""}</div>` : "";
+  return `${saldoTxt(t.saldo)}<div class="cmraw">${teile.filter(Boolean).join(" · ")}</div>${ung}${
     ohne.length ? `<div class="cmraw">ohne ${ohne.map(esc2).join(", ")} (Ablöse unbekannt)</div>` : ""}`; };
 // Δ mit Richtung: besserHoeher true/false färbt grün/violett, null bleibt neutral
 // (Gehalt und Kadergröße sind ein Preis, kein Urteil).
@@ -2429,6 +2449,18 @@ function planPlatz(erg, geaendert){
 }
 
 // Person (Zugang/Abgang): Herkunft der Zahlen, Näherungen, Stürmer-Hinweis
+// Transferwert-Spanne aus dem Export (D18): die Mitte bleibt die Näherung,
+// die Klammer zeigt den Wissensstand – je weniger gescoutet, desto breiter.
+// Nur bei Ablöse aus dem Marktwert; eine Ablöseforderung hat keine Spanne.
+// „57", „12,5", „0,8" – ohne „,0" (mioKurz rundet ab 10 auf ganze Mio)
+const spanneZahl = v => (+v).toLocaleString("de-DE", {maximumFractionDigits:1});
+function planSpanne(pe){
+  const lo = pe.value_min_m, hi = pe.value_max_m;
+  if(pe.abloese_quelle!=="marktwert" || lo==null || hi==null || lo===hi) return "";
+  const tip = `Transferwert im Export: ${spanneZahl(lo)} bis ${spanneZahl(hi)} Mio €${
+    pe.spanne_faktor ? ` (Obergrenze = ${spanneZahl(pe.spanne_faktor)} × Untergrenze)` : ""}`;
+  return ` <span class="muted" title="${escAttr(tip)}">(${spanneZahl(lo)}–${spanneZahl(hi)})</span>`;
+}
 // Bis die Rechnung da ist: was die Oberfläche schon weiß (Export-Zeile)
 const PLAN_VORAB_TEXT = {laeuft:"wird gerechnet…", ignoriert:"nicht gerechnet – siehe Hinweis rechts",
                          fehler:"keine Zahlen – die Rechnung ist fehlgeschlagen"};
@@ -2456,10 +2488,11 @@ function planPerson(pe, art){
         onclick="${art==="zu" ? `planZugangWeg(${+pe.eid})` : `planAbgang(${+pe.eid})`}">✕</button></div>
     <div class="planpmeta">${herkunft}</div>
     ${pe._vorab ? `<div class="planpmeta"><span class="${pe._vorab==="laeuft" ? "planspaet" : ""}">${PLAN_VORAB_TEXT[pe._vorab]}</span></div>`
-      : `<div class="planpmeta">${quelle} ${pe.abloese!=null ? `<b>${mioBetrag(pe.abloese)}</b>` : "–"}
+      : `<div class="planpmeta">${quelle} ${pe.abloese!=null ? `<b>${mioBetrag(pe.abloese)}</b>${planSpanne(pe)}` : "–"}
       · Gehalt ${pe.wage!=null ? `${art==="zu" ? "≈ " : ""}${mioWoche(pe.wage)}/Woche` : "–"}${plText ? ` · ${esc2(plText)}` : ""}</div>`}
     ${pe.kalenderjahr ? `<div class="planhinweis">Kalenderjahr-Liga: Die Zahlen zählen nach der dortigen
       Saison (Januar bis Dezember), nicht nach unserer – je nach Export eine halbe oder eine ganze.</div>` : ""}
+    ${pe.preis_hinweis && pe.preis_hinweis.text ? `<div class="planhinweis">${esc2(pe.preis_hinweis.text)}</div>` : ""}
     ${pe.hinweis && pe.hinweis.text ? `<div class="planhinweis">${esc2(pe.hinweis.text)}</div>` : ""}
     ${pinWahl}</div>`;
 }
@@ -2536,8 +2569,9 @@ function drawPlan(host){
       laeuft ? `<span class="planspaet"><span class="spin"></span></span>` : ""}</div>
     ${leiste}${planInfo()}
     <div class="plangrid">${links}<div class="planrechts">${rechts}</div></div>
-    <div class="cmfuss" style="padding:0 14px">≈ Näherungen: Ablöse = Ablöseforderung, wo gesetzt, sonst Marktwert;
-      Gehalt = heutiges Gehalt beim alten Verein. Stamm und Backup rechnet das Backend wie am Brett
+    <div class="cmfuss" style="padding:0 14px">≈ Näherungen: Ablöse = Ablöseforderung, wo gesetzt, sonst Marktwert
+      (Mitte der Spanne aus dem Export, die Spanne in Klammern; im ungünstigen Fall zählen Käufe zur Ober-
+      und Verkäufe zur Untergrenze); Gehalt = heutiges Gehalt beim alten Verein. Stamm und Backup rechnet das Backend wie am Brett
       (Gesamt mit Charakter, Pins), dünn = weniger als zwei Kaderspieler mit Leistung ≥ 72 auf der Position.</div>
   </div>`;
   if(PLAN_Q) planSuche(PLAN_Q, true);
@@ -2571,8 +2605,7 @@ function planErgebnis(R, lName, rName){
       planDelta(D.gehalt && D.gehalt.woche, mioWoche)],
     ["Gehalt / Jahr", naeh(L) + mioBetrag(L.gehalt && L.gehalt.jahr), naeh(Rr) + mioBetrag(Rr.gehalt && Rr.gehalt.jahr),
       planDelta(D.gehalt && D.gehalt.jahr, mioBetrag)],
-    ["Transferbilanz", planSaldo(L.transfer), planSaldo(Rr.transfer),
-      D.transfer_saldo ? planDelta(D.transfer_saldo, v => fmtMio(v/1e6)) : ""],
+    ["Transferbilanz", planSaldo(L.transfer), planSaldo(Rr.transfer), planSaldoDelta(D)],
     ["Kadergröße", L.kader_anzahl ?? "–", Rr.kader_anzahl ?? "–", planDelta((Rr.kader_anzahl ?? 0) - (L.kader_anzahl ?? 0), String)],
     [`<span title="Weder Stamm noch erster Backup auf irgendeiner Position">Überzählig</span>`,
       liste(ueber(L)), liste(ueber(Rr)), planMengenDelta(ueber(L), ueber(Rr), null)],
@@ -2964,7 +2997,9 @@ async function kaderRueckfrageAntwort(ja){
   if(!r || !r.ok){ st.textContent = "⚠ " + ((r && r.error) || "Kader-Import fehlgeschlagen"); return; }
   if(!ja){ st.textContent = "Kader unverändert – die Spieler der Datei sind wie bei „Import“ eingelesen."; return; }
   st.textContent = `Kader importiert: ${r.anzahl} Spieler von ${r.verein}`
-    + (r.verliehen ? ` · ${r.verliehen} verliehene ausgelassen` : "");
+    + (r.verliehen ? ` · ${r.verliehen} verliehene ausgelassen` : "")
+    + (r.hinweise && r.hinweise.length ? ` · Hinweis: ${r.hinweise.join(" · ")}` : "");
+  st.title = st.textContent;
   TACT_SQUADS = null; TACT = null; TACT_SLOT = null; TACT_PID = null;
   renderTactic();
 }
