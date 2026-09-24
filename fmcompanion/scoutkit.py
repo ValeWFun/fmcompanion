@@ -410,6 +410,21 @@ class Kit:
             mb["rating"] = fit["rating"] = note
         return mb, fit
 
+    # ------------------------------------------------ Kaderplaner (D14)
+    def szenario(self, zugaenge=(), abgaenge=(), pins=None, gegen="Ist"):
+        """Transferpaket durchrechnen – dieselbe Rechnung wie der Kaderplaner
+        der App (Api.planer_vergleich), rein lesend.
+
+        zugaenge: Export-EIDs, abgaenge: EIDs aus dem Kader, pins: optionale
+        Szenario-Pins {slot: eid}. gegen: "Ist" oder der Name eines in der App
+        gespeicherten Szenarios. -> {ok, links, rechts, delta}; rechts ist das
+        Paket, links der Vergleich. Brett, Meldeliste, Liga-/CL-Niveau,
+        Kadertiefe, Gehalt und Transferbilanz stehen je Seite drin.
+        """
+        return self.api.planer_vergleich(
+            gegen, {"zugaenge": list(zugaenge), "abgaenge": list(abgaenge),
+                    "pins": dict(pins or {})})
+
     def zwei_saisons(self):
         """Vorsaison und laufende Saison gemeinsam bewertet – nur Analyse (D11 a).
 

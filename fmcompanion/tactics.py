@@ -1519,3 +1519,54 @@ def meldeliste(kader, start, seit=None, ref_year=None):
                      "pl_grenzfall": p["pl_grenzfall"], "pl_text": p["pl_text"]}
                     for p in kader],
     }
+
+
+# ------------------------------------------------------------ Kadertiefe
+# Wie im Verkaufsdossier des Scouts: je Slot der Stammspieler (Brett-Elf),
+# dazu EIN 1. Backup – global der Reihe nach nach Leistung vergeben, jeder
+# Spieler nur einmal. Wer so keinen Platz bekommt, ist ueberzaehlig. "Duenn"
+# ist ein Slot mit weniger als zwei Kaderspielern ab TIEFE_SCHWELLE Leistung.
+# Leistung = sqrt(Fit x Score) ohne Charakter, dieselbe Zahl wie im
+# Ligavergleich.
+TIEFE_SCHWELLE = 72
+
+
+def kadertiefe(slots, schwelle=TIEFE_SCHWELLE):
+    """Stamm, 1. Backup und Dichte je Slot.
+
+    slots: Brett-Ausgabe (Kandidaten mit 'fit' und 'mb', Slot mit
+    'startelf_id'). -> {"slots": {key: {stamm, backup, ab_schwelle, duenn}},
+    "ueberzaehlig": [{id, name, leistung, slot}]}; stamm/backup sind
+    (Kandidat, Leistung) oder None.
+    """
+    stamm_ids = {s.get("startelf_id") for s in slots if s.get("startelf_id") is not None}
+    paare, beste, namen = [], {}, {}
+    for s in slots:
+        for k in s["kandidaten"]:
+            lst = gesamt(k.get("fit"), k.get("mb"), None)
+            if lst is None:
+                continue
+            namen[k["id"]] = k
+            if k["id"] not in beste or lst > beste[k["id"]][0]:
+                beste[k["id"]] = (lst, s["key"])
+            if k["id"] not in stamm_ids:
+                paare.append((lst, s["key"], k))
+    paare.sort(key=lambda t: -t[0])
+    backup, vergeben = {}, set()
+    for lst, key, k in paare:
+        if key in backup or k["id"] in vergeben:
+            continue
+        backup[key] = (k, lst)
+        vergeben.add(k["id"])
+    aus = {}
+    for s in slots:
+        stamm = next((k for k in s["kandidaten"] if k["id"] == s.get("startelf_id")), None)
+        werte = [gesamt(k.get("fit"), k.get("mb"), None) for k in s["kandidaten"]]
+        ab = sum(1 for w in werte if w is not None and w >= schwelle)
+        aus[s["key"]] = {
+            "stamm": (stamm, gesamt(stamm.get("fit"), stamm.get("mb"), None)) if stamm else None,
+            "backup": backup.get(s["key"]), "ab_schwelle": ab, "duenn": ab < 2}
+    ueber = [{"id": i, "name": namen[i].get("name"), "leistung": l, "slot": key}
+             for i, (l, key) in beste.items() if i not in stamm_ids and i not in vergeben]
+    ueber.sort(key=lambda u: -u["leistung"])
+    return {"slots": aus, "ueberzaehlig": ueber}

@@ -22,6 +22,9 @@ fmcompanion.db-wal
 *.db-journal
 # Sicherungskopien der DB (im Explorer kopiert: "fmcompanion - Kopie.db" …)
 sicherung/
+# Vorbereitete Kaderplaner-Szenarien dieses Spielstands (echte EIDs), siehe
+# app.Api.PLANER_VORLAGEN
+kaderplaner_vorlagen.json
 
 # --- FM-Exporte und Messdaten ----------------------------------------------
 # HTML-Exporte aus dem Spiel (Kaderlisten, Scouting) und Rohdumps der
