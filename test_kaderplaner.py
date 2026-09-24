@@ -209,7 +209,7 @@ try:
 
     print("== B Pins ==")
     r3 = api.planer_vergleich("Ist", {"abgaenge": [st_kader[0]]})
-    pruefe("Pin auf Abgang: Warnung", any(w.startswith("Pin auf st") for w in r3["rechts"]["warnungen"]))
+    pruefe("Pin auf Abgang: Warnung mit Slot-Label", any(w.startswith("Pin auf Sturmspitze") for w in r3["rechts"]["warnungen"]), str(r3["rechts"]["warnungen"]))
     pruefe("Szenario ohne st-Pin", "st" not in r3["rechts"]["brett"]["pins"])
     pruefe("Ist behaelt st-Pin", r3["links"]["brett"]["pins"].get("st") == st_kader[0])
     dm_fremd = next(p["eid"] for p in fremd if p["position"] == "DM, M (Z)")

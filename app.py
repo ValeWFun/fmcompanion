@@ -1258,24 +1258,26 @@ class Api:
             else:
                 a_ok.append(e)
         eids = (set(eids_ist) | set(z_ok)) - set(a_ok)
-        # Pins: die echten, ohne Abgaenge; dazu Szenario-Pins (auch auf Zugaenge)
+        # Pins: die echten, ohne Abgaenge; dazu Szenario-Pins (auch auf Zugaenge).
+        # In den Warnungen das Slot-Label ("Sturmspitze"), nicht der Schluessel.
+        label = {sl["key"]: sl["label"] for sl in tactics.FORMATION}
         pins = {}
         for key, e in self._pins(conn).items():
             if e in a_ok:
-                warn.append(f"Pin auf {key} entfällt im Szenario "
+                warn.append(f"Pin auf {label.get(key, key)} entfällt im Szenario "
                             f"({(export.get(e) or {}).get('name')} geht ab).")
             else:
                 pins[key] = e
-        slot_keys = {sl["key"] for sl in tactics.FORMATION}
         for key, e in (pins_szen or {}).items():
             try:
                 e = int(e)
             except (TypeError, ValueError):
                 continue
-            if key in slot_keys and e in eids:
+            if key in label and e in eids:
                 pins[key] = e
             else:
-                warn.append(f"Szenario-Pin auf {key} ignoriert (Spieler nicht im Kader).")
+                warn.append(f"Szenario-Pin auf {label.get(key, key)} ignoriert "
+                            f"(Spieler nicht im Kader).")
         brett, kader = self._brett(conn, eids, pins, basis)
         tiefe = tactics.kadertiefe(brett["slots"])
         neu = set(z_ok)
