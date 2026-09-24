@@ -459,6 +459,20 @@ def note_offset(league):
     return LEAGUE_NOTE_OFFSET.get(league, 0.0) if league else 0.0
 
 
+# Ligen, die im Kalenderjahr spielen (Brasilien, Argentinien, MLS, Norwegen,
+# Schweden, Japan, China, Irland). Dort ist der Winter-Export (im Spiel Ende
+# Dezember) das Saisonende und der Sommer-Export (Mitte Mai) schon die
+# naechste Saison – "Halbserie gegen Vorsaison" ist dort sinnlos. Erkannt
+# ueber Namensbestandteile, weil FM die Ligen teils mit Sponsorennamen fuehrt.
+KALENDERJAHR_MUSTER = ("Brasil", "Argentin", "Major League Soccer", "Norweg",
+                       "Schwed", "Allsvenskan", "J1 League", "J.League", "Japan",
+                       "China", "Chinese", "Irland", "Airtricity")
+
+
+def ist_kalenderjahr_liga(league):
+    return bool(league) and any(m in league for m in KALENDERJAHR_MUSTER)
+
+
 # Score-Profile: wenige Kennzahlen mit hohem Impact – und BEWUSST OHNE
 # Spielidee. Frueher steckte "hohes Pressing + passbasiert" in jedem Profil
 # (Pressing 10-25 %, Passquote, progressive Paesse). Seit es Positions-Fit

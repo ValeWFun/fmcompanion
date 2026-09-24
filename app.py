@@ -679,12 +679,16 @@ class Api:
             # Pins zeigen auf Spieler des alten Vereins – nach dem Wechsel
             # zu Manchester United stand sonst noch die Benfica-Elf fest.
             db.set_setting(conn, "startelf_pins", "{}")
-        if alt != verein:
+        if alt and alt != verein:
             # Stichtag des Vereinswechsels: der Eigengewaechs-Status im Export
             # bezieht sich auf den Verein des Nutzers ZUM EXPORTZEITPUNKT.
             # Fuer Meldelisten zaehlen nur Werte mit homegrown_stand ab hier.
             # Fehlt die Einstellung (Wechsel zu Man Utd lag vor ihrer
             # Einfuehrung, der Status wurde davor nie importiert), gilt jeder.
+            # NUR bei einem echten Wechsel: beim allerersten Kader-Import gab
+            # es keinen alten Verein – vorher hiess das, jede zuvor importierte
+            # Scoutingliste zaehlte beim Eigengewaechs-Status als "unbekannt"
+            # (im Kaderplaner-Test aufgefallen).
             db.set_setting(conn, "own_club_seit", jetzt)
         db.set_setting(conn, "squad_eids", json.dumps(sorted(eids)))
         db.set_setting(conn, "own_club", verein)
@@ -824,39 +828,56 @@ class Api:
         rows = [self._export_row_to_player(exp[e]) for e in eids if e in exp]
         return moneyball.enrich(rows, **bz)
 
+    def _basis(self, conn):
+        """Gemeinsame Rechengrundlage von Brett, Liga-/CL-Vergleich und
+        Kaderplaner: Bezugsdatum, Export, angereicherte Export-Zeilen und die
+        Vergleichsmenge fuer die Perzentile (ganzer Export PLUS Kohorte).
+
+        Frueher nur Kader + Kohorte ("die Kohorte reicht") – seit dem
+        Nachschaerfen des Torwarts reicht sie nicht mehr: die Note ueber
+        Erwartung gibt es nur im Export, die Kohorte kennt fuer Keeper nur Note
+        und Passquote. Mit ihr allein hatte der Torwart-Slot keine acht Werte je
+        Kennzahl, score_slot gab None und das Brett zeigte gar keinen Torwart.
+        Die Ersatzsuche (_repl_pool) benutzt dieselbe Menge – sonst waeren die
+        Scores nicht vergleichbar.
+        """
+        bz = self._bezug(conn)
+        export = db.load_export(conn)
+        export_rows = moneyball.enrich(
+            [self._export_row_to_player(e) for e in export if e.get("eid")], **bz)
+        kohorte = moneyball.enrich(db.cohort_load(conn), **bz)
+        # Teamstaerke fuer den Carry-Zuschlag: aus den EXPORT-Zeilen, nicht aus
+        # dem Kader – gebraucht werden die Schnitte FREMDER Vereine, und nur der
+        # Export kennt Verein und Note zu jedem Spieler.
+        return {"bz": bz, "export": export, "export_rows": export_rows,
+                "referenz": export_rows + kohorte,
+                "ligen": {int(e["eid"]): e["league"] for e in export
+                          if e.get("eid") and e.get("league")},
+                "teams": tactics.team_strength(export)}
+
     def tactic_board(self):
         """Je Position der Formation die passenden Kaderspieler mit Score und
         Aufschluesselung. Perzentile gegen alle Spieler, die dort spielen
-        koennen (Pool + namenlose Vergleichskohorte)."""
+        koennen (Export + namenlose Vergleichskohorte, siehe _basis)."""
         conn = self._db()
         eids = self._squad_eids(conn)
         if not eids:
             return {"ok": False, "kein_kader": True}
-        bz = self._bezug(conn)
+        return self._brett(conn, eids, self._pins(conn), self._basis(conn))[0]
+
+    def _brett(self, conn, eids, pins, basis):
+        """Das Brett fuer eine beliebige Kadermenge -> (Brett, Kaderzeilen).
+
+        Der echte Kader (tactic_board) und die Szenarien des Kaderplaners
+        rechnen hier mit demselben Code – nur so ist ein Unterschied zwischen
+        Ist und Szenario ein Unterschied im Kader und nicht in der Rechnung.
+        """
+        bz, referenz, ligen, teams = basis["bz"], basis["referenz"], basis["ligen"], basis["teams"]
         # Kader aus dem Export (siehe _kader_rows); id = EID, damit Brett,
         # Ersatzsuche und Formkurve denselben Schluessel benutzen.
         kader = self._kader_rows(conn, bz, eids)
         aus_export = len(kader)
-        kohorte = moneyball.enrich(db.cohort_load(conn), **bz)
         fehlt = len(eids) - len(kader)
-        # Teamstaerke fuer den Carry-Zuschlag: aus den EXPORT-Zeilen, nicht aus
-        # dem Kader – gebraucht werden die Schnitte FREMDER Vereine, und nur der
-        # Export kennt Verein und Note zu jedem Spieler.
-        export = db.load_export(conn)
-        teams = tactics.team_strength(export)
-        ligen = {int(e["eid"]): e["league"] for e in export
-                 if e.get("eid") and e.get("league")}
-        export_rows = moneyball.enrich(
-            [self._export_row_to_player(e) for e in export if e.get("eid")], **bz)
-        # Vergleichsmenge fuer die Positions-Perzentile: ganzer Export PLUS
-        # Kohorte. Frueher nur Kader + Kohorte ("die Kohorte reicht") – seit
-        # dem Nachschaerfen des Torwarts reicht sie nicht mehr: Paraden je
-        # Schuss und Note ueber Erwartung gibt es nur im Export, die Kohorte
-        # kennt fuer Keeper nur Note und Passquote. Mit ihr allein hatte der
-        # Torwart-Slot keine acht Werte je Kennzahl, score_slot gab None und
-        # das Brett zeigte gar keinen Torwart. Die Ersatzsuche (_repl_pool)
-        # benutzt dieselbe Menge – sonst waeren die Scores nicht vergleichbar.
-        referenz = export_rows + kohorte
         # Moneyball-Score der Kaderspieler – gegen DIESELBE Referenz wie die
         # Tabelle (ganzer Export + Kohorte), sonst hiesse "73" hier etwas
         # anderes als dort. Unter 'mb' abgelegt, weil build_board 'score' mit
@@ -879,13 +900,12 @@ class Api:
         # Score 73) landet bei 53, nicht bei 65. Die Aufstellung rechnet mit
         # derselben Zahl, sonst widerspraeche sie der Anzeige. Fit, Score und
         # Charakter bleiben einzeln sichtbar.
-        for s in slots:
-            for k in s["kandidaten"]:
+        for sl in slots:
+            for k in sl["kandidaten"]:
                 k["fit"] = k["score"]
                 k["charakter"] = k.get("pers_score")
                 k["score"] = tactics.gesamt(k["fit"], k.get("mb"), k.get("pers_score"))
-            s["kandidaten"].sort(key=lambda k: -k["score"])
-        pins = self._pins(conn)
+            sl["kandidaten"].sort(key=lambda k: -k["score"])
         elf = tactics.startelf(slots, pins)
         # Nur die Pins zurueckmelden, die auch greifen – ein Pin auf einen
         # Spieler, der nicht mehr im Kader ist, soll nicht als "manuell" stehen.
@@ -894,19 +914,19 @@ class Api:
         gesetzt = {k["id"]: skey for skey, k in elf.items()}
         form = db.form_trend(conn, [p.get("eid") for p in kader if p.get("eid")])
         eid_von = {p.get("id"): p.get("eid") for p in kader}
-        for s in slots:
-            s["startelf_id"] = (elf.get(s["key"]) or {}).get("id")
-            s["gepinnt"] = s["key"] in pins_aktiv
+        for sl in slots:
+            sl["startelf_id"] = (elf.get(sl["key"]) or {}).get("id")
+            sl["gepinnt"] = sl["key"] in pins_aktiv
             # Archetypen gleich mitliefern. Sie sind je Position konstant; sie
             # einzeln nachzuladen kostete elf weitere Fahrten ueber die
             # pywebview-Bruecke, mitten im Startpfad der Oberflaeche.
-            s["archetypen_liste"] = tactics.archetypen_fuer(s["key"])
-            for k in s["kandidaten"]:
+            sl["archetypen_liste"] = tactics.archetypen_fuer(sl["key"])
+            for k in sl["kandidaten"]:
                 # Wer anderswo gesetzt ist, ist hier kein echter Herausforderer –
                 # sonst stuende Correia als Konkurrent fuer links, obwohl er
                 # rechts spielt.
                 anderswo = gesetzt.get(k["id"])
-                k["gesetzt_auf"] = anderswo if anderswo != s["key"] else None
+                k["gesetzt_auf"] = anderswo if anderswo != sl["key"] else None
                 k["form"] = form.get(eid_von.get(k["id"]))
         return {"ok": True, "slots": slots, "startelf": list(elf), "pins": pins_aktiv,
                 "verein": db.get_setting(conn, "own_club", "") or "",
@@ -916,7 +936,7 @@ class Api:
                 "export_positionen": sum(1 for p in kader if p.get("position")),
                 "meldeliste": melde,
                 # Stand der Elf: nach Transfers veraltet der Kader-Import
-                "kader_stand": db.get_setting(conn, "squad_imported_at", "") or None}
+                "kader_stand": db.get_setting(conn, "squad_imported_at", "") or None}, kader
 
     def registration(self):
         """Meldeliste des eigenen Kaders: PL-Zaehler (25/17/8, U21 frei),
@@ -931,27 +951,25 @@ class Api:
         res["ok"] = True
         return res
 
-    def _vergleich_basis(self, min_minutes):
-        """Gemeinsame Grundlage von Liga- und CL-Vergleich: Brett-Elf (samt
-        Pins), bewertete Export-Zeilen, Referenz und aktueller Pool – alte
-        Zeilen tragen Vereine und Zahlen der Vorsaison."""
-        tb = self.tactic_board()
-        if not tb.get("ok"):
-            return tb
-        conn = self._db()
+    @staticmethod
+    def _elf(brett):
+        """{slot: Kandidat} der Brett-Elf (samt Pins)."""
         elf = {}
-        for s in tb["slots"]:
-            k = next((c for c in s["kandidaten"] if c["id"] == s.get("startelf_id")), None)
+        for sl in brett["slots"]:
+            k = next((c for c in sl["kandidaten"] if c["id"] == sl.get("startelf_id")), None)
             if k is not None:
-                elf[s["key"]] = k
-        bz = self._bezug(conn)
-        export = db.load_export(conn)
-        rows = moneyball.enrich([self._export_row_to_player(e) for e in export
-                                 if e.get("eid")], **bz)
-        referenz = rows + moneyball.enrich(db.cohort_load(conn), **bz)
-        ligen = {int(e["eid"]): e["league"] for e in export
-                 if e.get("eid") and e.get("league")}
-        moneyball.add_scores(rows, referenz, ligen)
+                elf[sl["key"]] = k
+        return elf
+
+    def _vergleich_daten(self, conn, min_minutes, basis):
+        """Gemeinsame Grundlage von Liga- und CL-Vergleich: bewertete Export-
+        Zeilen und der aktuelle Pool – alte Zeilen tragen Vereine und Zahlen
+        der Vorsaison. Unabhaengig von der eigenen Elf, damit Ist und Szenario
+        des Kaderplaners dieselbe Grundlage teilen."""
+        rows = basis["export_rows"]
+        if not basis.get("rows_bewertet"):
+            moneyball.add_scores(rows, basis["referenz"], basis["ligen"])
+            basis["rows_bewertet"] = True
         stand = self._pool_stand(conn)
         pool = [p for p in rows if not stand or (p.get("imported_at") or "") >= stand]
         verein = db.get_setting(conn, "own_club", "") or ""
@@ -963,30 +981,37 @@ class Api:
                                    default="") or None,
                 "kader_stand": db.get_setting(conn, "squad_imported_at", "") or None,
                 "min_minutes": int(min_minutes)}
-        return {"ok": True, "conn": conn, "elf": elf, "rows": rows,
-                "referenz": referenz, "pool": pool, "teams": tactics.team_strength(export),
-                "verein": verein, "kopf": kopf}
+        return {"rows": rows, "pool": pool, "verein": verein, "kopf": kopf}
+
+    def _liga_name(self, conn, rows):
+        """Liga des eigenen Kaders: die haeufigste unter den Kaderspielern."""
+        from collections import Counter
+        eids = self._squad_eids(conn)
+        liga = Counter(p.get("league") for p in rows
+                       if int(p["eid"]) in eids and p.get("league")).most_common(1)
+        return liga[0][0] if liga else None
 
     def league_comparison(self, min_minutes=450):
         """Eigene Elf je Position gegen die eigene Liga (tactics.liga_vergleich).
 
         Die Elf kommt aus dem Brett (automatische Aufstellung samt Pins), die
         Liga ist die haeufigste im eigenen Kader, der Pool sind die aktuellen
-        Importe (_vergleich_basis).
+        Importe (_vergleich_daten).
         """
-        from collections import Counter
-        b = self._vergleich_basis(min_minutes)
-        if not b.get("ok"):
-            return b
-        eids = self._squad_eids(b["conn"])
-        liga = Counter(p.get("league") for p in b["rows"]
-                       if int(p["eid"]) in eids and p.get("league")).most_common(1)
+        conn = self._db()
+        eids = self._squad_eids(conn)
+        if not eids:
+            return {"ok": False, "kein_kader": True}
+        basis = self._basis(conn)
+        brett = self._brett(conn, eids, self._pins(conn), basis)[0]
+        d = self._vergleich_daten(conn, min_minutes, basis)
+        liga = self._liga_name(conn, d["rows"])
         if not liga:
             return {"ok": False, "error": "Liga des eigenen Kaders unbekannt."}
-        zeilen = tactics.liga_vergleich(b["elf"], b["pool"], b["referenz"], liga[0][0],
-                                        b["verein"], teams=b["teams"],
+        zeilen = tactics.liga_vergleich(self._elf(brett), d["pool"], basis["referenz"],
+                                        liga, d["verein"], teams=basis["teams"],
                                         min_minutes=max(90, int(min_minutes)))
-        return dict(b["kopf"], ok=True, liga=liga[0][0], positionen=zeilen)
+        return dict(d["kopf"], ok=True, liga=liga, positionen=zeilen)
 
     # ------------------------------------------------------ CL-Niveau
     # Die 8 Vergleichsvereine (typisch: CL-Viertelfinalisten der letzten
@@ -1068,23 +1093,330 @@ class Api:
         if not vereine:
             return {"ok": False, "keine_vereine": True,
                     "error": "Noch keine CL-Vergleichsvereine festgelegt."}
-        b = self._vergleich_basis(min_minutes)
-        if not b.get("ok"):
-            return b
-        zeilen = tactics.cl_vergleich(b["elf"], b["pool"], b["referenz"], vereine,
-                                      b["verein"], teams=b["teams"],
+        eids = self._squad_eids(conn)
+        if not eids:
+            return {"ok": False, "kein_kader": True}
+        basis = self._basis(conn)
+        brett = self._brett(conn, eids, self._pins(conn), basis)[0]
+        d = self._vergleich_daten(conn, min_minutes, basis)
+        zeilen = tactics.cl_vergleich(self._elf(brett), d["pool"], basis["referenz"],
+                                      vereine, d["verein"], teams=basis["teams"],
                                       min_minutes=max(90, int(min_minutes)))
-        gewaehlt = [v for v in vereine if v != b["verein"]]
+        gewaehlt = [v for v in vereine if v != d["verein"]]
         # Die Regel "6 von 8" sagt nur, OB Daten da sind – nicht, ob es die
         # Stammspieler sind. Aus Scoutinglisten ist der beste Spieler eines
         # Vereins oft nicht sein Stammspieler; das Banner "vorlaeufig" braucht
         # deshalb, wer nur gescoutet ist.
-        erfassung = self._cl_erfassung(b["conn"], gewaehlt)
-        return dict(b["kopf"], ok=True, vereine=gewaehlt,
+        erfassung = self._cl_erfassung(conn, gewaehlt)
+        return dict(d["kopf"], ok=True, vereine=gewaehlt,
                     min_mit_daten=tactics.CL_MIN_VEREINE, positionen=zeilen,
                     mit_aussage=sum(1 for z in zeilen if z["aussage"]),
                     erfassung=erfassung,
                     nur_gescoutet=sum(1 for e in erfassung if not e["kader"]))
+
+    # ------------------------------------------------------ Kaderplaner
+    # "Was waere, wenn": Zugaenge (Export-EIDs) und Abgaenge (Kader-EIDs) auf
+    # einem VIRTUELLEN Kader durchrechnen – Brett, Meldeliste, Liga-/CL-Niveau,
+    # Kadertiefe, Gehalt, Transferbilanz. Ein Szenario aendert NIE squad_eids,
+    # own_club, own_club_seit oder die echten Pins, und es gibt bewusst keinen
+    # Weg "ins echte Team": der echte Kader kommt nur aus dem Kader-Export.
+    PLANER_SETTING = "kaderplaner_szenarien"
+    # Vorbereitete Szenarien fuer diesen Spielstand (echte EIDs) gehoeren nicht
+    # ins oeffentliche Repo: lokale JSON-Datei neben der DB, per .gitignore
+    # ausgeschlossen. [{name, zugaenge, abgaenge, hinweis, gueltig_bis_kader}]
+    # – gezeigt, solange der Kader-Import nicht neuer ist als gueltig_bis_kader.
+    PLANER_VORLAGEN = "kaderplaner_vorlagen.json"
+    STUERMER_HINWEIS = ("Stürmerzahlen wandern nach einem Vereinswechsel kaum mit "
+                        "(Split-Half r 0,07–0,16, kleine Stichprobe) – die Torgefahr "
+                        "hängt stark an der Chancenzufuhr des Vereins.")
+
+    def _planer_gespeichert(self, conn):
+        import json
+        try:
+            return json.loads(db.get_setting(conn, self.PLANER_SETTING, "{}") or "{}")
+        except Exception:
+            return {}
+
+    def _planer_vorlagen(self, conn):
+        import json
+        pfad = db._BASE / self.PLANER_VORLAGEN
+        try:
+            vorlagen = json.loads(pfad.read_text(encoding="utf-8")) if pfad.exists() else []
+        except Exception:
+            return []
+        kader_stand = db.get_setting(conn, "squad_imported_at", "") or ""
+        return [v for v in vorlagen if v.get("name") and
+                (not v.get("gueltig_bis_kader") or kader_stand <= v["gueltig_bis_kader"])]
+
+    @staticmethod
+    def _eid_liste(werte):
+        aus = []
+        for v in werte or []:
+            try:
+                e = int(v)
+            except (TypeError, ValueError):
+                continue
+            if e not in aus:
+                aus.append(e)
+        return aus
+
+    def planer_liste(self):
+        """Gespeicherte Szenarien und Vorlagen. veraltet = gespeichert auf
+        einem anderen Kader-Import als dem heutigen."""
+        conn = self._db()
+        kader_stand = db.get_setting(conn, "squad_imported_at", "") or None
+        szen = [dict(v, name=n, veraltet=bool(v.get("kader_stand")) and v.get("kader_stand") != kader_stand)
+                for n, v in sorted(self._planer_gespeichert(conn).items())]
+        return {"ok": True, "szenarien": szen, "vorlagen": self._planer_vorlagen(conn),
+                "kader_stand": kader_stand}
+
+    def planer_speichern(self, name, zugaenge, abgaenge, pins=None, notiz=""):
+        """Szenario unter einem Namen speichern (gleicher Name ueberschreibt).
+        Schreibt NUR die Szenario-Einstellung – nie Kader, Verein oder Pins."""
+        import json
+        from datetime import datetime as _dt
+        name = (name or "").strip()
+        if not name or name == "Ist":
+            return {"ok": False, "error": "Bitte einen Namen angeben („Ist“ ist reserviert)."}
+        conn = self._db()
+        alle = self._planer_gespeichert(conn)
+        slots = {sl["key"] for sl in tactics.FORMATION}
+        szen = {"zugaenge": self._eid_liste(zugaenge), "abgaenge": self._eid_liste(abgaenge),
+                "pins": {k: int(v) for k, v in (pins or {}).items()
+                         if k in slots and str(v).lstrip("-").isdigit()},
+                "notiz": str(notiz or ""),
+                "geaendert": _dt.now().isoformat(timespec="seconds"),
+                "kader_stand": db.get_setting(conn, "squad_imported_at", "") or None}
+        alle[name] = szen
+        db.set_setting(conn, self.PLANER_SETTING, json.dumps(alle, ensure_ascii=False))
+        return {"ok": True, "szenario": dict(szen, name=name)}
+
+    def planer_loeschen(self, name):
+        import json
+        conn = self._db()
+        alle = self._planer_gespeichert(conn)
+        if alle.pop(name, None) is None:
+            return {"ok": False, "error": f"Kein Szenario „{name}“."}
+        db.set_setting(conn, self.PLANER_SETTING, json.dumps(alle, ensure_ascii=False))
+        return {"ok": True}
+
+    def _planer_aufloesen(self, conn, seite):
+        """"Ist", gespeicherter Name, Vorlage oder Dict -> (name, zug, abg, pins)."""
+        if seite in (None, "", "Ist"):
+            return "Ist", [], [], {}
+        if isinstance(seite, dict):
+            return (seite.get("name"), self._eid_liste(seite.get("zugaenge")),
+                    self._eid_liste(seite.get("abgaenge")), dict(seite.get("pins") or {}))
+        gesp = self._planer_gespeichert(conn)
+        v = gesp.get(seite) or next((x for x in self._planer_vorlagen(conn)
+                                     if x.get("name") == seite), None)
+        if v is None:
+            raise KeyError(seite)
+        return (seite, self._eid_liste(v.get("zugaenge")), self._eid_liste(v.get("abgaenge")),
+                dict(v.get("pins") or {}))
+
+    def _planer_person(self, conn, e, richtung, basis, st_slot, pl=None):
+        """Zugang/Abgang fuer die Anzeige (Export-Zeile e)."""
+        roh = self._export_row_to_player(e)
+        if pl is None:
+            pl = moneyball.enrich([roh], **basis["bz"])[0]
+            self._pl_markieren(conn, [pl], basis["bz"])
+        fee, wert = e.get("transfer_fee"), e.get("value")
+        betrag, quelle = ((fee, "forderung") if fee else (wert, "marktwert") if wert
+                          else (None, None))
+        stuermer = bool(tactics.eligible(pl, st_slot)[0])
+        return {"eid": int(e["eid"]), "name": e.get("name"), "club": e.get("club"),
+                "league": e.get("league"), "position": e.get("position"),
+                "age": e.get("age"), "value_m": round(wert / 1e6, 1) if wert else None,
+                "abloese": betrag, "abloese_quelle": quelle, "wage": e.get("wage"),
+                "homegrown": e.get("homegrown"), "pl_status": pl.get("pl_status"),
+                "pl_text": pl.get("pl_text"), "pl_grenzfall": pl.get("pl_grenzfall"),
+                "stuermer": stuermer, "stand": e.get("imported_at"),
+                "kalenderjahr": moneyball.ist_kalenderjahr_liga(e.get("league")),
+                "hinweis": ({"art": "stuermer_wechsel", "text": self.STUERMER_HINWEIS}
+                            if (stuermer and richtung == "zugang") else None)}
+
+    def _planer_ergebnis(self, conn, name, zug, abg, pins_szen, basis, daten, liga, cl_vereine,
+                         min_minutes):
+        """Ein Szenario auf dem virtuellen Kader durchrechnen."""
+        export = {int(e["eid"]): e for e in basis["export"] if e.get("eid")}
+        eids_ist = self._squad_eids(conn)
+        warn = []
+        z_ok = []
+        for e in zug:
+            if e not in export:
+                warn.append(f"EID {e} nicht im Export – als Zugang ignoriert.")
+            elif e in eids_ist:
+                warn.append(f"{export[e].get('name')} ist schon im Kader – als Zugang ignoriert.")
+            else:
+                z_ok.append(e)
+        a_ok = []
+        for e in abg:
+            if e not in eids_ist:
+                nm = (export.get(e) or {}).get("name") or f"EID {e}"
+                warn.append(f"{nm} ist nicht im Kader – als Abgang ignoriert.")
+            else:
+                a_ok.append(e)
+        eids = (set(eids_ist) | set(z_ok)) - set(a_ok)
+        # Pins: die echten, ohne Abgaenge; dazu Szenario-Pins (auch auf Zugaenge).
+        # In den Warnungen das Slot-Label ("Sturmspitze"), nicht der Schluessel.
+        label = {sl["key"]: sl["label"] for sl in tactics.FORMATION}
+        pins = {}
+        for key, e in self._pins(conn).items():
+            if e in a_ok:
+                warn.append(f"Pin auf {label.get(key, key)} entfällt im Szenario "
+                            f"({(export.get(e) or {}).get('name')} geht ab).")
+            else:
+                pins[key] = e
+        for key, e in (pins_szen or {}).items():
+            try:
+                e = int(e)
+            except (TypeError, ValueError):
+                continue
+            if key in label and e in eids:
+                pins[key] = e
+            else:
+                warn.append(f"Szenario-Pin auf {label.get(key, key)} ignoriert "
+                            f"(Spieler nicht im Kader).")
+        brett, kader = self._brett(conn, eids, pins, basis)
+        tiefe = tactics.kadertiefe(brett["slots"])
+        neu = set(z_ok)
+        st_slot = next(sl for sl in tactics.FORMATION if sl["key"] == "st")
+
+        def kurz(k, lst, mit_gesamt=False):
+            if k is None:
+                return None
+            d = {"id": k["id"], "name": k.get("name"), "leistung": lst, "neu": k["id"] in neu}
+            if mit_gesamt:
+                d.update(gesamt=k.get("score"), fit=k.get("fit"), mb=k.get("mb"))
+            return d
+
+        slots = []
+        for sl in brett["slots"]:
+            t = tiefe["slots"][sl["key"]]
+            slots.append({**{k: sl[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz",
+                                                 "duty", "x", "y", "gepinnt")},
+                          "stamm": kurz(*(t["stamm"] or (None, None)), mit_gesamt=True),
+                          "backup": kurz(*(t["backup"] or (None, None))),
+                          "ab_schwelle": t["ab_schwelle"], "duenn": t["duenn"]})
+        ueber = [dict(u, neu=u["id"] in neu) for u in tiefe["ueberzaehlig"]]
+        elf = self._elf(brett)
+        # Gegner-Pool ohne die eigenen Zu- und Abgaenge: ein Zugang spielt
+        # nicht mehr fuer seinen alten Verein, ein Abgang nicht mehr fuer uns.
+        weg = set(z_ok) | set(a_ok)
+        pool = [p for p in daten["pool"] if int(p["eid"]) not in weg]
+        mm = max(90, int(min_minutes))
+        liga_z = (tactics.liga_vergleich(elf, pool, basis["referenz"], liga, daten["verein"],
+                                         teams=basis["teams"], min_minutes=mm) if liga else [])
+        cl = {"keine_vereine": True}
+        if cl_vereine:
+            cl_z = tactics.cl_vergleich(elf, pool, basis["referenz"], cl_vereine,
+                                        daten["verein"], teams=basis["teams"], min_minutes=mm)
+            cl = {"vereine": [v for v in cl_vereine if v != daten["verein"]],
+                  "positionen": [{k: z.get(k) for k in (
+                      "key", "label", "wert", "messlatte", "abstand", "aussage",
+                      "vereine_mit_daten", "vereine_soll", "fehlende_vereine")} for z in cl_z]}
+        # Gehalt: Export-Gehalt je Woche (Zugaenge mit ihrem HEUTIGEN Gehalt)
+        woche = sum(export[e].get("wage") or 0 for e in eids if e in export)
+        ohne = [export[e].get("name") for e in eids if e in export and not export[e].get("wage")]
+        # Personen und Transferbilanz
+        pl_von = {int(p["eid"]): p for p in kader if p.get("eid")}
+        zug_p = [self._planer_person(conn, export[e], "zugang", basis, st_slot, pl_von.get(e))
+                 for e in z_ok]
+        abg_p = [self._planer_person(conn, export[e], "abgang", basis, st_slot)
+                 for e in a_ok if e in export]
+        zeilen = []
+        for pers, richtung in [(x, "zugang") for x in zug_p] + [(x, "abgang") for x in abg_p]:
+            q = pers["abloese_quelle"]
+            quelle = ("unbekannt" if q is None else "Marktwert (Näherung)" if q == "marktwert"
+                      else "Ablöseforderung" if richtung == "zugang" else "unsere Forderung")
+            zeilen.append({"eid": pers["eid"], "name": pers["name"], "richtung": richtung,
+                           "betrag": pers["abloese"], "quelle": quelle})
+        ausgaben = sum(z["betrag"] or 0 for z in zeilen if z["richtung"] == "zugang")
+        einnahmen = sum(z["betrag"] or 0 for z in zeilen if z["richtung"] == "abgang")
+        return {"name": name, "kader_anzahl": len(eids), "zugaenge": zug_p, "abgaenge": abg_p,
+                "warnungen": warn,
+                "brett": {"pins": brett["pins"], "slots": slots, "ueberzaehlig": ueber},
+                "meldeliste": brett["meldeliste"],
+                "liga": {"liga": liga, "positionen": [{k: z.get(k) for k in (
+                    "key", "label", "wert", "top4", "median", "abstand_top4", "rang",
+                    "vereine_mit_daten")} for z in liga_z]},
+                "cl": cl,
+                "gehalt": {"woche": woche, "jahr": woche * 52, "heutiges_gehalt": bool(z_ok),
+                           "ohne_gehalt": ohne},
+                "transfer": {"ausgaben": ausgaben, "einnahmen": einnahmen,
+                             "saldo": einnahmen - ausgaben, "zeilen": zeilen}}
+
+    @staticmethod
+    def _planer_delta(li, re):
+        """Unterschiede rechts minus links."""
+        def nach_key(liste):
+            return {z["key"]: z for z in liste}
+
+        sl_l, sl_r = nach_key(li["brett"]["slots"]), nach_key(re["brett"]["slots"])
+        elf = []
+        for key in sl_l:
+            a, b = sl_l[key]["stamm"], sl_r[key]["stamm"]
+            elf.append({"key": key,
+                        "links": a and {"id": a["id"], "name": a["name"]},
+                        "rechts": b and {"id": b["id"], "name": b["name"]},
+                        "geaendert": (a or {}).get("id") != (b or {}).get("id")})
+        ml, mr = li["meldeliste"]["pl"], re["meldeliste"]["pl"]
+
+        def werte(a, b, feld):
+            aus = []
+            za, zb = nach_key(a), nach_key(b)
+            for key, x in za.items():
+                y = zb.get(key) or {}
+                d = (round(y[feld] - x[feld], 1)
+                     if x.get(feld) is not None and y.get(feld) is not None else None)
+                aus.append({"key": key, "label": x.get("label"), "links": x.get(feld),
+                            "rechts": y.get(feld), "delta": d,
+                            "aussage_links": x.get("aussage"), "aussage_rechts": y.get("aussage")})
+            return aus
+
+        cl = (werte(li["cl"]["positionen"], re["cl"]["positionen"], "wert")
+              if "positionen" in li["cl"] and "positionen" in re["cl"] else None)
+        return {"elf": elf,
+                "meldeliste": {"nicht_heimisch": mr["nicht_heimisch"] - ml["nicht_heimisch"],
+                               "heimisch": mr["heimisch"] - ml["heimisch"],
+                               "u21": mr["u21"] - ml["u21"],
+                               "ok_links": ml["ok"], "ok_rechts": mr["ok"]},
+                "liga": [{k: v for k, v in z.items() if not k.startswith("aussage")}
+                         for z in werte(li["liga"]["positionen"], re["liga"]["positionen"], "wert")],
+                "cl": cl,
+                "tiefe": [{"key": key, "duenn_links": sl_l[key]["duenn"],
+                           "duenn_rechts": sl_r[key]["duenn"],
+                           "ab_schwelle_links": sl_l[key]["ab_schwelle"],
+                           "ab_schwelle_rechts": sl_r[key]["ab_schwelle"]} for key in sl_l],
+                "gehalt": {"woche": re["gehalt"]["woche"] - li["gehalt"]["woche"],
+                           "jahr": re["gehalt"]["jahr"] - li["gehalt"]["jahr"]},
+                "transfer_saldo": re["transfer"]["saldo"] - li["transfer"]["saldo"]}
+
+    def planer_vergleich(self, links="Ist", rechts=None, min_minutes=450):
+        """Zwei Szenarien nebeneinander – "Ist", gespeicherter Name, Vorlage
+        oder Dict {zugaenge, abgaenge, pins}. Beide Seiten rechnen auf
+        derselben Grundlage (_basis, _vergleich_daten). Liest nur: weder
+        Kader noch Verein noch Pins werden veraendert."""
+        conn = self._db()
+        if not self._squad_eids(conn):
+            return {"ok": False, "kein_kader": True}
+        try:
+            seiten = [self._planer_aufloesen(conn, x) for x in (links, rechts)]
+        except KeyError as e:
+            return {"ok": False, "error": f"Kein Szenario „{e.args[0]}“."}
+        basis = self._basis(conn)
+        daten = self._vergleich_daten(conn, min_minutes, basis)
+        liga = self._liga_name(conn, daten["rows"])
+        cl_vereine = self._cl_liste(conn)
+        erg = [self._planer_ergebnis(conn, n, z, a, p, basis, daten, liga, cl_vereine,
+                                     min_minutes) for n, z, a, p in seiten]
+        if cl_vereine:
+            erfassung = self._cl_erfassung(conn, erg[0]["cl"]["vereine"])
+            for x in erg:
+                x["cl"]["nur_gescoutet"] = sum(1 for e in erfassung if not e["kader"])
+        return {"ok": True, "links": erg[0], "rechts": erg[1],
+                "delta": self._planer_delta(erg[0], erg[1])}
 
     # ------------------------------------------------ manuelle Aufstellung
     # Pins: {slot_key: eid}. Die Automatik bleibt der Vorschlag, ein Pin
