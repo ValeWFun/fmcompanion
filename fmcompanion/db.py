@@ -206,10 +206,20 @@ EXPORT_COLS = ["name", "position", "age", "club", "league", "nation",
                # Fuss, Statuskuerzel, Groesse (cm)
                "personality", "media", "foot", "info", "height",
                # Ablöseforderung (Euro) und Eigengewaechs-Status (Text)
-               "transfer_fee", "homegrown"]
+               "transfer_fee", "homegrown",
+               # D17: Spielbilanz, Einsaetze getrennt, Vertragsende und
+               # Geburtsdatum (ISO), Staerke je Fuss (Stufenwort),
+               # Transferstatus, Transferwert-Spanne; Team-Tore/90 nur
+               # gespeichert, Definition ungeprueft (siehe importer.COLUMNS)
+               "wins", "draws", "defeats", "apps_start", "apps_sub",
+               "contract_end", "birth_date", "foot_right", "foot_left",
+               "transfer_status", "value_min", "value_max",
+               "team_gt_p90", "team_tore_p90"]
 # Spalten, die Text tragen – alles andere ist REAL
 EXPORT_TEXT = {"name", "position", "club", "league", "nation",
-               "personality", "media", "foot", "info", "homegrown"}
+               "personality", "media", "foot", "info", "homegrown",
+               "contract_end", "birth_date", "foot_right", "foot_left",
+               "transfer_status"}
 # Nur in export_players: WANN ein Feld zuletzt aus einem Export kam.
 # pers_stand – die Persoenlichkeit bleibt bei "Scouting erforderlich" stehen
 # und aendert sich bei jungen Spielern; homegrown_stand – der Eigengewaechs-
