@@ -8,7 +8,7 @@ import threading
 import time
 import webview
 
-from fmcompanion import scanner, moneyball, db, importer, tactics, valuemodel
+from fmcompanion import scanner, moneyball, db, importer, tactics, valuemodel, charakter
 
 # Pfad zu den UI-Dateien (funktioniert auch im PyInstaller-Bundle)
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -42,6 +42,15 @@ class Api:
         # das Umschalten zwischen den Suchmodi nicht jedes Mal 30.000 Zeilen
         # neu anreichert. Unterstrich, sonst spiegelt pywebview das nach JS.
         self._repl_cache = None
+        # Rechengrundlage von Brett, Liga-/CL-Vergleich und Kaderplaner (_basis)
+        # samt der daraus abgeleiteten Perzentil-Verteilungen: nur im Speicher,
+        # je App-Lauf, nie in der DB. Gilt, solange _rechenstand() gleich
+        # bleibt – jede Aenderung dort verwirft alles. Unterstriche wegen
+        # pywebview (siehe oben).
+        self._rechen_cache = None               # (Fingerabdruck, Basis)
+        self._rechen_gen = 0                    # +1 bei jedem Schreiben aus der App
+        self._rechen_lock = threading.RLock()   # pywebview ruft aus mehreren Threads
+        self._rechen_cache_aus = False          # Tests: jedes Mal neu rechnen
         # Kader-Datei, die auf eine Rueckfrage (Vereinswechsel?) wartet.
         # Unterstrich: der Pfad soll nicht nach JS gespiegelt werden.
         self._kader_offen = None
@@ -80,6 +89,7 @@ class Api:
         except (TypeError, ValueError):
             return {"ok": False, "error": "Ungültiger Wert"}
         db.set_setting(self._db(), key, v)
+        self._rechen_neu()
         return {"ok": True, "value": v}
 
     # Rohzaehler, die der HTML-Export mitbringt. Abgeleitetes (/90-Raten,
@@ -279,8 +289,10 @@ class Api:
                                                meta.get("eids_ram"))
             if meta.get("cohort"):
                 meta["cohort_saved"] = db.cohort_save(conn, meta["cohort"])
+                self._rechen_neu()
             if players and self._should_snapshot(conn, players):
                 db.save_snapshot(conn, players)
+                self._rechen_neu()
                 self._last_snap_ts = time.time()
                 self._last_pids = {p["id"] for p in players}
         for k in ("names_ram", "eids_ram", "cohort"):
@@ -699,7 +711,7 @@ class Api:
             db.set_setting(conn, "squad_imported_prev", vorher)
         # Der Kader-Import definiert, was "aktuell" heisst (siehe _pool_stand)
         db.set_setting(conn, "squad_imported_at", jetzt)
-        self._repl_cache = None
+        self._rechen_neu()
         return {"ok": True, "verein": verein, "anzahl": len(eids),
                 "verliehen": verliehen}
 
@@ -749,6 +761,7 @@ class Api:
         res = self._squad_from_players(conn, players)
         self._kader_offen = path if res.get("rueckfrage") else None
         self._kalibrieren(conn)             # erst jetzt steht der neue _pool_stand
+        self._rechen_neu()
         return res
 
     def import_squad_confirm(self):
@@ -801,7 +814,7 @@ class Api:
             eids = {int(r["eid"]) for r in rows
                     if r["player_id"] in set(liste) and r["eid"]}
         db.set_setting(conn, "squad_eids", json.dumps(sorted(eids)))
-        self._repl_cache = None
+        self._rechen_neu()
         return {"ok": True, "anzahl": len(eids)}
 
     @staticmethod
@@ -816,7 +829,7 @@ class Api:
                     stat_stand=e.get("imported_at"), exp_at=e.get("imported_at"),
                     taken_at=e.get("imported_at"))     # "Stand" in der Ersatzsuche
 
-    def _kader_rows(self, conn, bz, eids):
+    def _kader_rows(self, conn, bz, eids, export=None):
         """Der eigene Kader als angereicherte Spieler – aus dem EXPORT.
 
         Bewusst nicht aus dem RAM: der Export ist der vollstaendige, aktuelle
@@ -824,7 +837,8 @@ class Api:
         Wettbewerb eigene Datensaetze und aendert sich mit jedem Neuladen.
         Neuzugaenge, die nie gescannt wurden, fehlten frueher auf dem Brett.
         """
-        exp = {int(e["eid"]): e for e in db.load_export(conn) if e.get("eid")}
+        export = export if export is not None else db.load_export(conn)
+        exp = {int(e["eid"]): e for e in export if e.get("eid")}
         rows = [self._export_row_to_player(exp[e]) for e in eids if e in exp]
         return moneyball.enrich(rows, **bz)
 
@@ -840,20 +854,82 @@ class Api:
         Kennzahl, score_slot gab None und das Brett zeigte gar keinen Torwart.
         Die Ersatzsuche (_repl_pool) benutzt dieselbe Menge – sonst waeren die
         Scores nicht vergleichbar.
+
+        Aufgehoben im Speicher (_rechen_cache), solange _rechenstand gleich
+        bleibt. 'verteilungen' nimmt die daraus abgeleiteten Perzentil-
+        Verteilungen auf (_verteilung, tactics.slot_dists). Frueher baute jeder
+        Aufruf alles neu: Brett 4 s, Ligavergleich 6 s, ein Szenariovergleich
+        9 s. Alles in der Basis ist danach nur noch zu lesen – Kader, Pins und
+        min_minutes stecken bewusst NICHT darin und werden je Aufruf gerechnet.
         """
         bz = self._bezug(conn)
-        export = db.load_export(conn)
-        export_rows = moneyball.enrich(
-            [self._export_row_to_player(e) for e in export if e.get("eid")], **bz)
-        kohorte = moneyball.enrich(db.cohort_load(conn), **bz)
-        # Teamstaerke fuer den Carry-Zuschlag: aus den EXPORT-Zeilen, nicht aus
-        # dem Kader – gebraucht werden die Schnitte FREMDER Vereine, und nur der
-        # Export kennt Verein und Note zu jedem Spieler.
-        return {"bz": bz, "export": export, "export_rows": export_rows,
-                "referenz": export_rows + kohorte,
-                "ligen": {int(e["eid"]): e["league"] for e in export
-                          if e.get("eid") and e.get("league")},
-                "teams": tactics.team_strength(export)}
+        with self._rechen_lock:
+            # Fingerabdruck VOR dem Lesen: schreibt jemand dazwischen, passt der
+            # gemerkte Schluessel beim naechsten Aufruf nicht mehr – dann wird
+            # neu gerechnet, nie mit alten Zahlen weitergemacht.
+            key = None if self._rechen_cache_aus else self._rechenstand(conn, bz)
+            if key is not None and self._rechen_cache and self._rechen_cache[0] == key:
+                return self._rechen_cache[1]
+            export = db.load_export(conn)
+            export_rows = moneyball.enrich(
+                [self._export_row_to_player(e) for e in export if e.get("eid")], **bz)
+            kohorte = moneyball.enrich(db.cohort_load(conn), **bz)
+            # Teamstaerke fuer den Carry-Zuschlag: aus den EXPORT-Zeilen, nicht aus
+            # dem Kader – gebraucht werden die Schnitte FREMDER Vereine, und nur der
+            # Export kennt Verein und Note zu jedem Spieler.
+            basis = {"bz": bz, "export": export, "export_rows": export_rows,
+                     "referenz": export_rows + kohorte,
+                     "ligen": {int(e["eid"]): e["league"] for e in export
+                               if e.get("eid") and e.get("league")},
+                     "teams": tactics.team_strength(export),
+                     "verteilungen": {}}
+            if key is not None:
+                self._rechen_cache = (key, basis)
+            return basis
+
+    def _rechenstand(self, conn, bz):
+        """Fingerabdruck von allem, woraus _basis rechnet: Tabellenstand
+        (db.rechenstand – jeder Import, jeder Scan, auch aus anderen
+        Prozessen), Bezugsdatum, die Modul-Konstanten der Rechnung und der
+        App-Zaehler _rechen_gen. Gleicher Fingerabdruck = dieselben Zahlen."""
+        return (self._rechen_gen, db.rechenstand(conn), tuple(sorted(bz.items())),
+                self._konstanten())
+
+    @staticmethod
+    def _konstanten():
+        """Alle GROSS geschriebenen Konstanten der Rechenmodule als Text:
+        Gewichte, Profile, Formation, Liga-Offsets, Schwellen. Aendert jemand
+        eine davon zur Laufzeit (Tests), gibt es neue Zahlen statt alter.
+        Kostet unter einer Millisekunde."""
+        return repr([(m.__name__, k, v) for m in (moneyball, tactics, charakter)
+                     for k, v in sorted(vars(m).items())
+                     if k.isupper() and not k.startswith("_")])
+
+    def _rechen_neu(self):
+        """Rechen-Caches verwerfen, nach jedem Schreiben aus der App (Import,
+        Kader, Scan, Einstellung). Der Fingerabdruck faengt das auch allein ab;
+        das hier ist die zweite Sicherung."""
+        with self._rechen_lock:
+            self._rechen_gen += 1
+            self._rechen_cache = None
+            self._repl_cache = None
+
+    def _verteilung(self, basis, name, rechne):
+        """Aus der Referenz abgeleitete Verteilung, einmal je Basis."""
+        v = basis["verteilungen"]
+        with self._rechen_lock:
+            if name not in v:
+                v[name] = rechne()
+            return v[name]
+
+    def _ref_scores(self, basis):
+        """moneyball.score_referenz zur Basis (Quoten-Prior, Verteilungen)."""
+        return self._verteilung(basis, "scores", lambda: moneyball.score_referenz(
+            basis["referenz"], basis["ligen"]))
+
+    def _ref_dna(self, basis):
+        return self._verteilung(basis, "dna", lambda: moneyball.dna_referenz(
+            basis["referenz"], basis["ligen"]))
 
     def tactic_board(self):
         """Je Position der Formation die passenden Kaderspieler mit Score und
@@ -875,24 +951,25 @@ class Api:
         bz, referenz, ligen, teams = basis["bz"], basis["referenz"], basis["ligen"], basis["teams"]
         # Kader aus dem Export (siehe _kader_rows); id = EID, damit Brett,
         # Ersatzsuche und Formkurve denselben Schluessel benutzen.
-        kader = self._kader_rows(conn, bz, eids)
+        kader = self._kader_rows(conn, bz, eids, basis["export"])
         aus_export = len(kader)
         fehlt = len(eids) - len(kader)
         # Moneyball-Score der Kaderspieler – gegen DIESELBE Referenz wie die
         # Tabelle (ganzer Export + Kohorte), sonst hiesse "73" hier etwas
         # anderes als dort. Unter 'mb' abgelegt, weil build_board 'score' mit
         # dem Positions-Fit belegt.
-        moneyball.add_scores(kader, referenz, ligen)
+        moneyball.add_scores(kader, referenz, ligen, ref_stats=self._ref_scores(basis))
         for p in kader:
             p["mb"] = p.get("score")
         # Vereins-DNA gegen dieselbe Referenz wie die Positionsscores – nur so
         # liegen beide Zahlen auf einer Skala.
-        moneyball.add_dna(kader, referenz, ligen)
+        moneyball.add_dna(kader, referenz, ligen, ref_dists=self._ref_dna(basis))
         # Meldeliste (PL-Zaehler, CL-Richtwert) – markiert zugleich jeden
         # Kaderspieler mit pl_status, das Brett reicht es an die Kandidaten.
         melde = tactics.meldeliste(kader, *self._meldebasis(conn, kader, bz))
         melde.pop("spieler", None)
-        slots = tactics.build_board(kader, referenz, teams=teams)
+        slots = tactics.build_board(kader, referenz, teams=teams,
+                                    cache=basis["verteilungen"])
         # Brett-Zahl = geometrisches Mittel aus Fit (passt in den Slot), Score
         # (wie gut allgemein) und Charakter (Persoenlichkeit, tactics.gesamt).
         # Multiplikativ wie bei der DNA: wer alles mitbringt, liegt vorn; ein
@@ -967,9 +1044,11 @@ class Api:
         der Vorsaison. Unabhaengig von der eigenen Elf, damit Ist und Szenario
         des Kaderplaners dieselbe Grundlage teilen."""
         rows = basis["export_rows"]
-        if not basis.get("rows_bewertet"):
-            moneyball.add_scores(rows, basis["referenz"], basis["ligen"])
-            basis["rows_bewertet"] = True
+        with self._rechen_lock:             # einmal je Basis, nicht je Thread
+            if not basis.get("rows_bewertet"):
+                moneyball.add_scores(rows, basis["referenz"], basis["ligen"],
+                                     ref_stats=self._ref_scores(basis))
+                basis["rows_bewertet"] = True
         stand = self._pool_stand(conn)
         pool = [p for p in rows if not stand or (p.get("imported_at") or "") >= stand]
         verein = db.get_setting(conn, "own_club", "") or ""
@@ -1010,7 +1089,8 @@ class Api:
             return {"ok": False, "error": "Liga des eigenen Kaders unbekannt."}
         zeilen = tactics.liga_vergleich(self._elf(brett), d["pool"], basis["referenz"],
                                         liga, d["verein"], teams=basis["teams"],
-                                        min_minutes=max(90, int(min_minutes)))
+                                        min_minutes=max(90, int(min_minutes)),
+                                        cache=basis["verteilungen"])
         return dict(d["kopf"], ok=True, liga=liga, positionen=zeilen)
 
     # ------------------------------------------------------ CL-Niveau
@@ -1101,7 +1181,8 @@ class Api:
         d = self._vergleich_daten(conn, min_minutes, basis)
         zeilen = tactics.cl_vergleich(self._elf(brett), d["pool"], basis["referenz"],
                                       vereine, d["verein"], teams=basis["teams"],
-                                      min_minutes=max(90, int(min_minutes)))
+                                      min_minutes=max(90, int(min_minutes)),
+                                      cache=basis["verteilungen"])
         gewaehlt = [v for v in vereine if v != d["verein"]]
         # Die Regel "6 von 8" sagt nur, OB Daten da sind – nicht, ob es die
         # Stammspieler sind. Aus Scoutinglisten ist der beste Spieler eines
@@ -1307,11 +1388,13 @@ class Api:
         pool = [p for p in daten["pool"] if int(p["eid"]) not in weg]
         mm = max(90, int(min_minutes))
         liga_z = (tactics.liga_vergleich(elf, pool, basis["referenz"], liga, daten["verein"],
-                                         teams=basis["teams"], min_minutes=mm) if liga else [])
+                                         teams=basis["teams"], min_minutes=mm,
+                                         cache=basis["verteilungen"]) if liga else [])
         cl = {"keine_vereine": True}
         if cl_vereine:
             cl_z = tactics.cl_vergleich(elf, pool, basis["referenz"], cl_vereine,
-                                        daten["verein"], teams=basis["teams"], min_minutes=mm)
+                                        daten["verein"], teams=basis["teams"], min_minutes=mm,
+                                        cache=basis["verteilungen"])
             cl = {"vereine": [v for v in cl_vereine if v != daten["verein"]],
                   "positionen": [{k: z.get(k) for k in (
                       "key", "label", "wert", "messlatte", "abstand", "aussage",
@@ -1551,12 +1634,15 @@ class Api:
         """
         eids = frozenset(self._squad_eids(conn))
         stand = None if alle else self._pool_stand(conn)
-        roh = [e for e in db.load_export(conn) if e.get("eid")]
-        max_at = max((e.get("imported_at") or "" for e in roh), default="")
-        key = (stand, eids, len(roh), max_at)
-        if self._repl_cache and self._repl_cache[0] == key:
-            return self._repl_cache[1:]
         bz = self._bezug(conn)
+        # Derselbe Fingerabdruck wie beim Brett (_rechenstand). Frueher nur
+        # Zeilenzahl und neuester imported_at: eine Shortlist, die nur Felder
+        # aendert (Persoenlichkeit), oder ein Scan liess die Suchmenge alt.
+        key = (self._rechenstand(conn, bz), stand, eids)
+        if (not self._rechen_cache_aus and self._repl_cache
+                and self._repl_cache[0] == key):
+            return self._repl_cache[1:]
+        roh = [e for e in db.load_export(conn) if e.get("eid")]
         # ALLE Export-Zeilen anreichern: die Suchmenge sind nur die aktuellen,
         # die Vergleichsmenge fuer die Perzentile aber ganzer Export + Kohorte
         # – dieselbe wie im Taktikbrett (siehe dort, Torwart-Kennzahlen).
@@ -1565,8 +1651,14 @@ class Api:
                 if not stand or (p.get("imported_at") or "") >= stand]
         ligen = {int(e["eid"]): e.get("league") for e in roh if e.get("league")}
         kader_ids = frozenset(p["id"] for p in pool if int(p["eid"]) in eids)
-        referenz = alle + moneyball.enrich(db.cohort_load(conn), **bz)
-        moneyball.add_dna(pool, referenz, ligen)
+        # Die Kohorte aus der Rechengrundlage (_basis) mitbenutzen statt sie ein
+        # zweites Mal anzureichern: dieselben Zeilen mit demselben Bezugsdatum,
+        # rund 200 MB weniger im Speicher. Beide haengen am selben
+        # Fingerabdruck; gelesen wird nur. Ebenso die DNA-Verteilungen –
+        # Export plus Kohorte ist genau die Referenz der Basis.
+        basis = self._basis(conn)
+        referenz = alle + basis["referenz"][len(basis["export_rows"]):]
+        moneyball.add_dna(pool, referenz, ligen, ref_dists=self._ref_dna(basis))
         self._pl_markieren(conn, pool, bz)
         self._repl_cache = (key, pool, referenz, kader_ids)
         return pool, referenz, kader_ids
@@ -1810,6 +1902,7 @@ class Api:
         for name, players, felder in geparst:
             db.save_export(conn, players, felder, datei=name, ts=ts)
         self._kalibrieren(conn)             # neue Export-Alter -> Bezugsdatum
+        self._rechen_neu()
         n = len({p["eid"] for _, players, _ in geparst for p in players})
         return {"ok": True, "count": n, "dateien": dateien,
                 "zeilen": sum(d["spieler"] for d in dateien), "fehler": fehler}

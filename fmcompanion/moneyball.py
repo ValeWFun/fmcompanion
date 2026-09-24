@@ -770,11 +770,16 @@ def _pct(sorted_vals, v):
     return 100.0 * (lo + 0.5 * (hi - lo)) / n
 
 
-def add_scores(players, reference=None, leagues=None):
-    """Ergaenzt jeden Spieler um score (0-100), score_parts (Tooltip),
-    profile_label, league(+coeff). Perzentile werden je Positionsprofil ueber
-    die reference-Menge (idealerweise der Pool) gebildet."""
-    reference = reference if reference is not None else players
+def score_referenz(reference, leagues=None):
+    """Was add_scores aus der Referenzmenge braucht: (Quoten-Prior,
+    Verteilungen je (Profil, Kennzahl), Score-Verteilungen je (Profil,
+    Altersband)).
+
+    Haengt nur an Referenz und Ligen, nicht an den bewerteten Spielern –
+    deshalb eine eigene Funktion: app.Api rechnet sie je Rechenstand einmal
+    statt bei jedem Brett, Ligavergleich und Szenario neu (Export plus
+    Kohorte, zehntausende Zeilen). Die Listen sind danach nur noch zu lesen.
+    """
     leagues = leagues or {}
 
     def lg(p):
@@ -820,6 +825,26 @@ def add_scores(players, reference=None, leagues=None):
             age_dists.setdefault((prof, band), []).append(s / ws)
     for v in age_dists.values():
         v.sort()
+    return priors, dists, age_dists
+
+
+def add_scores(players, reference=None, leagues=None, ref_stats=None):
+    """Ergaenzt jeden Spieler um score (0-100), score_parts (Tooltip),
+    profile_label, league(+coeff). Perzentile werden je Positionsprofil ueber
+    die reference-Menge (idealerweise der Pool) gebildet.
+
+    ref_stats: fertiges Ergebnis von score_referenz(reference, leagues). Wer
+    dieselbe Referenz oft benutzt (Brett, Liga-/CL-Vergleich, Kaderplaner),
+    rechnet es einmal und gibt es mit – sonst wird es hier gebildet."""
+    reference = reference if reference is not None else players
+    leagues = leagues or {}
+
+    def lg(p):
+        eid = p.get("eid")
+        return leagues.get(int(eid)) if eid else None
+
+    priors, dists, age_dists = (ref_stats if ref_stats is not None
+                                else score_referenz(reference, leagues))
 
     for p in players:
         prof = _profile(p)
@@ -948,19 +973,9 @@ def _dna_wert(p, key, coeff):
     return float(v) * coeff if key in DNA_SKALIERT else float(v)
 
 
-def add_dna(players, reference=None, leagues=None):
-    """Ergaenzt jeden Spieler um dna (0-100), dna_pass, dna_ball und dna_teile.
-
-    reference: Vergleichsmenge fuer die Perzentile – dieselbe wie bei den
-    Scores, sonst liegen die Zahlen auf verschiedenen Skalen.
-
-    Die Gesamt-DNA ist das GEOMETRISCHE Mittel beider Dimensionen, kein
-    arithmetisches. Der Unterschied ist der ganze Sinn der Sache: gesucht
-    ist, wer BEIDES kann. Ein Spieler mit 95/30 haette im Durchschnitt 62,
-    genauso viel wie einer mit 62/62 – geometrisch sind es 53 gegen 62, und
-    der ausgewogene liegt vorn. Genau den unterschaetzt der Markt.
-    """
-    reference = reference if reference is not None else players
+def dna_referenz(reference, leagues=None):
+    """Verteilungen je (Positionsgruppe, Kennzahl) fuer add_dna – wie
+    score_referenz einmal je Referenz zu rechnen und danach nur zu lesen."""
     leagues = leagues or {}
 
     def lg(p):
@@ -980,6 +995,30 @@ def add_dna(players, reference=None, leagues=None):
                     dists.setdefault((g, key), []).append(v)
     for v in dists.values():
         v.sort()
+    return dists
+
+
+def add_dna(players, reference=None, leagues=None, ref_dists=None):
+    """Ergaenzt jeden Spieler um dna (0-100), dna_pass, dna_ball und dna_teile.
+
+    reference: Vergleichsmenge fuer die Perzentile – dieselbe wie bei den
+    Scores, sonst liegen die Zahlen auf verschiedenen Skalen. ref_dists:
+    fertiges dna_referenz(reference, leagues), sonst wird es hier gebildet.
+
+    Die Gesamt-DNA ist das GEOMETRISCHE Mittel beider Dimensionen, kein
+    arithmetisches. Der Unterschied ist der ganze Sinn der Sache: gesucht
+    ist, wer BEIDES kann. Ein Spieler mit 95/30 haette im Durchschnitt 62,
+    genauso viel wie einer mit 62/62 – geometrisch sind es 53 gegen 62, und
+    der ausgewogene liegt vorn. Genau den unterschaetzt der Markt.
+    """
+    reference = reference if reference is not None else players
+    leagues = leagues or {}
+
+    def lg(p):
+        eid = p.get("eid")
+        return leagues.get(int(eid)) if eid else None
+
+    dists = ref_dists if ref_dists is not None else dna_referenz(reference, leagues)
 
     for p in players:
         g = _dna_gruppe(p)

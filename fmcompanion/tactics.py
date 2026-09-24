@@ -692,13 +692,25 @@ def carry_bonus(p, teams):
     return max(-CARRY_CAP, min(CARRY_CAP, bonus)), ohne, n - 1
 
 
-def slot_dists(slot, reference, min_minutes=MIN_MINUTES):
+def slot_dists(slot, reference, min_minutes=MIN_MINUTES, cache=None):
     """Perzentil-Verteilungen je Kennzahl dieser Position.
 
     Gebildet NUR ueber Spieler, die die Position auch spielen koennen: ein
     Stuermer gehoert nicht in die Zweikampfverteilung der Innenverteidiger.
     Gibt (Verteilungen, Groesse der Vergleichsbasis) zurueck.
+
+    cache: dict, das zu GENAU dieser Referenz gehoert (app.Api legt es je
+    Rechenstand neu an). Der Schluessel enthaelt Gewichte und Gruppen des
+    Slots, damit eine geaenderte Formation nie eine alte Verteilung trifft.
+    Das Ergebnis ist danach nur noch zu lesen.
     """
+    if cache is not None:
+        key = ("slot", slot["key"], min_minutes, tuple(slot["gewichte"].items()),
+               tuple(slot["gruppen"]))
+        hit = cache.get(key)
+        if hit is None:
+            hit = cache[key] = slot_dists(slot, reference, min_minutes)
+        return hit
     pool = [r for r in reference
             if (r.get("minutes") or 0) >= min_minutes and eligible(r, slot)[0]]
     dists = {}
@@ -762,16 +774,17 @@ def score_slot(p, slot, dists, teams=None):
             "teile": sorted(teile, key=lambda t: -t["gewicht"])}
 
 
-def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None):
+def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=None):
     """Fuer jede Position die passenden Spieler mit Score und Aufschluesselung.
 
     squad     : Spieler, die bewertet werden (der eigene Kader)
     reference : Vergleichsmenge fuer die Perzentile (Pool + Kohorte)
     teams      : team_strength() fuer den Carry-Zuschlag, oder None
+    cache      : Verteilungs-Cache zu dieser Referenz (siehe slot_dists)
     """
     out = []
     for slot in FORMATION:
-        dists, basis = slot_dists(slot, reference, min_minutes)
+        dists, basis = slot_dists(slot, reference, min_minutes, cache)
         kandidaten = []
         for p in squad:
             ok, quelle = eligible(p, slot)
@@ -942,7 +955,7 @@ LIGA_POSITIONEN = [
 
 
 def liga_vergleich(elf, pool, referenz, liga, verein, teams=None,
-                   min_minutes=450):
+                   min_minutes=450, cache=None):
     """Je Position: eigene Elf gegen die Liga.
 
     elf      : {slot_key: Kandidat aus dem Brett} mit 'fit', 'mb', 'name', 'minutes'
@@ -957,7 +970,7 @@ def liga_vergleich(elf, pool, referenz, liga, verein, teams=None,
     return _positionsvergleich(
         elf, pool, referenz,
         lambda p: p.get("league") == liga and p.get("club") != verein,
-        teams, min_minutes)
+        teams, min_minutes, cache)
 
 
 # CL-Niveau: dieselbe Rechnung, aber gegen eine FESTE Liste von 8 Vereinen
@@ -971,7 +984,7 @@ CL_MIN_VEREINE = 6
 
 
 def cl_vergleich(elf, pool, referenz, vereine, verein, teams=None,
-                 min_minutes=450):
+                 min_minutes=450, cache=None):
     """Je Position: eigene Elf gegen die festgelegten CL-Vergleichsvereine.
 
     vereine: Vereinsnamen wie im Export; der eigene Verein zaehlt nie mit.
@@ -980,7 +993,8 @@ def cl_vergleich(elf, pool, referenz, vereine, verein, teams=None,
     """
     ref = {v for v in (vereine or []) if v and v != verein}
     zeilen = _positionsvergleich(elf, pool, referenz,
-                                 lambda p: p.get("club") in ref, teams, min_minutes)
+                                 lambda p: p.get("club") in ref, teams, min_minutes,
+                                 cache)
     for z in zeilen:
         mit = {v["club"] for v in z["vereine"]}
         werte = sorted(v["wert"] for v in z["vereine"])
@@ -1000,14 +1014,15 @@ def cl_vergleich(elf, pool, referenz, vereine, verein, teams=None,
 
 
 def _positionsvergleich(elf, pool, referenz, gehoert_dazu, teams=None,
-                        min_minutes=450):
+                        min_minutes=450, cache=None):
     """Gemeinsamer Kern von Liga- und CL-Vergleich: je Position die eigene Elf
-    gegen den jeweils besten Spieler jedes Vereins, der gehoert_dazu(p) erfuellt."""
+    gegen den jeweils besten Spieler jedes Vereins, der gehoert_dazu(p) erfuellt.
+    cache: Verteilungs-Cache zu dieser Referenz (siehe slot_dists)."""
     slots = {s["key"]: s for s in FORMATION}
     out = []
     for key, label, skeys in LIGA_POSITIONEN:
         slot = slots[skeys[0]]
-        dists, _ = slot_dists(slot, referenz)
+        dists, _ = slot_dists(slot, referenz, cache=cache)
         je_verein, alle = {}, []
         for p in pool:
             if not gehoert_dazu(p):
