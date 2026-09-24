@@ -63,6 +63,7 @@
     --pos:#2f7a2b;                            /* Grün   = Kauf, gut     */
     --neg:#8b4bb0;                            /* Violett= Verkauf, schwach */
     --mark:#b25a06;                           /* Orange = gemerkt       */
+    --mark-rgb:178,90,6;                      /* dasselbe für rgba()    */
     --blue:#0a6cb4;
     --zebra:#f4f5f7; --rowhover:#e2eaf2;
     /* Schatten tragen den Blaustich des Grundes, nicht neutrales Schwarz –
@@ -83,7 +84,7 @@
     --accent:#57adf2; --on-accent:#0b0e12;
     --pos:#7cc86c;
     --neg:#c193e8;
-    --mark:#f0982f;
+    --mark:#f0982f; --mark-rgb:240,152,47;
     --blue:#57adf2;
     --zebra:#1b1f26; --rowhover:#23303d;
     --shadow:0 1px 0 rgba(0,4,10,.4);
@@ -565,6 +566,68 @@
   .tcmp{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:11.5px}
   /* Umschalter unter „mein team": Brett | Ligavergleich */
   .tactnav{padding:14px 16px 0}
+
+  /* ---------- Planspiel (D14) ----------
+     Sichtbar KEIN echtes Brett: Absperrband mit 45°-Schraffur (Möbel, Regel
+     1) im Orange der Merkliste – vorgemerkt = geplant –, gestrichelter Rahmen
+     um die ganze Ansicht. Zugänge grün (Kauf), Abgänge violett und
+     durchgestrichen (Verkauf); kein Rot. */
+  .planwrap{margin:14px 16px 26px;border:2px dashed var(--mark);background:var(--surface)}
+  .planband{display:flex;align-items:center;gap:12px;padding:9px 14px;color:var(--text);
+    font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    background:repeating-linear-gradient(45deg,rgba(var(--mark-rgb),.26) 0 9px,transparent 9px 18px);
+    border-bottom:1px solid var(--mark)}
+  .planband span:first-child{background:var(--surface);padding:2px 8px}
+  .planleiste{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 14px}
+  .planleiste select{min-width:0}
+  .planfrage{font-size:12px}
+  /* Neu gerechnet wird ein paar Sekunden: das alte Ergebnis bleibt stehen, gedämpft */
+  .planwrap.laeuft .planrechts{opacity:.5;transition:opacity .2s}
+  .plantag{display:inline-block;margin-left:6px;padding:0 5px;border:1px dashed var(--dim);font-family:var(--mono);
+    font-size:10px;color:var(--muted);letter-spacing:.04em}
+  .planinfo{margin:0 14px 12px;padding:6px 10px;border-left:3px solid var(--mark);background:var(--surface2);
+    font-size:12px;line-height:1.5}
+  .plangrid{display:grid;grid-template-columns:330px minmax(0,1fr);gap:20px;padding:0 14px 8px}
+  @media (max-width:1100px){ .plangrid{grid-template-columns:1fr} }
+  .planp{border-left:3px solid var(--pos);background:var(--surface2);padding:7px 9px;margin:6px 0}
+  .planp.ab{border-left-color:var(--neg)}
+  .planp.ab .pn{text-decoration:line-through;text-decoration-color:var(--neg)}
+  .planpkopf{display:flex;align-items:baseline;gap:8px}
+  .planpkopf .pn{font-weight:600}
+  .planweg{margin-left:auto;background:none;border:0;clip-path:none;padding:0 2px;color:var(--dim);
+    font-size:12px;letter-spacing:0}
+  .planweg:hover{color:var(--text);filter:none}
+  .planp.zu .pn{color:var(--text)}
+  .planpmeta{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4}
+  .planhinweis{font-size:11px;margin-top:5px;padding-left:7px;border-left:2px solid var(--mark);line-height:1.4}
+  .planpin{font-size:11px;padding:2px 4px;margin-top:5px;min-width:0;width:auto;max-width:100%;
+    background:transparent;border-color:var(--rule);color:var(--muted)}
+  .plankader{display:flex;flex-wrap:wrap;gap:4px}
+  .plankader button{background:var(--surface2);color:var(--text);border:1px solid var(--border);clip-path:none;
+    padding:3px 7px;font-family:var(--sans);font-size:11.5px;font-weight:400;letter-spacing:0;text-transform:none}
+  .plankader button:hover{border-color:var(--neg);filter:none}
+  .plankader button.on{border-color:var(--neg);color:var(--neg);text-decoration:line-through}
+  .planwarn{border:1px dashed var(--dim);padding:7px 11px;font-size:12px;margin-bottom:10px}
+  table.plankz,table.planpos{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:12px;
+    font-variant-numeric:tabular-nums}
+  table.plankz th,table.planpos th{position:static;background:transparent;font-family:var(--mono);font-size:10px;
+    font-weight:500;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;text-align:left;
+    padding:5px 8px;border-bottom:1.5px solid var(--border);cursor:default}
+  table.plankz td,table.planpos td{padding:6px 8px;border-bottom:1px solid var(--rule);text-align:left;
+    white-space:normal;cursor:default;position:static;background:transparent}
+  table.plankz td:first-child{color:var(--muted);width:170px}
+  table.plankz td:last-child{white-space:nowrap}
+  table.planpos tr.ae td{background:rgba(var(--mark-rgb),.10)}
+  .planplaetze{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .planplatz{max-width:360px}
+  .planleg{display:inline-block;width:14px;height:9px;border:1px solid var(--border)}
+  .planleg.ae{border:2px solid var(--mark)}
+  .planleg.duenn{border:1px dashed var(--dim)}
+  /* „+ ins Planspiel": Orange wie die Merkliste; der Hinweis in der Leiste auch */
+  .wbtn.plan{border-color:var(--mark);color:var(--mark)}
+  .wbtn.plan.on{background:var(--mark);color:var(--on-accent);border-color:var(--mark)}
+  .planlink{display:block;margin-top:3px;font-size:11px;color:var(--mark)}
+  #planChip{border-color:var(--mark);color:var(--mark);font-weight:700}
   /* Rollenkürzel wie im Spiel (StS, BsV …): Groß-/Kleinschreibung bleibt */
   .rkurz{display:inline-block;margin-left:6px;padding:0 5px;font-family:var(--mono);font-size:10px;
     font-weight:500;letter-spacing:.04em;color:var(--muted);border:1px solid var(--border);vertical-align:1px}
@@ -937,6 +1000,8 @@
     <button data-mode="cards" onclick="setMode('cards')">dossier</button>
   </div>
   <button id="watchFilter" class="wbtn" onclick="toggleWatchFilter()" title="Nur Merkliste zeigen">★ Merkliste</button>
+  <button id="planChip" class="wbtn planchip" style="display:none" onclick="zumPlanspiel()"
+          title="Zum Planspiel – der echte Kader bleibt unverändert"></button>
   <button id="u21Filter" class="wbtn" onclick="toggleU21()" title="Nur Spieler bis 21 Jahre. Das Alter kommt jetzt aus dem Geburtsdatum im RAM, nicht mehr nur aus Exporten.">U21</button>
   <select id="ranking" onchange="applyRanking()"></select>
   <span id="axisSel" style="display:none;gap:6px;align-items:center">
@@ -1790,7 +1855,7 @@ async function renderTactic(){
   if(!api){ host.innerHTML = `<div class="empty"><h2>Nur in der App</h2></div>`; return; }
   if(TACT_SQUADS){ renderSquadPicker(host); return; }
   if(!TACT){
-    LIGA = null; CLV = null;  // neues Brett = neue Elf, die Vergleiche rechnen neu
+    LIGA = null; CLV = null; PLAN_ERG = null;  // neues Brett = neue Elf, alles rechnet neu
     if(!TACT_LADEN)
       host.innerHTML = `<div class="empty"><span class="spin"></span> lade Taktik…</div>`;
     let e;
@@ -1801,6 +1866,7 @@ async function renderTactic(){
     if(!TACT) return;
   }
   if(TACT_VIEW==="liga"){ drawLigaHost(host); return; }
+  if(TACT_VIEW==="plan"){ drawPlanHost(host); return; }
   drawTactic(host);
 }
 
@@ -1808,6 +1874,7 @@ function tactNav(){
   return `<div class="tactnav"><div class="seg">
     <button class="${TACT_VIEW==="brett"?"on":""}" onclick="setTactView('brett')">Brett</button>
     <button class="${TACT_VIEW==="liga"?"on":""}" onclick="setTactView('liga')">Ligavergleich</button>
+    <button class="${TACT_VIEW==="plan"?"on":""}" onclick="setTactView('plan')">Planspiel</button>
   </div></div>`;
 }
 function setTactView(v){ TACT_VIEW = v; renderTactic(); }
@@ -2116,6 +2183,429 @@ function tactDetail(c){
     <div style="margin-top:10px">
       <button class="wbtn" onclick="openRepl(${c.id})">Ersatz finden…</button></div>`;
 }
+
+// ======================= Planspiel (D14) =====================================
+// „Was wäre, wenn": Zugänge und Abgänge durchspielen, ohne dass sich der echte
+// Kader ändert. Das Backend rechnet einen virtuellen Kader (Kader + Zugänge −
+// Abgänge); echter Kader, own_club und echte Pins bleiben unberührt. Einen
+// Knopf „ins echte Team übernehmen" gibt es bewusst NICHT.
+// Der Entwurf lebt im Browser (fmc_plan), benannte Szenarien in der DB.
+const PLAN_LEER = () => ({name:"", zugaenge:[], abgaenge:[], pins:{}});
+let PLAN = planLaden();
+let PLAN_ERG = null, PLAN_LISTE = null, PLAN_LINKS = "Ist", PLAN_LAEUFT = 0,
+    PLAN_Q = "", PLAN_SEL = 0, PLAN_LOESCHEN = false;
+
+function planLaden(){
+  try{ const t = JSON.parse(localStorage.getItem("fmc_plan") || "null");
+       if(t && Array.isArray(t.zugaenge) && Array.isArray(t.abgaenge)) return Object.assign(PLAN_LEER(), t); }
+  catch(e){}
+  return PLAN_LEER();
+}
+function planMerken(){
+  try{ localStorage.setItem("fmc_plan", JSON.stringify(PLAN)); }catch(e){}
+  planChip();
+}
+const planZahl = (n, eins, viele) => `${n} ${n===1 ? eins : viele}`;
+function planChip(){
+  const b = document.getElementById("planChip"); if(!b) return;
+  const z = PLAN.zugaenge.length, a = PLAN.abgaenge.length;
+  b.style.display = (z || a) ? "" : "none";
+  b.textContent = `Planspiel: ${planZahl(z, "Zugang", "Zugänge")} · ${planZahl(a, "Abgang", "Abgänge")}`;
+}
+function zumPlanspiel(){ closeAll(); closeCompare(); closeRepl(); TACT_VIEW = "plan"; setMode("tactic"); }
+// Eigener Kader = die EIDs auf dem echten Brett
+const planKader = () => new Set((TACT ? TACT.slots : []).flatMap(s => s.kandidaten.map(k => +k.id)));
+const planName = eid => { const p = PLAYERS.find(q => q.eid && +q.eid === +eid); return p ? p.name : String(eid); };
+function planKnopf(eid){
+  if(!eid || planKader().has(+eid)) return "";
+  const drin = PLAN.zugaenge.includes(+eid);
+  return `<button class="wbtn plan${drin?" on":""}" onclick="planZugang(${+eid})"
+    title="Im Planspiel durchspielen – der echte Kader bleibt unverändert">${drin ? "im Planspiel" : "+ ins Planspiel"}</button>`;
+}
+function planZugang(eid){
+  eid = +eid; if(!eid) return;
+  const st = document.getElementById("status");
+  if(planKader().has(eid)){ st.textContent = "Schon im eigenen Kader – im Planspiel lässt er sich nur abgeben."; return; }
+  if(!PLAN.zugaenge.includes(eid)) PLAN.zugaenge.push(eid);
+  planMerken(); PLAN_ERG = null;
+  st.textContent = `${planName(eid)} liegt im Planspiel – der echte Kader bleibt unverändert.`;
+  if(MODE==="tactic" && TACT_VIEW==="plan") planRechnen();
+}
+function planZugangWeg(eid){
+  PLAN.zugaenge = PLAN.zugaenge.filter(e => e !== +eid);
+  for(const k of Object.keys(PLAN.pins)) if(+PLAN.pins[k] === +eid) delete PLAN.pins[k];
+  planMerken(); planRechnen();
+}
+function planAbgang(eid){
+  eid = +eid;
+  PLAN.abgaenge = PLAN.abgaenge.includes(eid) ? PLAN.abgaenge.filter(e => e !== eid) : PLAN.abgaenge.concat(eid);
+  planMerken(); planRechnen();
+}
+function planPin(eid, slot){
+  for(const k of Object.keys(PLAN.pins)) if(+PLAN.pins[k] === +eid) delete PLAN.pins[k];
+  if(slot) PLAN.pins[slot] = +eid;
+  planMerken(); planRechnen();
+}
+// „Neu" fängt ganz vorn an – auch der Vergleich geht zurück auf „Ist"
+function planNeu(){ PLAN = PLAN_LEER(); PLAN_LINKS = "Ist"; PLAN_LOESCHEN = false; planMerken(); planRechnen(); }
+function planName_(v){ PLAN.name = v; planMerken(); }
+
+// Eine Rechnung dauert im Backend einige Sekunden. Mehrere Klicks kurz
+// hintereinander (drei Abgänge) lösen deshalb nur EINE Rechnung aus; eine
+// Antwort, die inzwischen überholt ist, wird verworfen.
+let PLAN_TIMER = null;
+function planRechnen(){
+  if(!API()) return nurInApp();
+  const nr = ++PLAN_LAEUFT;
+  if(MODE==="tactic" && TACT_VIEW==="plan") drawPlan(ligaHost());
+  clearTimeout(PLAN_TIMER);
+  PLAN_TIMER = setTimeout(() => planRechnenJetzt(nr), 350);
+}
+async function planRechnenJetzt(nr){
+  const api = API(), links = PLAN_LINKS;
+  let r;
+  try{ r = await api.planer_vergleich(links,
+         {zugaenge: PLAN.zugaenge, abgaenge: PLAN.abgaenge, pins: PLAN.pins}); }
+  catch(e){ r = {ok:false, error:String(e)}; }
+  if(nr !== PLAN_LAEUFT) return;                  // inzwischen neu angestoßen
+  PLAN_ERG = Object.assign(r || {ok:false}, {_links: links}); PLAN_LAEUFT = 0;
+  if(MODE==="tactic" && TACT_VIEW==="plan") drawPlan(ligaHost());
+}
+async function planListe(){
+  const api = API(); if(!api) return;
+  try{ PLAN_LISTE = await api.planer_liste(); }catch(e){ PLAN_LISTE = {ok:false, error:String(e)}; }
+}
+async function drawPlanHost(host){
+  if(!PLAN_LISTE) await planListe();
+  if(!PLAN_ERG && !PLAN_LAEUFT) return planRechnen();
+  drawPlan(host);
+}
+async function planSpeichern(){
+  const api = API(); if(!api) return nurInApp();
+  const st = document.getElementById("status");
+  const name = (PLAN.name || "").trim();
+  if(!name){ st.textContent = "Erst einen Namen für das Szenario eingeben."; document.getElementById("planNameIn")?.focus(); return; }
+  if(planVorlage(name) && !planGespeichert(name)){
+    st.textContent = `„${name}“ ist eine Vorlage und bleibt unverändert – unter einem neuen Namen speichern.`;
+    const i = document.getElementById("planNameIn"); if(i){ i.focus(); i.select(); } return; }
+  let r; try{ r = await api.planer_speichern(name, PLAN.zugaenge, PLAN.abgaenge, PLAN.pins, ""); }
+  catch(e){ r = {ok:false, error:String(e)}; }
+  if(!r || !r.ok){ st.textContent = "⚠ " + ((r && r.error) || "Szenario nicht gespeichert"); return; }
+  st.textContent = `Szenario „${name}“ gespeichert.`;
+  await planListe(); drawPlan(ligaHost());
+}
+function planOeffnen(name){
+  const vorlage = name.startsWith("vorlage:");
+  const quelle = vorlage ? (PLAN_LISTE && PLAN_LISTE.vorlagen) : (PLAN_LISTE && PLAN_LISTE.szenarien);
+  const sz = (quelle || []).find(x => x.name === (vorlage ? name.slice(8) : name)); if(!sz) return;
+  PLAN = {name: sz.name, zugaenge: (sz.zugaenge||[]).map(Number), abgaenge: (sz.abgaenge||[]).map(Number),
+          pins: Object.assign({}, sz.pins || {})};
+  PLAN_LOESCHEN = false; planMerken(); planRechnen();
+}
+async function planLoeschen(ja){
+  if(!ja){ PLAN_LOESCHEN = !PLAN_LOESCHEN; drawPlan(ligaHost()); return; }
+  const api = API(); if(!api) return nurInApp();
+  const name = PLAN.name;
+  let r; try{ r = await api.planer_loeschen(name); }catch(e){ r = {ok:false, error:String(e)}; }
+  document.getElementById("status").textContent = r && r.ok ? `Szenario „${name}“ gelöscht.` : "⚠ Löschen fehlgeschlagen";
+  PLAN_LOESCHEN = false; await planListe(); drawPlan(ligaHost());
+}
+function setPlanLinks(v){ PLAN_LINKS = v || "Ist"; planRechnen(); }
+const planVorlage = n => ((PLAN_LISTE && PLAN_LISTE.vorlagen) || []).find(v => v.name === n) || null;
+// Weicht der Entwurf vom gespeicherten Stand unter seinem Namen ab?
+function planGeaendert(){
+  const g = planGespeichert(PLAN.name) || planVorlage(PLAN.name);
+  if(!g) return PLAN.zugaenge.length + PLAN.abgaenge.length > 0;
+  const menge = a => JSON.stringify((a || []).map(Number).sort());
+  const pins = o => JSON.stringify(Object.keys(o || {}).sort().map(k => [k, +o[k]]));
+  return menge(g.zugaenge) !== menge(PLAN.zugaenge) || menge(g.abgaenge) !== menge(PLAN.abgaenge)
+      || pins(g.pins) !== pins(PLAN.pins);
+}
+const planGespeichert = n => ((PLAN_LISTE && PLAN_LISTE.szenarien) || []).find(s => s.name === n) || null;
+// Hinweise zum Stand: Vorlage (verschwindet mit dem nächsten Kader-Import)
+// oder ein Szenario, das auf einem älteren Kader gespeichert wurde
+function planInfo(){
+  const aus = [];
+  const g = planGespeichert(PLAN.name), v = !g && planVorlage(PLAN.name);
+  if(v) aus.push(`<b>Vorlage.</b> ${esc2(v.hinweis || "")} Sie verschwindet mit dem nächsten Kader-Import;
+    Änderungen unter neuem Namen speichern.`);
+  if(g && g.veraltet) aus.push(`„${esc2(g.name)}“ ist auf dem Kader-Import vom ${datumKurz(g.kader_stand)} gespeichert.
+    Gerechnet wird mit dem heutigen Kader – Zugänge, die inzwischen da sind, zählen nicht doppelt.`);
+  const l = PLAN_LINKS !== "Ist" && planGespeichert(PLAN_LINKS);
+  if(l && l.veraltet) aus.push(`Vergleich: „${esc2(l.name)}“ ist auf einem älteren Kader-Import gespeichert (${datumKurz(l.kader_stand)}).`);
+  return aus.length ? `<div class="planinfo">${aus.join("<br>")}</div>` : "";
+}
+
+// Suche nach Zugängen: nur Export-Spieler (EID), ohne eigenen Kader und Geplante
+function planTreffer(q){
+  const n = cardNorm(q.trim()); if(n.length < 2) return [];
+  const kader = planKader();
+  return PLAYERS.filter(p => p.name && p.eid && !kader.has(+p.eid) && !PLAN.zugaenge.includes(+p.eid)
+                          && cardNorm(p.name).includes(n))
+    .sort((a,b) => (b.minutes||0) - (a.minutes||0)).slice(0, 8);
+}
+function planSuche(q, still){
+  PLAN_Q = q; if(!still) PLAN_SEL = 0;
+  const host = document.getElementById("planSugg"); if(!host) return;
+  const t = planTreffer(q);
+  host.innerHTML = t.length ? `<div class="cmsugg">${t.map((p,i) =>
+    `<button class="${i===PLAN_SEL?"on":""}" onmousedown="event.preventDefault();planNimm(${+p.eid})">${esc2(p.name)}
+      <span>${esc2(p.club||"")} · ${esc2(p.pos_label||"?")}</span></button>`).join("")}</div>` : "";
+}
+function planSucheTaste(e){
+  const t = planTreffer(PLAN_Q);
+  if(e.key==="ArrowDown"){ PLAN_SEL = Math.min(t.length-1, PLAN_SEL+1); planSuche(PLAN_Q, true); e.preventDefault(); }
+  else if(e.key==="ArrowUp"){ PLAN_SEL = Math.max(0, PLAN_SEL-1); planSuche(PLAN_Q, true); e.preventDefault(); }
+  else if(e.key==="Enter" && t[PLAN_SEL]){ planNimm(+t[PLAN_SEL].eid); e.preventDefault(); }
+  else if(e.key==="Escape" && PLAN_Q){ e.stopPropagation(); e.target.value = ""; planSuche(""); }
+}
+function planNimm(eid){ PLAN_Q = ""; PLAN_SEL = 0; planZugang(eid); }
+
+// ---- Anzeige ------------------------------------------------------------------
+// Jugendverträge liegen teils unter 1.000 €/Woche – dann in Euro, nicht „0 k€"
+const mioWoche = v => v==null ? "–" : (Math.abs(v) >= 1e6 ? (v/1e6).toFixed(2).replace(".", ",") + " Mio €"
+  : Math.abs(v) >= 1e3 ? Math.round(v/1e3).toLocaleString("de-DE") + " k€" : Math.round(v).toLocaleString("de-DE") + " €");
+const mioBetrag = v => v==null ? "–" : fmtMio(v/1e6);
+// Saldo mit echtem Minus; ohne Transfers ein Strich statt „≈ 0,0 Mio"
+const saldoTxt = v => v==null || v===0 ? "–" : `≈ ${v>0?"+":"−"}${fmtMio(Math.abs(v)/1e6)}`;
+// Ablöse unbekannt (kein Marktwert, keine Forderung) fehlt in der Summe –
+// das steht dann dabei, statt die Bilanz stillschweigend zu schönen
+const planSaldo = t => { if(!t) return "–";
+  const ohne = (t.zeilen || []).filter(z => z.betrag == null).map(z => nachname(z.name));
+  if(!t.ausgaben && !t.einnahmen && !ohne.length) return "–";
+  const teile = [t.ausgaben ? `Ausgaben ${mioBetrag(t.ausgaben)}` : "", t.einnahmen ? `Einnahmen ${mioBetrag(t.einnahmen)}` : ""];
+  return `${saldoTxt(t.saldo)}<div class="cmraw">${teile.filter(Boolean).join(" · ")}</div>${
+    ohne.length ? `<div class="cmraw">ohne ${ohne.map(esc2).join(", ")} (Ablöse unbekannt)</div>` : ""}`; };
+// Δ mit Richtung: besserHoeher true/false färbt grün/violett, null bleibt neutral
+// (Gehalt und Kadergröße sind ein Preis, kein Urteil).
+const planDelta = (d, fmt, besserHoeher=null) => d==null || d===0 ? `<span class="muted">±0</span>`
+  : `<span class="${besserHoeher===null ? "" : (d>0) === besserHoeher ? "pos" : "neg"}">${d>0?"+":"−"}${fmt(Math.abs(d))}</span>`;
+// Mengen-Δ: neu hinzugekommen (+) und weggefallen (−) getrennt. Eine reine
+// Zählerdifferenz („±0") verschwiege, dass eine Position behoben und eine
+// andere neu betroffen ist. besserWeniger null = neutral färben.
+const planMengenDelta = (a, b, besserWeniger=true) => {
+  const neu = b.filter(x => !a.includes(x)), weg = a.filter(x => !b.includes(x));
+  if(!neu.length && !weg.length) return `<span class="muted">±0</span>`;
+  const f = cls => besserWeniger===null ? "" : cls;
+  const tip = [neu.length ? "neu: " + neu.join(", ") : "", weg.length ? "weg: " + weg.join(", ") : ""].filter(Boolean).join(" · ");
+  return `<span title="${escAttr(tip)}">${[neu.length ? `<span class="${f("neg")}">+${neu.length}</span>` : "",
+    weg.length ? `<span class="${f("pos")}">−${weg.length}</span>` : ""].filter(Boolean).join(" ")}</span>`;
+};
+const planSlots = e => (e && e.brett && e.brett.slots) || [];
+const nachname = n => { const t = String(n||"").split(" "); return t.length > 1 ? t.slice(1).join(" ") : t[0]; };
+
+// Kleiner Platz: je Slot der Stamm mit Gesamt. Geändert gegenüber der anderen
+// Seite = orangener Rahmen; Zugang = grünes „+"; dünn besetzt = gestrichelt.
+function planPlatz(erg, geaendert){
+  const tiles = planSlots(erg).map(s => {
+    const st = s.stamm, neu = st && st.neu, ae = geaendert.has(s.key);
+    const nm = st ? nachname(st.name) : "–";
+    return `<g><title>${escAttr(`${s.label}: ${st ? `${st.name} · Gesamt ${st.gesamt}` : "unbesetzt"}${s.duenn ? " · dünn besetzt" : ""}`)}</title>
+      <rect x="${s.x-9.5}" y="${s.y-5.6}" width="19" height="11.2" fill="var(--surface)"
+        stroke="${ae ? "var(--mark)" : "var(--border)"}" stroke-width="${ae ? 0.9 : 0.4}"${s.duenn ? ' stroke-dasharray="1.2 0.8"' : ""}/>
+      <text x="${s.x}" y="${s.y-1.2}" text-anchor="middle" font-size="2.7" font-family="var(--sans)"
+        fill="var(--text)">${esc2(nm.length > 11 ? nm.slice(0,10) + "…" : nm)}</text>
+      <text x="${s.x}" y="${s.y+3.6}" text-anchor="middle" font-size="3.4" font-weight="700"
+        font-family="var(--mono)" fill="${st ? scoreInk(st.gesamt) : "var(--dim)"}">${st ? st.gesamt : "–"}</text>
+      ${neu ? `<text x="${s.x+8.2}" y="${s.y-2.2}" text-anchor="middle" font-size="3.4" font-weight="700" fill="var(--pos)">+</text>` : ""}
+    </g>`;
+  }).join("");
+  return `<svg viewBox="0 0 100 100" class="pitchsvg planplatz">
+    <rect x="1" y="1" width="98" height="98" fill="var(--surface)" stroke="var(--border)" stroke-width="0.5"/>
+    <line x1="1" y1="50" x2="99" y2="50" stroke="var(--rule)" stroke-width="0.4"/>
+    <circle cx="50" cy="50" r="9" fill="none" stroke="var(--rule)" stroke-width="0.4"/>
+    <rect x="28" y="82" width="44" height="17" fill="none" stroke="var(--rule)" stroke-width="0.4"/>
+    <rect x="28" y="1" width="44" height="17" fill="none" stroke="var(--rule)" stroke-width="0.4"/>
+    ${tiles}</svg>`;
+}
+
+// Person (Zugang/Abgang): Herkunft der Zahlen, Näherungen, Stürmer-Hinweis
+// Bis die Rechnung da ist: was die Oberfläche schon weiß (Export-Zeile)
+const PLAN_VORAB_TEXT = {laeuft:"wird gerechnet…", ignoriert:"nicht gerechnet – siehe Hinweis rechts",
+                         fehler:"keine Zahlen – die Rechnung ist fehlgeschlagen"};
+function planVorab(eid, zustand){
+  const p = PLAYERS.find(q => q.eid && +q.eid === +eid) || {};
+  return {eid:+eid, name:p.name || String(eid), position:p.position, age:p.age, club:p.club, league:p.league,
+          _vorab:zustand || "laeuft"};
+}
+function planPerson(pe, art){
+  const quelle = pe.abloese_quelle==="forderung" ? "Ablöseforderung"
+    : pe.abloese_quelle==="marktwert" ? "≈ Marktwert" : "Ablöse unbekannt";
+  const herkunft = [pe.club, pe.league, pe.stand ? `Stand ${datumKurz(pe.stand)}` : ""].filter(Boolean).map(esc2).join(" · ");
+  // Beim Abgang heißt „braucht Ausländerplatz": einer wird frei
+  const plText = art==="ab" && pe.pl_status==="braucht_platz" ? "gibt einen Ausländerplatz frei" : pe.pl_text;
+  const slots = planSlots(PLAN_ERG && PLAN_ERG.rechts);
+  const pinVon = Object.keys(PLAN.pins).find(k => +PLAN.pins[k] === +pe.eid) || "";
+  const pinWahl = art==="zu" && slots.length ? `<select class="planpin" onchange="planPin(${+pe.eid}, this.value)"
+      title="Im Szenario auf eine Position setzen (Pin) – sonst entscheidet die Automatik">
+      <option value="">Position: automatisch</option>${slots.map(s =>
+        `<option value="${s.key}"${s.key===pinVon?" selected":""}>fest: ${esc2(s.label)}</option>`).join("")}</select>` : "";
+  return `<div class="planp ${art}">
+    <div class="planpkopf"><span class="pn">${art==="zu" ? "+ " : "− "}${esc2(pe.name)}</span>
+      <span class="muted">${esc2(pe.position||"")}${pe.age!=null ? ` · ${Math.round(pe.age)} J` : ""}</span>
+      <button class="planweg" title="aus dem Szenario nehmen"
+        onclick="${art==="zu" ? `planZugangWeg(${+pe.eid})` : `planAbgang(${+pe.eid})`}">✕</button></div>
+    <div class="planpmeta">${herkunft}</div>
+    ${pe._vorab ? `<div class="planpmeta">${PLAN_VORAB_TEXT[pe._vorab]}</div>`
+      : `<div class="planpmeta">${quelle} ${pe.abloese!=null ? `<b>${mioBetrag(pe.abloese)}</b>` : "–"}
+      · Gehalt ${pe.wage!=null ? `${art==="zu" ? "≈ " : ""}${mioWoche(pe.wage)}/Woche` : "–"}${plText ? ` · ${esc2(plText)}` : ""}</div>`}
+    ${pe.kalenderjahr ? `<div class="planhinweis">Kalenderjahr-Liga: Die Zahlen zählen nach der dortigen
+      Saison (Januar bis Dezember), nicht nach unserer – je nach Export eine halbe oder eine ganze.</div>` : ""}
+    ${pe.hinweis && pe.hinweis.text ? `<div class="planhinweis">${esc2(pe.hinweis.text)}</div>` : ""}
+    ${pinWahl}</div>`;
+}
+
+function drawPlan(host){
+  if(!host) return;
+  const R = PLAN_ERG, laeuft = !!PLAN_LAEUFT;
+  const sz = (PLAN_LISTE && PLAN_LISTE.szenarien) || [];
+  const vorlagen = (PLAN_LISTE && PLAN_LISTE.vorlagen) || [];
+  const gespeichert = sz.some(x => x.name === PLAN.name);
+  const lk = R && R._links || PLAN_LINKS;
+  const linksName = lk === "Ist" ? "Ist (heute)" : lk;
+  const opt = (v, t, sel) => `<option value="${escAttr(v)}"${sel?" selected":""}>${esc2(t)}</option>`;
+  const leiste = `<div class="planleiste">
+      <label class="status" style="display:flex;gap:6px;align-items:center">Szenario
+        <input id="planNameIn" value="${escAttr(PLAN.name)}" placeholder="Name, z.B. Paket A" oninput="planName_(this.value)"
+          style="min-width:190px"></label>
+      <button onclick="planSpeichern()" title="In der Datenbank speichern – gleicher Name überschreibt">Speichern</button>${
+        planGeaendert() ? `<span class="muted" style="font-size:11.5px">nicht gespeichert</span>` : ""}
+      <select onchange="if(this.value)planOeffnen(this.value);this.value=''" title="Gespeichertes Szenario öffnen" style="min-width:180px">
+        <option value="">Öffnen…</option>${sz.map(x => opt(x.name, x.name + (x.veraltet ? " · alter Kader" : ""))).join("")}${
+        vorlagen.length ? `<optgroup label="Vorlagen">${vorlagen.map(x => opt("vorlage:" + x.name, x.name)).join("")}</optgroup>` : ""}</select>
+      <button class="ghost" onclick="planNeu()" title="Leeres Szenario – gespeicherte bleiben erhalten">Neu</button>
+      ${gespeichert ? (PLAN_LOESCHEN
+        ? `<span class="planfrage">„${esc2(PLAN.name)}“ löschen? <button class="xbtn" onclick="planLoeschen(true)">Löschen</button>
+           <button class="linkbtn" onclick="planLoeschen(false)">abbrechen</button></span>`
+        : `<button class="linkbtn" onclick="planLoeschen(false)">löschen…</button>`) : ""}
+      <span class="grow"></span>
+      <label class="status" style="display:flex;gap:6px;align-items:center">Vergleichen mit
+        <select onchange="setPlanLinks(this.value)" style="min-width:170px">${opt("Ist", "Ist (heute)", PLAN_LINKS==="Ist")}${
+          sz.filter(x => x.name !== PLAN.name).map(x => opt(x.name, x.name + (x.veraltet ? " · alter Kader" : ""),
+            PLAN_LINKS===x.name)).join("")}${(() => { const vs = vorlagen.filter(x => x.name !== PLAN.name && !planGespeichert(x.name));
+          return vs.length ? `<optgroup label="Vorlagen">${vs.map(x => opt(x.name, x.name, PLAN_LINKS===x.name)).join("")}</optgroup>` : ""; })()}</select></label>
+    </div>`;
+
+  // Linke Spalte: Änderungen
+  const Rr = R && R.ok ? R.rechts : null;
+  // Die Liste folgt dem Szenario sofort; die Zahlen kommen aus der letzten
+  // Rechnung. Fehlt jemand in einer aktuellen Rechnung, hat das Backend ihn
+  // ignoriert (Warnung rechts).
+  const zustand = laeuft || !R ? "laeuft" : R.ok ? "ignoriert" : "fehler";
+  const person = (feld, e) => ((Rr && Rr[feld]) || []).find(p => +p.eid === +e) || planVorab(e, zustand);
+  const zu = PLAN.zugaenge.map(e => person("zugaenge", e));
+  const ab = PLAN.abgaenge.map(e => person("abgaenge", e));
+  const kader = TACT ? TACT.slots.flatMap(s => s.kandidaten.map(k => ({id:+k.id, name:k.name, slot:s.kurz})))
+    .filter((k,i,a) => a.findIndex(x => x.id === k.id) === i) : [];
+  const links = `<div class="planlinks">
+    <div class="dsec" style="margin-top:0">Zugänge <span class="muted">(${zu.length})</span></div>
+    ${zu.map(pe => planPerson(pe, "zu")).join("") || `<div class="muted" style="font-size:12px">noch keine</div>`}
+    <div style="position:relative;margin-top:8px"><input id="planSuche" type="search" placeholder="Zugang suchen (aus Exporten)…"
+      value="${escAttr(PLAN_Q)}" oninput="planSuche(this.value)" onkeydown="planSucheTaste(event)" autocomplete="off"
+      style="width:100%;min-width:0"><div id="planSugg"></div></div>
+    <div class="dsec">Abgänge <span class="muted">(${ab.length})</span></div>
+    ${ab.map(pe => planPerson(pe, "ab")).join("") || `<div class="muted" style="font-size:12px">noch keine</div>`}
+    <div class="muted" style="font-size:11px;margin:10px 0 4px">Eigener Kader – Klick gibt im Szenario ab:</div>
+    <div class="plankader">${kader.map(k => `<button class="${PLAN.abgaenge.includes(k.id)?"on":""}"
+      onclick="planAbgang(${k.id})" title="${escAttr(PLAN.abgaenge.includes(k.id) ? "zurückholen" : "im Szenario abgeben")}">${esc2(nachname(k.name))}</button>`).join("")}</div>
+  </div>`;
+
+  // Rechte Spalte: Ergebnis
+  let rechts;
+  if(laeuft && !R){
+    rechts = `<div class="empty" style="padding:40px 8px"><span class="spin"></span> rechne Szenario… <span class="muted">(einige Sekunden)</span></div>`;
+  } else if(!R || !R.ok){
+    rechts = `<div class="empty" style="padding:30px 8px"><h2>Kein Ergebnis</h2>${esc2((R && R.error)
+      || (R && R.kein_kader ? "Erst einen Kader auswählen." : ""))}</div>`;
+  } else {
+    const rName = PLAN.name || "Szenario";
+    rechts = planErgebnis(R, linksName, rName === linksName ? rName + " (Entwurf)" : rName);
+  }
+  host.innerHTML = tactNav() + `<div class="planwrap${laeuft ? " laeuft" : ""}">
+    <div class="planband"><span>Planspiel – der echte Kader bleibt unverändert</span>${
+      laeuft ? `<span class="spin"></span>` : ""}</div>
+    ${leiste}${planInfo()}
+    <div class="plangrid">${links}<div class="planrechts">${rechts}</div></div>
+    <div class="cmfuss" style="padding:0 14px">≈ Näherungen: Ablöse = Ablöseforderung, wo gesetzt, sonst Marktwert;
+      Gehalt = heutiges Gehalt beim alten Verein. Stamm und Backup rechnet das Backend wie am Brett
+      (Gesamt mit Charakter, Pins), dünn = weniger als zwei Kaderspieler mit Leistung ≥ 72 auf der Position.</div>
+  </div>`;
+  if(PLAN_Q) planSuche(PLAN_Q, true);
+}
+
+function planErgebnis(R, lName, rName){
+  const L = R.links, Rr = R.rechts, D = R.delta || {};
+  const geaendert = new Set((D.elf || []).filter(e => e.geaendert).map(e => e.key));
+  const pl = e => e.meldeliste && e.meldeliste.pl;
+  const plZelle = e => { const x = pl(e); if(!x) return "–";
+    const zahl = x.nicht_heimisch!=null && x.max_nicht_heimisch!=null ? `${x.nicht_heimisch}/${x.max_nicht_heimisch}` : "";
+    return `<span class="${x.ok===false ? "neg" : ""}" title="${escAttr(x.text||"")}">${zahl || esc2(x.text||"–")}${x.ok===false ? " · gerissen" : ""}</span>${
+      x.heimisch!=null ? `<div class="cmraw">${x.heimisch} Heimische · ${x.u21 ?? 0} U21</div>` : ""}`; };
+  const ml = D.meldeliste;
+  // Mehr Nicht-Heimische sind nur dann schlecht, wenn die Liste reißt
+  const mlDelta = ml ? planDelta(ml.nicht_heimisch, String, ml.ok_rechts===false ? false : null) : "";
+  const ohneGehalt = e => (e.gehalt && (e.gehalt.ohne_gehalt||[]).length)
+    ? `<div class="cmraw" title="${escAttr(e.gehalt.ohne_gehalt.join(", "))}">ohne Angabe: ${e.gehalt.ohne_gehalt.length}</div>` : "";
+  const clVorl = [L, Rr].some(e => e.cl && e.cl.nur_gescoutet > 0);
+  // Überzählig = weder Stamm noch erster Backup auf irgendeiner Position
+  const ueber = e => ((e.brett && e.brett.ueberzaehlig) || []).map(u => nachname(u.name) + (u.neu ? " +" : ""));
+  const duenn = e => planSlots(e).filter(s => s.duenn).map(s => SLOT_KURZ_EIN[s.key] || s.kurz);
+  const unterLiga = e => ((e.liga && e.liga.positionen) || []).filter(p => p.abstand_top4!=null && p.abstand_top4 < 0 && (p.vereine_mit_daten||0) >= LIGA_MIN_VEREINE);
+  const unterCl = e => e.cl && e.cl.positionen ? e.cl.positionen.filter(p => p.aussage && p.abstand!=null && p.abstand < 0) : null;
+  const liste = a => a.length ? a.map(esc2).join(", ") : `<span class="muted">keine</span>`;
+  const naeh = e => e.gehalt && e.gehalt.heutiges_gehalt ? "≈ " : "";
+  const zeilen = [
+    ["Meldeliste PL", plZelle(L), plZelle(Rr), mlDelta],
+    ["Gehalt / Woche", naeh(L) + mioWoche(L.gehalt && L.gehalt.woche) + ohneGehalt(L),
+      naeh(Rr) + mioWoche(Rr.gehalt && Rr.gehalt.woche) + ohneGehalt(Rr),
+      planDelta(D.gehalt && D.gehalt.woche, mioWoche)],
+    ["Gehalt / Jahr", naeh(L) + mioBetrag(L.gehalt && L.gehalt.jahr), naeh(Rr) + mioBetrag(Rr.gehalt && Rr.gehalt.jahr),
+      planDelta(D.gehalt && D.gehalt.jahr, mioBetrag)],
+    ["Transferbilanz", planSaldo(L.transfer), planSaldo(Rr.transfer),
+      D.transfer_saldo ? planDelta(D.transfer_saldo, v => fmtMio(v/1e6)) : ""],
+    ["Kadergröße", L.kader_anzahl ?? "–", Rr.kader_anzahl ?? "–", planDelta((Rr.kader_anzahl ?? 0) - (L.kader_anzahl ?? 0), String)],
+    [`<span title="Weder Stamm noch erster Backup auf irgendeiner Position">Überzählig</span>`,
+      liste(ueber(L)), liste(ueber(Rr)), planMengenDelta(ueber(L), ueber(Rr), null)],
+    ["Dünne Positionen", liste(duenn(L)), liste(duenn(Rr)), planMengenDelta(duenn(L), duenn(Rr))],
+    ["Unter Top-4-Niveau", liste(unterLiga(L).map(p => p.label)), liste(unterLiga(Rr).map(p => p.label)),
+      planMengenDelta(unterLiga(L).map(p => p.label), unterLiga(Rr).map(p => p.label))],
+    ["Unter der CL-Messlatte" + (clVorl ? ` <span class="plantag" title="Vergleichsvereine nur gescoutet – Kader-Exporte fehlen">vorläufig</span>` : ""), unterCl(L) ? liste(unterCl(L).map(p => p.label)) : `<span class="muted">keine Vereine gewählt</span>`,
+      unterCl(Rr) ? liste(unterCl(Rr).map(p => p.label)) : `<span class="muted">keine Vereine gewählt</span>`,
+      unterCl(L) && unterCl(Rr) ? planMengenDelta(unterCl(L).map(p => p.label), unterCl(Rr).map(p => p.label)) : ""],
+  ];
+  // Warnungen beider Seiten; bei „Ist" links gibt es keine
+  const warn = [...(Rr.warnungen || []),
+                ...(PLAN_LINKS !== "Ist" ? (L.warnungen || []).map(w => `${lName}: ${w}`) : [])];
+  const kz = `<table class="plankz"><thead><tr><th></th><th>${esc2(lName)}</th><th>${esc2(rName)}</th><th>Δ</th></tr></thead>
+    <tbody>${zeilen.map(z => `<tr><td>${z[0]}</td><td>${z[1]}</td><td>${z[2]}</td><td>${z[3]}</td></tr>`).join("")}</tbody></table>`;
+  // Je Position: Stamm, Tiefe, Liga
+  const ligaVon = (e, key) => ((e.liga && e.liga.positionen) || []).find(p => p.key === (LIGA_SLOT_ZU[key] || key));
+  const pos = planSlots(Rr).map(s => {
+    const l = planSlots(L).find(x => x.key === s.key) || {};
+    const ae = geaendert.has(s.key);
+    const lg = ligaVon(L, s.key), rg = ligaVon(Rr, s.key);
+    const stamm = x => x && x.stamm ? `${esc2(nachname(x.stamm.name))} <b>${x.stamm.gesamt}</b>${x.stamm.neu ? ` <span class="pos">+</span>` : ""}` : `<span class="muted">–</span>`;
+    const tiefe = x => x ? `<span class="${x.duenn ? "neg" : ""}" title="Kaderspieler mit Leistung ≥ 72">${x.ab_schwelle ?? "–"}${x.duenn ? " dünn" : ""}</span>` : "–";
+    const lz = g => g && g.abstand_top4!=null && (g.vereine_mit_daten||0) >= LIGA_MIN_VEREINE ? fmtDelta(g.abstand_top4) : "–";
+    return `<tr class="${ae ? "ae" : ""}"><td><span class="ltile" style="--grp:var(--pg-${SLOT_GRUPPE[s.key]||"mid"})">${esc2(s.kurz)}</span></td>
+      <td>${stamm(l)}</td><td>${stamm(s)}</td><td>${tiefe(l)} → ${tiefe(s)}</td><td>${lz(lg)} → ${lz(rg)}</td></tr>`;
+  }).join("");
+  const postab = `<table class="planpos"><thead><tr><th></th><th>Stamm ${esc2(lName)}</th><th>Stamm ${esc2(rName)}</th>
+      <th title="Kaderspieler mit Leistung ≥ 72 auf der Position">Tiefe</th><th title="Abstand zur Top-4-Schwelle der Liga">Δ Top 4</th></tr></thead>
+    <tbody>${pos}</tbody></table>`;
+  return `${warn.length ? `<div class="planwarn">${warn.map(esc2).join("<br>")}</div>` : ""}
+    ${kz}
+    <div class="planplaetze"><div><div class="dsec" style="margin-top:0">${esc2(lName)}</div>${planPlatz(L, geaendert)}</div>
+      <div><div class="dsec" style="margin-top:0">${esc2(rName)}</div>${planPlatz(Rr, geaendert)}</div></div>
+    <div class="lleg" style="margin:6px 0 12px"><span><i class="planleg ae"></i> anders besetzt</span>
+      <span><b class="pos">+</b> Zugang in der Elf</span><span><i class="planleg duenn"></i> dünn besetzt</span></div>
+    <div class="dsec">Je Position</div>${postab}`;
+}
+// Kurz und eindeutig je Slot – „IV" allein sagt bei zwei IV nicht, welcher
+const SLOT_KURZ_EIN = {tw:"TW", lv:"LV", ivl:"IV-L", ivr:"IV-R", rv:"RV", dml:"DM-L", dmr:"DM-R",
+  aml:"LA", amc:"OM", amr:"RA", st:"ST"};
+// Slot -> Ligavergleich-Position (die Doppelpositionen teilen sich eine Zeile)
+const LIGA_SLOT_ZU = {ivl:"iv", ivr:"iv", dml:"dm", dmr:"dm"};
 
 // ======================= Ligavergleich =====================================
 // Unsere Elf je Position gegen die Liga (tactics.liga_vergleich) oder gegen
@@ -2758,7 +3248,8 @@ function replDetail(c){
   return `<div class="muted" style="font-size:11px;margin-bottom:6px">
       oben <b>${esc2(REPL.original.name)}</b> (grau) · unten
       <b>${esc2(c.name)}</b> · Perzentil unter allen Spielern dieser Position,
-      rechts der Wert</div>${rows}${hin}${chr}${duenn}`;
+      rechts der Wert</div>${rows}${hin}${chr}${duenn}${
+      c.im_kader ? "" : `<div style="margin-top:8px">${planKnopf(c.id)}</div>`}`;
 }
 
 document.addEventListener("keydown", e=>{
@@ -3269,7 +3760,8 @@ async function renderDetail(){
    <input class="wnote" id="wnote" placeholder="Notiz…" value="${(w.note||"").replace(/"/g,'&quot;')}" onchange="saveNote(${p.id})">
    <div class="dsec">Perzentile – ${p.profile_label||"?"} (${cohort.length} Spieler im Vergleich)</div>
    ${metricBars(p, cohort)}
-   <button class="wbtn" style="margin-top:10px" onclick="addCompare(${p.id})">+ zum Vergleich</button>
+   <div class="wbtns" style="margin-top:10px"><button class="wbtn" onclick="addCompare(${p.id})">+ zum Vergleich</button>${
+     planKnopf(p.eid)}</div>
    <div class="dsec">Verlauf über Snapshots</div>
    <div id="dHist" class="muted">lade…</div>
    <div class="dsec">Saison-Historie (alle Records)</div>
@@ -3459,10 +3951,12 @@ function drawCompare(){
     // Zwei feste Zeilen (Verein / Alter · Fuß), damit alle Köpfe gleich hoch sind
     const meta = `${esc2(s.club||"–")}<br>${[s.age!=null ? Math.round(s.age)+" J" : null,
       fussKurz(s.foot)||null].filter(Boolean).map(esc2).join(" · ")}`;
+    const plan = s.rolle==="kandidat" && !s.im_kader && s.eid && !s.fehlt
+      ? `<button class="linkbtn planlink" onclick="planZugang(${+s.eid})">+ ins Planspiel</button>` : "";
     const weg = s.rolle==="kandidat" && s.anfrage_id!=null
       ? `<button class="cmweg" onclick="removeCompare(${s.anfrage_id})" title="aus dem Vergleich nehmen">✕</button>` : "";
     return `<th${zc(s)}>${weg}<span class="cmrolle">${rolle}</span>
-      <div class="cmname">${esc2(s.name)}</div>
+      <div class="cmname">${esc2(s.name)}</div>${plan}
       ${s.fehlt ? `${s.club ? `<div class="cmmeta">${esc2(s.club)}</div>` : ""}<div class="cmfehlt">${esc2(s.fehlt)}</div>`
                 : `<div class="cmmeta">${meta}</div>`}</th>`;
   }).join("");
@@ -3709,6 +4203,7 @@ async function init(){
   document.getElementById("curMax").value = s.cur_max_min;
   await loadData();
   populateAxes(); updateControls(); applyRanking();
+  planChip();
 }
 window.addEventListener("pywebviewready", init);
 // Icons und Theme sofort setzen – unabhaengig davon, ob PyWebView schon da ist
