@@ -500,6 +500,43 @@ def load_export(conn):
     return [dict(r) for r in rows]
 
 
+def rechenstand(conn):
+    """Fingerabdruck der Tabellen, aus denen Brett, Liga-/CL-Vergleich und
+    Kaderplaner rechnen (app.Api._rechenstand): Export, Import-Historie,
+    Vergleichskohorte, Snapshots. Aendert sich mit jedem Import und jedem
+    Scan – auch wenn ein anderer Prozess schreibt oder jemand die Tabelle
+    per SQL aendert. Rein lesend, legt keine Tabelle an.
+
+    Der Export (einige tausend Zeilen) geht mit seinem vollen Inhalt ein,
+    ~20 ms. Die Kohorte hat ~50.000 Zeilen: sie zu holen kostete ~250 ms je
+    Aufruf, deshalb dort eine Pruefsumme in SQL (Summe je Spalte, dazu
+    gewichtet mit der player_id, damit auch ein Tausch zweier Zeilen
+    auffaellt) – ~120 ms.
+    """
+    def eins(tabelle, spalten):
+        if not _hat_tabelle(conn, tabelle):
+            return None
+        return tuple(conn.execute(f"SELECT {spalten} FROM {tabelle}").fetchone())
+
+    export = None
+    if _hat_tabelle(conn, "export_players"):
+        cur = conn.cursor()
+        cur.row_factory = None              # Tupel, keine Row-Objekte
+        export = hash(tuple(cur.execute("SELECT * FROM export_players ORDER BY eid")))
+    kohorte = None
+    if _hat_tabelle(conn, "cohort_stats"):
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(cohort_stats)")]
+        teile = (["COUNT(*)", "MAX(updated_at)"]
+                 + [f"TOTAL({c})" for c in cols if c != "updated_at"]
+                 + [f"TOTAL({c} * (player_id % 1009))" for c in cols
+                    if c not in ("updated_at", "player_id")])
+        kohorte = eins("cohort_stats", ", ".join(teile))
+    return (export, kohorte,
+            # jede Datei eines Imports ist hier eine Zeile
+            eins("export_importe", "COUNT(*), MAX(id)"),
+            eins("snapshots", "COUNT(*), MAX(id)"))
+
+
 def export_count(conn):
     _init_export(conn)
     return conn.execute("SELECT COUNT(*) AS n FROM export_players").fetchone()["n"]
