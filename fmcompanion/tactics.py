@@ -1170,13 +1170,16 @@ assert not _ungewichtet, f"Archetyp auf ungewichteter Kennzahl: {sorted(_ungewic
 FUSS_REGEL = {"aml": ("streng", "Rechts"), "amr": ("streng", "Links"),
               "ivl": ("hinweis", "Links"), "ivr": ("hinweis", "Rechts")}
 # Staerke je Fuss (Export-Spalten 'Rechter Fuß'/'Linker Fuß') als Rangfolge,
-# 1 = sehr schwach bis 6 = sehr stark. In test.html (Sept. 2026) kommen
-# "Schwach", "Passabel" und "Sehr stark" vor; die uebrigen Stufen sind
-# VORLAEUFIG, die vollstaendige Liste bestaetigt der FM24-Experte. Gespeichert
-# wird das Wort, deshalb aendert eine korrigierte Liste nur diese Tabelle.
-# Unbekanntes -> None, nie geraten.
+# 1 = sehr schwach bis 6 = sehr stark – ordinal, nie als Abstand rechnen.
+# Laut FM24-Experte (24.09.2026) sechs Stufen: Sehr schwach < Schwach <
+# Passabel < (Stufe 4) < Stark < Sehr stark. Belegt sind "Schwach",
+# "Passabel" und "Sehr stark". Das deutsche Wort fuer Stufe 4 ("Fairly
+# Strong") ist offen – "Ziemlich stark", "Recht stark" oder "Gut" – und wird
+# erst nachgetragen, wenn es in einem Export auftaucht. Bis dahin: None und
+# ein Hinweis beim Import (unbekannte_fussstufen). Gespeichert wird das Wort,
+# ein Nachtrag hier wirkt deshalb sofort, ohne neuen Import.
 FUSS_STUFEN = {"sehr schwach": 1, "schwach": 2, "passabel": 3,
-               "ziemlich stark": 4, "stark": 5, "sehr stark": 6,
+               "stark": 5, "sehr stark": 6,
                "very weak": 1, "weak": 2, "reasonable": 3,
                "fairly strong": 4, "strong": 5, "very strong": 6}
 
@@ -1184,6 +1187,18 @@ FUSS_STUFEN = {"sehr schwach": 1, "schwach": 2, "passabel": 3,
 def fuss_rang(stufe):
     """'Sehr stark' -> 6, 'Passabel' -> 3, None/unbekannt -> None."""
     return FUSS_STUFEN.get((stufe or "").strip().lower())
+
+
+def unbekannte_fussstufen(players):
+    """{Stufenwort: Anzahl} der Fuss-Werte ohne Rangfolge – fuer einen
+    einmaligen Hinweis beim Import statt stillem None."""
+    aus = {}
+    for p in players:
+        for f in ("foot_right", "foot_left"):
+            w = p.get(f)
+            if w and fuss_rang(w) is None:
+                aus[w] = aus.get(w, 0) + 1
+    return aus
 
 
 def fuss_passung(foot, slot_key):

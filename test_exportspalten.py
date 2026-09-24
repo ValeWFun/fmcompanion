@@ -23,6 +23,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from fmcompanion import db, importer, tactics
 from fmcompanion.scoutkit import Kit
+import app
 
 _gesamt = 0
 _bestanden = 0
@@ -129,10 +130,17 @@ try:
 
     print("== Fuss-Rangfolge ==")
     pruefe("Stufen -> Rang", [tactics.fuss_rang(s) for s in
-                              ("Sehr schwach", "Schwach", "Passabel", "Ziemlich stark", "Stark",
-                               "Sehr stark")], [1, 2, 3, 4, 5, 6])
-    pruefe("Unbekanntes -> None", [tactics.fuss_rang(s) for s in (None, "", "-", "Irgendwie")],
-           [None, None, None, None])
+                              ("Sehr schwach", "Schwach", "Passabel", "Stark", "Sehr stark")],
+           [1, 2, 3, 5, 6])
+    pruefe("englische Stufen", [tactics.fuss_rang(s) for s in ("Very Weak", "Fairly Strong",
+                                                                "Very Strong")], [1, 4, 6])
+    pruefe("Unbekanntes -> None (Stufe 4 deutsch noch offen)",
+           [tactics.fuss_rang(s) for s in (None, "", "-", "Irgendwie", "Ziemlich stark")],
+           [None, None, None, None, None])
+    pruefe("unbekannte Stufe wird gemeldet, nicht verschluckt",
+           tactics.unbekannte_fussstufen(sp), {"Ziemlich stark": 1})
+    pruefe("Import-Hinweis nennt das Wort einmal",
+           [h for h in app.Api._import_hinweise(sp) if "Ziemlich stark" in h] != [], True)
 
     # ------------------------------------------------ Zusammenfuehren
     print("== Zusammenfuehren: alter Export setzt nichts auf NULL ==")

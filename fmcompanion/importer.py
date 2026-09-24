@@ -89,11 +89,15 @@ COLUMNS = {
     "foot_right": ["Rechter Fuß", "Right Foot"],
     "foot_left": ["Linker Fuß", "Left Foot"],
     "transfer_status": ["Transferstatus", "Transfer Status"],
-    # Laut Tooltip im Spiel Teamgegentore/90 und Teamtore/90. Definition
-    # ungeprueft: als "Tore, waehrend er auf dem Platz steht" sind die Werte
-    # unplausibel (Prada: 40 Tore mit ihm, 12 kassiert, bei 3 S, 5 U, 6 N).
-    # Nur gespeichert – NICHT in Berechnungen und NICHT in der Anzeige, bis ein
-    # Kaderexport gegen die echten Ergebnisse geklaert hat, was FM zaehlt.
+    # Tore gegen bzw. fuer das TEAM, waehrend der Spieler auf dem Platz steht,
+    # je 90 Minuten (Plus/Minus). Gezaehlt werden alle Pflichtspiele samt
+    # Supercup, keine Testspiele. Am Man-Utd-Kader gegen den echten Spielplan
+    # bestaetigt (24.09.2026): Kotarski mit 990 Min = genau 38:5 aus allen 11
+    # Pflichtspielen, die Summe ueber den Kader = 11 x Teamtore bzw.
+    # -gegentore. Kleine Minuten erzeugen Ausreisser (73 Min -> 8,63).
+    # Kalenderjahr-Ligen (Brasilien) sind noch nicht geprueft. Gespeichert,
+    # aber NICHT in Berechnungen und NICHT in der Anzeige, bis der
+    # Datenanalyst sein Plus/Minus-Verfahren festgelegt hat.
     "team_gt_p90": ["TGgt/90"], "team_tore_p90": ["Ttor/90"],
 }
 # Spalten, die NIE gelesen werden, auch nicht als Text – jede mit Grund. Ein
@@ -417,7 +421,7 @@ def parse_export_felder(path):
         for f in ("wins", "draws", "defeats"):
             p[f] = _num(g(row, f), int)
         p["apps_start"], p["apps_sub"] = _eins_getrennt(g(row, "apps"))
-        # Definition ungeprueft, nur gespeichert (siehe COLUMNS)
+        # Plus/Minus des Teams, nur gespeichert, noch ungenutzt (siehe COLUMNS)
         p["team_gt_p90"] = _num(g(row, "team_gt_p90"))
         p["team_tore_p90"] = _num(g(row, "team_tore_p90"))
         p["contract_end"] = _datum(g(row, "contract_end"), folge)

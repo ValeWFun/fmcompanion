@@ -762,6 +762,7 @@ class Api:
         self._kader_offen = path if res.get("rueckfrage") else None
         self._kalibrieren(conn)             # erst jetzt steht der neue _pool_stand
         self._rechen_neu()
+        res["hinweise"] = self._import_hinweise(players)
         return res
 
     def import_squad_confirm(self):
@@ -1905,7 +1906,17 @@ class Api:
         self._rechen_neu()
         n = len({p["eid"] for _, players, _ in geparst for p in players})
         return {"ok": True, "count": n, "dateien": dateien,
-                "zeilen": sum(d["spieler"] for d in dateien), "fehler": fehler}
+                "zeilen": sum(d["spieler"] for d in dateien), "fehler": fehler,
+                "hinweise": self._import_hinweise(
+                    [p for _, players, _ in geparst for p in players])}
+
+    @staticmethod
+    def _import_hinweise(players):
+        """Einmalige Hinweise zu einem Import: Werte, die gespeichert, aber
+        noch nicht eingeordnet werden koennen (Fuss-Stufen ohne Rangfolge)."""
+        return [f"Unbekannte Fußstufe „{w}“ ({n}×) – gespeichert, aber ohne "
+                f"Rangfolge; bitte in tactics.FUSS_STUFEN nachtragen."
+                for w, n in sorted(tactics.unbekannte_fussstufen(players).items())]
 
     def import_export(self):
         """Datei-Dialog (Mehrfachauswahl), importiert alle gewaehlten Exporte."""

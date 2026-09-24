@@ -210,7 +210,7 @@ EXPORT_COLS = ["name", "position", "age", "club", "league", "nation",
                # D17: Spielbilanz, Einsaetze getrennt, Vertragsende und
                # Geburtsdatum (ISO), Staerke je Fuss (Stufenwort),
                # Transferstatus, Transferwert-Spanne; Team-Tore/90 nur
-               # gespeichert, Definition ungeprueft (siehe importer.COLUMNS)
+               # gespeichert, noch ungenutzt (Plus/Minus, siehe importer.COLUMNS)
                "wins", "draws", "defeats", "apps_start", "apps_sub",
                "contract_end", "birth_date", "foot_right", "foot_left",
                "transfer_status", "value_min", "value_max",
