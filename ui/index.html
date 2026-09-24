@@ -581,8 +581,17 @@
   .planleiste{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 14px}
   .planleiste select{min-width:0}
   .planfrage{font-size:12px}
-  /* Neu gerechnet wird ein paar Sekunden: das alte Ergebnis bleibt stehen, gedämpft */
-  .planwrap.laeuft .planrechts{opacity:.5;transition:opacity .2s}
+  /* Aus dem Rechen-Cache kommt die Antwort in ~0,5 s, die erste nach einem
+     Import braucht ~4 s. Spinner, Dämpfung des alten Ergebnisses und „wird
+     gerechnet…" erscheinen deshalb erst nach 0,8 s (warm mit Entprellung
+     ~0,6 s), der Zusatz „(einige Sekunden)" erst nach 1,5 s – warm blitzt
+     nichts auf, kalt sieht man, dass es dauert. Animation statt Transition: ein neu
+     eingefügtes Element startet sie jedes Mal von vorn. */
+  .planwrap.laeuft .planrechts{animation:plandim .2s ease .8s both}
+  @keyframes plandim{from{opacity:1}to{opacity:.5}}
+  .planspaet{animation:planzeigen .15s ease .8s both}
+  .planlang{animation:planzeigen .2s ease 1.5s both}
+  @keyframes planzeigen{from{opacity:0}to{opacity:1}}
   .plantag{display:inline-block;margin-left:6px;padding:0 5px;border:1px dashed var(--dim);font-family:var(--mono);
     font-size:10px;color:var(--muted);letter-spacing:.04em}
   .planinfo{margin:0 14px 12px;padding:6px 10px;border-left:3px solid var(--mark);background:var(--surface2);
@@ -2250,16 +2259,16 @@ function planPin(eid, slot){
 function planNeu(){ PLAN = PLAN_LEER(); PLAN_LINKS = "Ist"; PLAN_LOESCHEN = false; planMerken(); planRechnen(); }
 function planName_(v){ PLAN.name = v; planMerken(); }
 
-// Eine Rechnung dauert im Backend einige Sekunden. Mehrere Klicks kurz
-// hintereinander (drei Abgänge) lösen deshalb nur EINE Rechnung aus; eine
-// Antwort, die inzwischen überholt ist, wird verworfen.
+// Eine Rechnung kommt aus dem Rechen-Cache in ~0,5 s, die erste nach einem
+// Import braucht ~4 s. Klicks kurz hintereinander lösen nur EINE Rechnung
+// aus; eine Antwort, die inzwischen überholt ist, wird verworfen.
 let PLAN_TIMER = null;
 function planRechnen(){
   if(!API()) return nurInApp();
   const nr = ++PLAN_LAEUFT;
   if(MODE==="tactic" && TACT_VIEW==="plan") drawPlan(ligaHost());
   clearTimeout(PLAN_TIMER);
-  PLAN_TIMER = setTimeout(() => planRechnenJetzt(nr), 350);
+  PLAN_TIMER = setTimeout(() => planRechnenJetzt(nr), 150);
 }
 async function planRechnenJetzt(nr){
   const api = API(), links = PLAN_LINKS;
@@ -2446,7 +2455,7 @@ function planPerson(pe, art){
       <button class="planweg" title="aus dem Szenario nehmen"
         onclick="${art==="zu" ? `planZugangWeg(${+pe.eid})` : `planAbgang(${+pe.eid})`}">✕</button></div>
     <div class="planpmeta">${herkunft}</div>
-    ${pe._vorab ? `<div class="planpmeta">${PLAN_VORAB_TEXT[pe._vorab]}</div>`
+    ${pe._vorab ? `<div class="planpmeta"><span class="${pe._vorab==="laeuft" ? "planspaet" : ""}">${PLAN_VORAB_TEXT[pe._vorab]}</span></div>`
       : `<div class="planpmeta">${quelle} ${pe.abloese!=null ? `<b>${mioBetrag(pe.abloese)}</b>` : "–"}
       · Gehalt ${pe.wage!=null ? `${art==="zu" ? "≈ " : ""}${mioWoche(pe.wage)}/Woche` : "–"}${plText ? ` · ${esc2(plText)}` : ""}</div>`}
     ${pe.kalenderjahr ? `<div class="planhinweis">Kalenderjahr-Liga: Die Zahlen zählen nach der dortigen
@@ -2513,7 +2522,8 @@ function drawPlan(host){
   // Rechte Spalte: Ergebnis
   let rechts;
   if(laeuft && !R){
-    rechts = `<div class="empty" style="padding:40px 8px"><span class="spin"></span> rechne Szenario… <span class="muted">(einige Sekunden)</span></div>`;
+    rechts = `<div class="empty planspaet" style="padding:40px 8px"><span class="spin"></span> rechne Szenario…
+      <span class="muted planlang">(einige Sekunden)</span></div>`;
   } else if(!R || !R.ok){
     rechts = `<div class="empty" style="padding:30px 8px"><h2>Kein Ergebnis</h2>${esc2((R && R.error)
       || (R && R.kein_kader ? "Erst einen Kader auswählen." : ""))}</div>`;
@@ -2523,7 +2533,7 @@ function drawPlan(host){
   }
   host.innerHTML = tactNav() + `<div class="planwrap${laeuft ? " laeuft" : ""}">
     <div class="planband"><span>Planspiel – der echte Kader bleibt unverändert</span>${
-      laeuft ? `<span class="spin"></span>` : ""}</div>
+      laeuft ? `<span class="planspaet"><span class="spin"></span></span>` : ""}</div>
     ${leiste}${planInfo()}
     <div class="plangrid">${links}<div class="planrechts">${rechts}</div></div>
     <div class="cmfuss" style="padding:0 14px">≈ Näherungen: Ablöse = Ablöseforderung, wo gesetzt, sonst Marktwert;
