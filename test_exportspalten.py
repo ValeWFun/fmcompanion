@@ -57,9 +57,9 @@ NEU = ["EID", "Name", "Position", "Alter", "Verein", "Min.", "Eins", "S", "U", "
        "SiegQ", "Endet", "Geb.", "Rechter Fuß", "Linker Fuß", "Transferstatus",
        "Transferwert", "Eignung", "TGgt/90", "Ttor/90"]
 ZEILEN_NEU = [
-    [101, "Anton", "M (Z)", 26, "Testverein", "810", "9", 3, 5, 1, "0%", "30/6/2031",
+    [101, "Anton", "M (Z)", 26, "Testverein", "990", "9", 3, 5, 1, "0%", "30/6/2031",
      "15/5/2002 (26 Jahre alt)", "Schwach", "Sehr stark", "Nicht zugewiesen",
-     "€120K - €1.2Mio", "Gut - Gut", "2.04", "1.74"],
+     "€120K - €1.2Mio", "Gut - Gut", "0.45", "3.45"],
     [102, "Bruno", "ST (Z)", 20, "Testverein", "12", "0 (1)", 0, 1, 0, "0%", "31/12/2029",
      "14/10/2007 (20 Jahre alt)", "Sehr stark", "Passabel", "Transferliste",
      "€191Mio - €208Mio", "Hervorragend - Hervorragend", "-", "-"],
@@ -102,12 +102,17 @@ try:
            (5000000, 5000000))
     pruefe("'Unbekannt' -> None", (p[103]["value_min"], p[103]["value_max"], p[103]["value"]),
            (None, None, None))
-    pruefe("Team-Tore/90 gelesen (nur gespeichert)", (p[101]["team_gt_p90"], p[101]["team_tore_p90"]),
-           (2.04, 1.74))
+    pruefe("Teamtore mit ihm als Zaehlwert (Kotarski: 990 Min, 3,45 / 0,45 -> 38:5)",
+           (p[101]["team_tore_on"], p[101]["team_gt_on"]), (38, 5))
+    pruefe("3.690 Min, 1,90 / 1,10 -> 78:45", (p[104]["team_tore_on"], p[104]["team_gt_on"]), (78, 45))
+    pruefe("ohne Rate oder Minuten -> None", (p[102]["team_tore_on"], p[103]["team_gt_on"]),
+           (None, None))
+    pruefe("/90-Raten selbst werden nicht gespeichert",
+           {"team_tore_p90", "team_gt_p90"} & (felder | set(db.EXPORT_COLS)), set())
     pruefe("Felder der Datei enthalten die neuen",
            {"wins", "draws", "defeats", "apps_start", "apps_sub", "contract_end", "birth_date",
             "foot_right", "foot_left", "transfer_status", "value_min", "value_max",
-            "team_gt_p90", "team_tore_p90"} <= felder, True)
+            "team_tore_on", "team_gt_on"} <= felder, True)
 
     print("== Nie gelesen: Eignung (Regel 2), SiegQ (kaputt) ==")
     pruefe("Eignung und SiegQ stehen in NIE_LESEN",
@@ -154,7 +159,7 @@ try:
     z = {r["eid"]: dict(r) for r in conn.execute("SELECT * FROM export_players")}
     neue = ["wins", "draws", "defeats", "apps_start", "apps_sub", "contract_end", "birth_date",
             "foot_right", "foot_left", "transfer_status", "value_min", "value_max",
-            "team_gt_p90", "team_tore_p90"]
+            "team_tore_on", "team_gt_on"]
     pruefe("alter Export: neue Felder bleiben stehen",
            [(e, f) for e in (101, 104) for f in neue if z[e][f] != p[e][f]], [])
     pruefe("alter Export: seine eigenen Felder aendern sich", (z[101]["minutes"], z[104]["minutes"]),
@@ -213,10 +218,10 @@ try:
            tactics.pl_status({"age": 22, "birth_year": 2007}, 2028, ref_year=2028), ("u21", False))
 
     print("== Scoutkit: Spanne und Raten werden nicht summiert ==")
-    pruefe("NICHT_SUMMIERBAR", {"value_min", "value_max", "team_gt_p90", "team_tore_p90"}
-           <= Kit.NICHT_SUMMIERBAR, True)
-    pruefe("Siege und Einsaetze sind summierbar",
-           {"wins", "draws", "defeats", "apps_start", "apps_sub"} & Kit.NICHT_SUMMIERBAR, set())
+    pruefe("NICHT_SUMMIERBAR", {"value_min", "value_max"} <= Kit.NICHT_SUMMIERBAR, True)
+    pruefe("Siege, Einsaetze und Teamtore sind summierbar",
+           {"wins", "draws", "defeats", "apps_start", "apps_sub", "team_tore_on", "team_gt_on"}
+           & Kit.NICHT_SUMMIERBAR, set())
 finally:
     shutil.rmtree(ordner, ignore_errors=True)
 

@@ -209,12 +209,12 @@ EXPORT_COLS = ["name", "position", "age", "club", "league", "nation",
                "transfer_fee", "homegrown",
                # D17: Spielbilanz, Einsaetze getrennt, Vertragsende und
                # Geburtsdatum (ISO), Staerke je Fuss (Stufenwort),
-               # Transferstatus, Transferwert-Spanne; Team-Tore/90 nur
-               # gespeichert, noch ungenutzt (Plus/Minus, siehe importer.COLUMNS)
+               # Transferstatus, Transferwert-Spanne; Teamtore und -gegentore
+               # mit dem Spieler auf dem Platz (Zaehlwerte), noch ungenutzt
                "wins", "draws", "defeats", "apps_start", "apps_sub",
                "contract_end", "birth_date", "foot_right", "foot_left",
                "transfer_status", "value_min", "value_max",
-               "team_gt_p90", "team_tore_p90"]
+               "team_tore_on", "team_gt_on"]
 # Spalten, die Text tragen – alles andere ist REAL
 EXPORT_TEXT = {"name", "position", "club", "league", "nation",
                "personality", "media", "foot", "info", "homegrown",

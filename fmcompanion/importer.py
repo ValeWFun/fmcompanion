@@ -95,9 +95,11 @@ COLUMNS = {
     # bestaetigt (24.09.2026): Kotarski mit 990 Min = genau 38:5 aus allen 11
     # Pflichtspielen, die Summe ueber den Kader = 11 x Teamtore bzw.
     # -gegentore. Kleine Minuten erzeugen Ausreisser (73 Min -> 8,63).
-    # Kalenderjahr-Ligen (Brasilien) sind noch nicht geprueft. Gespeichert,
-    # aber NICHT in Berechnungen und NICHT in der Anzeige, bis der
-    # Datenanalyst sein Plus/Minus-Verfahren festgelegt hat.
+    # Kalenderjahr-Ligen (Brasilien) sind noch nicht geprueft. Gespeichert
+    # als ZAEHLWERTE team_tore_on/team_gt_on (Rate x Min / 90, gerundet):
+    # nur Zaehlwerte lassen sich fuer Halbserien subtrahieren (Summer -
+    # Winter), wie Tore oder Paesse. NICHT in Berechnungen und NICHT in der
+    # Anzeige, bis der Datenanalyst sein Plus/Minus-Verfahren festgelegt hat.
     "team_gt_p90": ["TGgt/90"], "team_tore_p90": ["Ttor/90"],
 }
 # Spalten, die NIE gelesen werden, auch nicht als Text – jede mit Grund. Ein
@@ -292,7 +294,7 @@ def diagnose(path):
 # COLUMNS-Eintraege, die nur als Quelle fuer ein abgeleitetes Feld dienen und
 # selbst nicht gespeichert werden.
 _NUR_QUELLE = {"eid", "losses_p90", "recoveries_p90", "gp_p90", "chances_p90",
-               "sprints_p90"}
+               "sprints_p90", "team_tore_p90", "team_gt_p90"}
 # Abgeleitete Felder und ALLE Spalten, aus denen sie entstehen. Fehlt eine
 # davon, steht im Feld ein Ersatzwert (xga waeren dann nackte Gegentore) –
 # es gilt deshalb als NICHT in der Datei enthalten und wird nicht gespeichert.
@@ -305,6 +307,9 @@ _ABGELEITET = {
     # Unter- und Obergrenze der Transferwert-Spanne
     "value_min": ("value",),
     "value_max": ("value",),
+    # Plus/Minus des Teams als Zaehlwerte (siehe COLUMNS)
+    "team_tore_on": ("team_tore_p90", "minutes"),
+    "team_gt_on": ("team_gt_p90", "minutes"),
     # Startelfeinsaetze und Einwechslungen aus derselben Zelle wie 'apps'
     "apps_start": ("apps",),
     "apps_sub": ("apps",),
@@ -421,9 +426,11 @@ def parse_export_felder(path):
         for f in ("wins", "draws", "defeats"):
             p[f] = _num(g(row, f), int)
         p["apps_start"], p["apps_sub"] = _eins_getrennt(g(row, "apps"))
-        # Plus/Minus des Teams, nur gespeichert, noch ungenutzt (siehe COLUMNS)
-        p["team_gt_p90"] = _num(g(row, "team_gt_p90"))
-        p["team_tore_p90"] = _num(g(row, "team_tore_p90"))
+        # Plus/Minus des Teams als Zaehlwerte, noch ungenutzt (siehe COLUMNS).
+        # Kotarski: 3,45 x 990 / 90 = 37,95 -> 38 Tore, 0,45 x 11 -> 5 Gegentore.
+        for f, quelle in (("team_tore_on", "team_tore_p90"), ("team_gt_on", "team_gt_p90")):
+            r90 = _num(g(row, quelle))
+            p[f] = round(r90 * m / 90) if (m and r90 is not None) else None
         p["contract_end"] = _datum(g(row, "contract_end"), folge)
         p["birth_date"] = _datum(g(row, "birth_date"), folge)
         p["value_min"], p["value_max"] = parse_money_spanne(g(row, "value"))
