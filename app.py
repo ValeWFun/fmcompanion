@@ -505,9 +505,16 @@ class Api:
         # 26-MB-Pakets aus, das bei jedem Laden ueber die pywebview-Bruecke
         # geht und dort als JSON geparst wird – die Tabelle zeigt davon nur
         # einen Tooltip. Brett und Ersatzsuche behalten sie fuer ihre paar
-        # Spieler; hier fliegt sie raus.
+        # Spieler; hier fliegt sie raus. Ebenso die Aufschluesselung je Profil
+        # (score_je_profil, seit D19): die Tabelle braucht je Profil nur
+        # score, label und talent, der Tooltip kommt aus score_parts des
+        # Listen-Scores. Mit den parts waren es 35 statt ~26 MB.
         for p in players:
             p.pop("dna_teile", None)
+            je = p.get("score_je_profil")
+            if je:
+                p["score_je_profil"] = {pr: {k: w.get(k) for k in ("score", "label", "talent")}
+                                        for pr, w in je.items()}
         # Fair-Value-Modell: sagt den Marktwert aus Leistung, Alter, Liga und
         # Position vorher; interessant ist die Abweichung. Der Fit laeuft bei
         # jedem Aufruf neu – 500 Zeilen mal 20 Features sind fuer lstsq ein
