@@ -119,20 +119,32 @@ class Api:
     RAM_ONLY_STATS = ("fouls",
                       "fouls_against", "yellow")
 
-    def _merge_export_stats(self, rows, exp_by_eid):
+    # Seit D22: ein Export des aktuellen Stands gewinnt immer gegen den RAM
+    # (siehe _merge_export_stats). False = Regel vor D22 (mehr Minuten gewinnt).
+    AKTUELLER_EXPORT_GEWINNT = True
+
+    def _merge_export_stats(self, rows, exp_by_eid, stand=None):
         """Export-Zahlen in die RAM-Zeilen ziehen. VOR moneyball.enrich rufen.
 
-        Regel: der Export gewinnt, ausser der RAM hat mehr Minuten.
+        Regel: ein Export des aktuellen Stands (imported_at ab `stand`, der
+        Grenze aus _pool_stand – dieselbe Menge wie scoutkit.aktuell) gewinnt
+        immer. Aeltere Exporte gewinnen, ausser der RAM hat mehr Minuten.
 
         Der Export ist FMs eigene Zahl und damit exakt – aber nur so frisch wie
         der letzte Import. Der RAM ist live, sieht jedoch nur, was FM gerade
         geladen hat: an Buendia gemessen 10 Minuten im RAM gegen 337 im Export,
         ueber 300 Spieler stimmten beide Quellen nur in 5 % der Faelle ueberein.
-        Wer mehr Minuten hat, hat den vollstaendigeren Stand.
+        Bis D22 galt deshalb "mehr Minuten gewinnt". Im September 2026 passte
+        das nicht mehr: der letzte Scan (06.09.) war AELTER als der Export
+        (22./23.09.), und Spiegel-Records blaehen die RAM-Minuten auf (Yoro
+        1.780 im RAM gegen 768 im Export). 130 aktuelle Spieler trugen in der
+        Tabelle RAM-Zahlen, darunter fuenf aus dem eigenen Kader – waehrend
+        Brett und Referenz aus dem Export rechnen.
 
         Stammdaten (Position, Verein, Liga, Marktwert) kommen IMMER aus dem
         Export – die kennt der RAM-Scan gar nicht.
         """
+        grenze = stand or ""
         n = 0
         for p in rows:
             e = exp_by_eid.get(int(p["eid"])) if p.get("eid") else None
@@ -147,7 +159,9 @@ class Api:
             # Export-Zeilen (enrich baut pos_label/pos_groups aus der Maske).
             if not p.get("pos_mask") and e.get("position"):
                 p["pos_mask"] = moneyball.pos_mask_from_string(e["position"])
-            if (e.get("minutes") or 0) <= (p.get("minutes") or 0):
+            aktuell = (self.AKTUELLER_EXPORT_GEWINNT
+                       and (e.get("imported_at") or "") >= grenze)
+            if not aktuell and (e.get("minutes") or 0) <= (p.get("minutes") or 0):
                 continue                      # RAM ist vollstaendiger
             for k in self.EXPORT_STATS:
                 p[k] = e.get(k)
@@ -465,7 +479,7 @@ class Api:
         raw = db.pool_players(conn) if mode == "pool" else db.latest_players(conn)
         exp = db.load_export(conn)
         exp_by_eid = {int(e["eid"]): e for e in exp if e.get("eid")}
-        aus_export = self._merge_export_stats(raw, exp_by_eid)
+        aus_export = self._merge_export_stats(raw, exp_by_eid, self._pool_stand(conn))
         players = moneyball.enrich(raw, **bz)
         for p in players:
             p.setdefault("id", p.get("player_id"))

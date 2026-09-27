@@ -28,7 +28,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import numpy as np
 
-from fmcompanion import db, moneyball, positionen, tactics
+from fmcompanion import db, moneyball, positionen, scoutkit, tactics
 import app
 
 _gesamt = 0
@@ -704,6 +704,17 @@ try:
     db.set_setting(conn, "squad_eids", json.dumps(kader))
     db.set_setting(conn, "own_club", "Test FC")
     db.set_setting(conn, "squad_imported_at", "2026-09-26T11:00:00")
+    # RAM-Snapshot (Stand 06.09. im echten Save): Kaderspieler und alte Importe
+    # mit MEHR Minuten im RAM (Spiegel-Records), dazu reine RAM-Zeilen
+    von_eid = {e["eid"]: e for e in aktuell + alt}
+    snap = [dict(zeile(e, von_eid[e]["position"]), id=300000 + i, eid=e, pos_mask=0,
+                 minutes=von_eid[e]["minutes"] + 500, birth_year=2000.0, birth_day=100.0,
+                 is_gk=0.0, name=f"RAM {e}")
+            for i, e in enumerate(kader[:20] + [8000 + j for j in range(5)])]
+    snap += [dict(zeile(0, "ST (Z)"), id=400000 + i, eid=None, pos_mask=float(1 << 14),
+                  birth_year=2000.0, birth_day=100.0, is_gk=0.0, name=f"RAM {i}")
+             for i in range(10)]
+    db.save_snapshot(conn, snap)
     api = app.Api()
     api._local.conn = conn
     b = api._basis(conn)
@@ -731,6 +742,40 @@ try:
            alt_zeile.get("score_je_profil") and api._repl_pool(conn, alle=True)[1] is b["referenz"])
     ls = api.load_saved()
     pruefe("load_saved nennt den Umfang der Referenz", ls["referenz"] == b["referenz_status"])
+
+    print("== H Tabellenzeile: aktueller Export gewinnt; Tabelle = Brett = Scoutkit ==")
+    je_eid = {}
+    for p in ls["players"]:
+        if p.get("eid"):
+            je_eid.setdefault(int(p["eid"]), []).append(p)
+    kz = [p for e in kader[:20] for p in je_eid[e]]
+    pruefe("aktueller Export gewinnt, auch wenn der RAM mehr Minuten hat",
+           kz and all(p["source"] == "ram+export" and p.get("stat_quelle") == "export"
+                      and p["aktuell"] and p["minutes"] == von_eid[int(p["eid"])]["minutes"]
+                      for p in kz))
+    az = [p for e in range(8000, 8005) for p in je_eid[e]]
+    pruefe("aelterer Export: mehr RAM-Minuten gewinnen weiter, Zeile nicht aktuell",
+           az and all(p.get("stat_quelle") != "export" and not p["aktuell"] for p in az))
+    app.Api.AKTUELLER_EXPORT_GEWINNT = False
+    alt_regel = [p for p in api.load_saved()["players"] if p.get("eid") and int(p["eid"]) in kader[:20]]
+    app.Api.AKTUELLER_EXPORT_GEWINNT = True
+    pruefe("Schalter AKTUELLER_EXPORT_GEWINNT=False: Regel vor D22 (mehr Minuten gewinnt)",
+           alt_regel and all(p.get("stat_quelle") != "export" for p in alt_regel))
+    kit = scoutkit.oeffnen(os.path.join(ordner, "test.db"))
+    kit_score = {int(p["eid"]): p["score"] for p in kit.aktuell}
+    tab_score = {int(p["eid"]): p["score"] for p in ls["players"]
+                 if p.get("eid") and p["aktuell"]}
+    anders = [(e, tab_score[e], kit_score.get(e)) for e in tab_score if tab_score[e] != kit_score.get(e)]
+    pruefe("Tabelle und Scoutkit: derselbe Listen-Score fuer jeden aktuellen Spieler",
+           len(tab_score) == len(kit_score) and not anders, f"{len(anders)} anders: {anders[:3]}")
+    tab_je = {int(p["eid"]): p["score_je_profil"] for p in ls["players"]
+              if p.get("eid") and p["aktuell"]}
+    brett = [(sl["profil"], k) for sl in tb["slots"] for k in sl["kandidaten"]]
+    anders = [(k["id"], pr, k["mb"], (tab_je[int(k["id"])].get(pr) or {}).get("score"))
+              for pr, k in brett if k["mb"] != (tab_je[int(k["id"])].get(pr) or {}).get("score")]
+    pruefe("Tabelle und Brett: derselbe Score im Profil des Slots (alle Kandidaten)",
+           brett and not anders, f"{len(anders)} anders: {anders[:3]}")
+    kit.conn.close()
     vor = {int(e["id"]): e["mb"] for sl in tb["slots"] for e in sl["kandidaten"]}
     moneyball.REFERENZ_MENGE = "export+kohorte"
     tb_k = api.tactic_board()
