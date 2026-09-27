@@ -497,40 +497,57 @@ def listen_vorsprung(a, b):
     return _vorsprung_aus(kal_a, var_a, 0.0, kal_b, var_b, 0.0)
 
 
-# Spitzengruppe einer sortierten Liste: alle, gegen die der Erste mit P unter
-# diesem Wert vorn liegt. Einheitlich fuer alle Profile (Entscheidung Head
-# Scout, 27.09.2026); beim IV ist die Formel leicht zu optimistisch, das
-# bleibt unter einer Stufe.
-SPITZENGRUPPE_P = 0.90
+# Spitzengruppe einer Liste (Entscheidung Head Scout nach Empfehlung des
+# Datenanalysten, 27.09.2026): Bezug ist der Spieler mit dem hoechsten
+# kalibrierten Wert (score_kal), NICHT der mit dem hoechsten Rohwert – nach der
+# Schrumpfung liegt ein Spieler mit mehr Minuten oft vorn (Saka 95 bei 4.242
+# Min gegen Haaland 96 bei 3.518: P(Haaland vorn) 0,40). Zur Gruppe gehoert,
+# wer mit dem Bezug "gleichauf" ist: P(Bezug besser) unter der untersten
+# Stufe (0,70), mit dem Zukunftsterm wie im Slot. Die erste Fassung (Erster
+# nach Rohwert, P < 0,90) ergab auf der echten DB Gruppen von 27 bis 530
+# Spielern, diese 8 bis 43.
+SPITZENGRUPPE_P = VORSPRUNG_STUFEN[-1][0]
 
 
 def listen_vergleich(eintraege):
-    """Sortierte Liste -> Vergleich jedes Eintrags mit dem Ersten und die
-    Groesse der Spitzengruppe.
+    """Liste -> Bezug (hoechstes score_kal), Vergleich jedes Eintrags mit ihm
+    und die Groesse der Spitzengruppe.
 
-    eintraege: [{"id", "score", "minutes", "profil"}] in Anzeige-Reihenfolge.
-    -> {"spitzengruppe": n oder None (Erster ohne Aussage), "eintraege":
-    [{"id", "vergleich_erster": vergleich_feld-Objekt oder None beim Ersten}]}.
-    Wer keine Aussage erlaubt (duenne Datenbasis), zaehlt nicht zur Gruppe."""
-    if not eintraege:
-        return {"spitzengruppe": None, "eintraege": []}
-    erster = eintraege[0]
-    a = (erster.get("score"), erster.get("minutes"), erster.get("profil"))
-    aus, gruppe = [{"id": erster.get("id"), "vergleich_erster": None}], 1
-    erster_ok = listen_vorsprung(a, a) is not None
-    for e in eintraege[1:]:
-        v = listen_vorsprung((e.get("score"), e.get("minutes"), e.get("profil")), a)
+    eintraege: [{"id", "score", "minutes", "profil"}], Reihenfolge egal.
+    -> {"bezug": id oder None, "spitzengruppe": n oder None, "eintraege":
+    [{"id", "vergleich_bezug": vergleich_feld-Objekt, None beim Bezug}]}.
+    Die Oberflaeche rechnet dasselbe aus score_kal/score_sd selbst (sie
+    filtert und sortiert im Browser); diese Funktion ist fuer Skripte und als
+    Gegenprobe. Wer keine Aussage erlaubt (duenne Datenbasis), zaehlt nicht."""
+    kal = {}
+    for i, e in enumerate(eintraege):
+        k, _var = moneyball.score_kalibriert(e.get("profil"), e.get("score"), e.get("minutes"))
+        if k is not None:
+            kal[i] = k
+    if not kal:
+        return {"bezug": None, "spitzengruppe": None,
+                "eintraege": [{"id": e.get("id"), "vergleich_bezug": None} for e in eintraege]}
+    ib = max(kal, key=lambda i: (kal[i], -i))        # bei Gleichstand der weiter vorn stehende
+    bezug = eintraege[ib]
+    b = (bezug.get("score"), bezug.get("minutes"), bezug.get("profil"))
+    aus, gruppe = [], 0
+    for i, e in enumerate(eintraege):
+        if i == ib:
+            aus.append({"id": e.get("id"), "vergleich_bezug": None})
+            gruppe += 1
+            continue
+        v = listen_vorsprung((e.get("score"), e.get("minutes"), e.get("profil")), b)
         if v is None:
             feld = {"vorsprung_p": None, "vorsprung_stufe": None, "vorn": None,
                     "p_besser": None, "duenn": True}
         else:
             feld = {"vorsprung_p": v["vorsprung_p"], "vorsprung_stufe": v["vorsprung_stufe"],
-                    "vorn": e.get("id") if v["vorn"] == "a" else (erster.get("id") if v["vorn"] == "b" else None),
+                    "vorn": e.get("id") if v["vorn"] == "a" else (bezug.get("id") if v["vorn"] == "b" else None),
                     "p_besser": v["p_a"], "duenn": False}
-            if 1.0 - v["p_a"] < SPITZENGRUPPE_P:       # Erster liegt mit P < 90 % vorn
+            if 1.0 - v["p_a"] < SPITZENGRUPPE_P:       # mit dem Bezug gleichauf
                 gruppe += 1
-        aus.append({"id": e.get("id"), "vergleich_erster": feld})
-    return {"spitzengruppe": gruppe if erster_ok else None, "eintraege": aus}
+        aus.append({"id": e.get("id"), "vergleich_bezug": feld})
+    return {"bezug": bezug.get("id"), "spitzengruppe": gruppe, "eintraege": aus}
 
 
 def vergleich_feld(slot_key, selbst, bezug):

@@ -519,20 +519,37 @@ pruefe("Slot-Vergleich unveraendert (Mbeumo/Samu 0,533, Samu/Shpendi 0,861)",
 pruefe("Spielerzeilen tragen score_band zum Listen-Profil",
        all(p.get("score_band") == moneyball.score_band(p["profil"], p.get("minutes"))
            for p in dna_welt if p.get("score") is not None))
-liste = [{"id": 1, "score": 90, "minutes": 3000, "profil": "st"},
-         {"id": 2, "score": 88, "minutes": 2500, "profil": "off"},
-         {"id": 3, "score": 84, "minutes": 1200, "profil": "st"},
-         {"id": 4, "score": 70, "minutes": 3000, "profil": "mid"},
-         {"id": 5, "score": 89, "minutes": 150, "profil": "st"}]
+liste = [{"id": 1, "score": 96, "minutes": 900, "profil": "st"},     # Rohwert-Erster, wenig Minuten
+         {"id": 2, "score": 95, "minutes": 4000, "profil": "st"},    # hoechstes score_kal -> Bezug
+         {"id": 3, "score": 88, "minutes": 2500, "profil": "off"},
+         {"id": 4, "score": 84, "minutes": 1200, "profil": "st"},
+         {"id": 5, "score": 70, "minutes": 3000, "profil": "mid"},
+         {"id": 6, "score": 97, "minutes": 150, "profil": "st"}]     # duenne Datenbasis
+
+
+def kal_unabh(e):
+    mu, tau, sh, mh = SOLL[e["profil"]]
+    sem2 = (sh * _m.sqrt(mh / e["minutes"])) ** 2
+    return mu + tau ** 2 / (tau ** 2 + sem2) * (e["score"] - mu)
+
+
 lv = tactics.listen_vergleich(liste)
-erwartet = 1 + sum(1 for e in liste[1:] if e["minutes"] >= 180 and
-                   1 - listen_p((e["score"], e["minutes"], e["profil"]), (90, 3000, "st")) < 0.90)
-pruefe(f"Spitzengruppe = Erster + alle, gegen die er mit P < 90 % vorn liegt ({erwartet})",
-       lv["spitzengruppe"] == erwartet, str(lv["spitzengruppe"]))
-pruefe("der Erste hat keinen Vergleich, duenne Datenbasis zaehlt nicht zur Gruppe",
-       lv["eintraege"][0]["vergleich_erster"] is None and lv["eintraege"][4]["vergleich_erster"]["duenn"])
-pruefe("Erster ohne Aussage (unter 180 Min): keine Spitzengruppe",
-       tactics.listen_vergleich(liste[4:] + liste[:1])["spitzengruppe"] is None)
+mit_daten = [e for e in liste if e["minutes"] >= 180]
+bez = max(mit_daten, key=kal_unabh)
+pruefe("Bezug = hoechstes score_kal (nicht der Rohwert-Erste)", lv["bezug"] == bez["id"] == 2,
+       str((lv["bezug"], bez["id"])))
+erwartet = 1 + sum(1 for e in mit_daten if e is not bez and
+                   1 - listen_p((e["score"], e["minutes"], e["profil"]),
+                                (bez["score"], bez["minutes"], bez["profil"])) < 0.70)
+pruefe(f"Spitzengruppe = Bezug + alle, die mit ihm gleichauf sind (P < 70 %): {erwartet}",
+       lv["spitzengruppe"] == erwartet and 1 < erwartet < len(liste), str(lv["spitzengruppe"]))
+zeile = {e["id"]: e for e in lv["eintraege"]}
+pruefe("der Bezug hat keinen Vergleich, duenne Datenbasis zaehlt nicht zur Gruppe",
+       zeile[2]["vergleich_bezug"] is None and zeile[6]["vergleich_bezug"]["duenn"] is True)
+pruefe("Reihenfolge der Eingabe egal",
+       tactics.listen_vergleich(list(reversed(liste)))["spitzengruppe"] == lv["spitzengruppe"])
+pruefe("niemand mit Aussage: keine Spitzengruppe",
+       tactics.listen_vergleich(liste[5:])["spitzengruppe"] is None)
 pruefe("js_api listen_vergleich liefert dasselbe",
        app.Api().listen_vergleich(liste)["spitzengruppe"] == lv["spitzengruppe"])
 zeilen_mit = [p for p in dna_welt if p.get("score_kal") is not None]
@@ -548,15 +565,18 @@ pruefe("Phi((kal_A - kal_B) / sqrt(sd_A^2 + sd_B^2)) = listen_vorsprung (3 Stell
 kv = app.Api().vergleich_konstanten()
 pruefe("js_api vergleich_konstanten: Stufen und Schwellen aus tactics",
        kv["stufen"] == [[0.975, "sicher"], [0.90, "klar"], [0.70, "leicht"]]
-       and kv["spitzengruppe_p"] == 0.90 and kv["min_minutes"] == 180)
+       and kv["spitzengruppe_p"] == 0.70 and kv["min_minutes"] == 180
+       and kv["spitzengruppe_bezug"] == "hoechstes score_kal")
+pruefe("Spitzengruppe = Grenze von 'gleichauf' (unterste Stufe)",
+       tactics.SPITZENGRUPPE_P == tactics.VORSPRUNG_STUFEN[-1][0] == 0.70)
 vorher = app.Api._konstanten()
 alt_lb = moneyball.LISTEN_BAND["st"]
 moneyball.LISTEN_BAND["st"] = (56.5, 12.7, 10.4, 1385)
 pruefe("Rechen-Cache: LISTEN_BAND steckt im Fingerabdruck", app.Api._konstanten() != vorher)
 moneyball.LISTEN_BAND["st"] = alt_lb
-tactics.SPITZENGRUPPE_P = 0.91
+tactics.SPITZENGRUPPE_P = 0.71
 pruefe("Rechen-Cache: SPITZENGRUPPE_P steckt im Fingerabdruck", app.Api._konstanten() != vorher)
-tactics.SPITZENGRUPPE_P = 0.90
+tactics.SPITZENGRUPPE_P = 0.70
 
 print(f"\n{_bestanden} von {_gesamt} Prüfungen bestanden")
 sys.exit(0 if _bestanden == _gesamt else 1)
