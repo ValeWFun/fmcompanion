@@ -184,7 +184,24 @@ pruefe("tactics re-exportiert die Positionsgruppen",
        tactics.player_groups is positionen.player_groups and tactics.GROUPS is positionen.GROUPS)
 
 # ------------------------------------------------ B: Invariante bitgleich
-print("== B Nur Hauptprofil erlaubt: bitgleich zum Stand vor D19 ==")
+print("== B Schalterstellung laut Datenanalyst (D19) ==")
+pruefe("REFERENZ_WAHL steht auf 'gruppe' (alle, deren Positionen das Profil erlauben)",
+       moneyball.REFERENZ_WAHL == "gruppe")
+pruefe("LISTEN_WAHL steht auf 'bester' (Maximum der erlaubten Profile)",
+       moneyball.LISTEN_WAHL == "bester")
+REF_STANDARD = moneyball.REFERENZ_WAHL
+om_st = beispiel["OM (RL), ST (Z)"]
+pruefe("'gruppe': 'OM (RL), ST (Z)' speist die Verteilungen off UND st",
+       moneyball.referenz_profile(om_st) == ("off", "st"))
+pruefe("'gruppe': 'M (L)' speist off, nicht mid", moneyball.referenz_profile(beispiel["M (L)"]) == ("off",))
+moneyball.REFERENZ_WAHL = "maske"
+pruefe("'maske': 'M (L)' speist mid (Masken-Sicht)", moneyball.referenz_profile(beispiel["M (L)"]) == ("mid",))
+moneyball.REFERENZ_WAHL = "haupt"
+pruefe("'haupt': nur die erste Gruppe", moneyball.referenz_profile(om_st) == ("off",))
+
+print("== B Nur Hauptprofil erlaubt: bitgleich zum Stand vor D19 (Referenz 'haupt') ==")
+# Der Algorithmus selbst muss mit der alten Referenz exakt das Alte liefern;
+# mit 'gruppe' aendern sich die Verteilungen und damit jeder Score – gewollt.
 rows = [zeile(1000 + i, POSITIONEN[i % len(POSITIONEN)]) for i in range(420)]
 ligen = {r["eid"]: r["league"] for r in rows}
 basis = als_spieler(rows)
@@ -220,7 +237,7 @@ moneyball.add_scores(haupt, haupt, ligen)
 pruefe("LISTEN_WAHL 'haupt': Listen-Score ueberall wie vor D19",
        all(haupt[i].get(f) == alt[i].get(f) for i in range(len(haupt)) for f in felder))
 moneyball.LISTEN_WAHL = alt_listen
-for wahl in ("gruppe", "slot"):
+for wahl in ("gruppe", "maske"):
     moneyball.REFERENZ_WAHL = wahl
     stats = moneyball.score_referenz(basis, ligen)
     n_neu = sum(len(v) for v in stats[1].values())
@@ -240,6 +257,7 @@ v_z = copy.deepcopy([p for p in basis if p["position"] == "V (Z)"][:1])
 moneyball.add_scores(v_z, basis, ligen, zusatz_profile=("st",))
 pruefe("Zusatzprofil (Umschulung): Score als Stuermer, Listen-Score bleibt IV",
        "st" in v_z[0]["score_je_profil"] and v_z[0]["profil"] == "iv")
+moneyball.REFERENZ_WAHL = REF_STANDARD           # ab hier die Stellung des Analysten
 
 # ------------------------------------------------ C: Slot-Score auf dem Brett
 print("== C Brett und Auto-Elf rechnen mit dem Slot-Score ==")
@@ -311,9 +329,9 @@ try:
     moneyball.LISTEN_WAHL = "haupt"
     pruefe("Rechen-Cache: LISTEN_WAHL steckt im Fingerabdruck", api._konstanten() != vorher)
     moneyball.LISTEN_WAHL = alt_listen
-    moneyball.REFERENZ_WAHL = "slot"
+    moneyball.REFERENZ_WAHL = "maske"
     pruefe("Rechen-Cache: REFERENZ_WAHL steckt im Fingerabdruck", api._konstanten() != vorher)
-    moneyball.REFERENZ_WAHL = "haupt"
+    moneyball.REFERENZ_WAHL = REF_STANDARD
     pruefe("Rechen-Cache: zurueckgesetzt = alter Fingerabdruck", api._konstanten() == vorher)
     conn.close()
 finally:

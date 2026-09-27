@@ -641,17 +641,25 @@ PROFIL_VON_GRUPPE = {"tw": "tw", "lv": "av", "rv": "av", "iv": "iv",
 # Reihenfolge fuer Schleifen und Gleichstaende: defensiv -> offensiv
 PROFIL_REIHENFOLGE = ("tw", "iv", "av", "mid", "off", "st")
 # Wer geht in die Perzentil-Verteilungen eines Profils ein (Quoten-Prior,
-# Kennzahl-Verteilungen, Altersbaender)? EINE umschaltbare Stelle, die Wahl
-# trifft der Datenanalyst (Auftrag D19); bis dahin der Stand vor D19:
+# Kennzahl-Verteilungen, Altersbaender)? EINE umschaltbare Stelle:
+#   "gruppe": alle, deren Positionen das Profil erlauben (erlaubte_profile,
+#             "M (L)" -> off). Gewaehlt vom Datenanalysten (Auftrag A, D19,
+#             27.09.2026): in jeder Messung gleich gut oder besser als die
+#             erste Gruppe; die ST-Referenz waechst je Halbserie von 26 auf
+#             184 Spieler. Eine Verteilung je PROFIL, nicht je Slot – eine
+#             slot-abhaengige Referenz ("slotfaehig") gibt es bewusst nicht.
 #   "haupt":  nur Spieler, deren Hauptprofil (_profile) es ist – Stand vor D19
-#   "gruppe": jede Gruppe aus pos_groups (Maske/Export), so abgebildet, wie
-#             _profile sie als erste Gruppe abbilden wuerde ("M (L)" -> mid)
-#   "slot":   jedes Profil, das die Positionen erlauben (erlaubte_profile,
-#             "M (L)" -> off) – also jeder, der einen Slot des Profils spielen kann
-REFERENZ_WAHL = "haupt"
+#   "maske":  jede Gruppe aus pos_groups, so abgebildet wie im Hauptprofil
+#             ("M (L)" -> mid) – Vergleichsvariante
+REFERENZ_WAHL = "gruppe"
 # Welcher Profil-Score ist DER Score eines Spielers in Tabelle, Ranglisten,
 # Talent-Board und value_score (listen_profil)? Ebenfalls eine Stelle:
-#   "bester": der hoechste ueber die erlaubten Profile (Vorschlag Head Scout)
+#   "bester": der hoechste ueber die erlaubten Profile, mit Profilname.
+#             Gewaehlt vom Datenanalysten (D19): Split-Half 0,69 gegen 0,72
+#             beim Hauptprofil, sagt die Note der zweiten Halbserie aber
+#             besser vorher (0,53 gegen 0,44). Der Winner's Curse betraegt nur
+#             +1,1 bis +1,9 Punkte und wird bewusst NICHT abgezogen: Tabelle
+#             und Slot zeigen fuer dieselbe Rolle dieselbe Zahl.
 #   "haupt":  das Hauptprofil (Stand vor D19)
 LISTEN_WAHL = "bester"
 
@@ -674,9 +682,9 @@ def erlaubte_profile(p):
     return aus
 
 
-def _gruppen_profile(p):
+def _masken_profile(p):
     """Profile ALLER pos_groups, jede wie im Hauptprofil abgebildet (fuer
-    REFERENZ_WAHL "gruppe")."""
+    REFERENZ_WAHL "maske")."""
     if p.get("is_gk"):
         return {"tw"}
     maske = int(p.get("pos_mask") or 0)
@@ -695,9 +703,9 @@ def referenz_profile(r):
         h = _profile(r)
         return (h,) if h else ()
     if REFERENZ_WAHL == "gruppe":
-        menge = _gruppen_profile(r)
-    elif REFERENZ_WAHL == "slot":
         menge = erlaubte_profile(r)
+    elif REFERENZ_WAHL == "maske":
+        menge = _masken_profile(r)
     else:
         raise ValueError(f"Unbekannte REFERENZ_WAHL: {REFERENZ_WAHL!r}")
     return tuple(pr for pr in PROFIL_REIHENFOLGE if pr in menge)
