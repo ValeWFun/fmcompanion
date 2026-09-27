@@ -383,6 +383,41 @@ try:
            and all("leistung_band" in t and "gleichauf" in t and "vergleich_original" in t
                    for t in er["treffer"]),
            str(er.get("error")))
+
+    print("== D Liste: aktuell und profile_erlaubt in load_saved ==")
+    alt = [zeile(9000 + i, pos) for i, pos in enumerate(POSITIONEN)]
+    db.save_export(conn, alt, None, datei="alt", ts="2026-09-01T10:00:00")
+    ls = api.load_saved()
+    zl = {int(p["eid"]): p for p in ls["players"]}
+    pruefe("load_saved: jede Zeile hat aktuell (bool) und profile_erlaubt (Liste)",
+           ls.get("ok") and all(isinstance(p["aktuell"], bool) and isinstance(p["profile_erlaubt"], list)
+                                for p in ls["players"]))
+    pruefe("aktuell = Import seit _pool_stand (neu ja, alter Import nein)",
+           all(p["aktuell"] == (e < 9000) for e, p in zl.items()),
+           str(sorted({(e < 9000, p["aktuell"]) for e, p in zl.items()})))
+    pruefe("profile_erlaubt = erlaubte_profile in PROFIL_REIHENFOLGE, Listen-Profil ist erlaubt",
+           all(p["profile_erlaubt"] == [pr for pr in moneyball.PROFIL_REIHENFOLGE
+                                        if pr in moneyball.erlaubte_profile(p)]
+               and (p.get("profil") is None or p["profil"] in p["profile_erlaubt"])
+               for p in ls["players"]))
+    fluegel = next(p for p in ls["players"] if p.get("position") == "M/OM (L)")
+    pruefe("reiner Fluegel 'M/OM (L)': nur off erlaubt",
+           fluegel["profile_erlaubt"] == ["off"],
+           f"{fluegel['profile_erlaubt']} / {sorted(fluegel.get('score_je_profil') or {})}")
+    ram = [dict(position="ST (Z)", source="ram"),
+           dict(position="ST (Z)", source="ram+export"),                    # RAM-Zahlen gewinnen
+           dict(position="ST (Z)", source="ram+export", stat_quelle="export",
+                stat_stand="2026-09-26T10:00:00"),
+           dict(position="ST (Z)", source="ram+export", stat_quelle="export",
+                stat_stand="2026-09-01T10:00:00")]
+    api._listen_felder(conn, ram)
+    pruefe("RAM-Zeilen: nur Export-Statistik seit _pool_stand ist aktuell",
+           [p["aktuell"] for p in ram] == [False, False, True, False],
+           str([p["aktuell"] for p in ram]))
+    db.set_setting(conn, "squad_imported_at", "")
+    api._listen_felder(conn, ram)
+    pruefe("ohne Kader-Import keine Grenze: jede Export-Statistik ist aktuell",
+           [p["aktuell"] for p in ram] == [False, False, True, True])
     conn.close()
 finally:
     shutil.rmtree(ordner, ignore_errors=True)
