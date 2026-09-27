@@ -1006,11 +1006,14 @@ class Api:
             sl["archetypen_liste"] = tactics.archetypen_fuer(sl["key"])
             stamm = elf.get(sl["key"])
             for k in sl["kandidaten"]:
-                # Gleichauf mit dem Stammspieler im Rahmen der Messgenauigkeit?
-                # Dann zeigt die Oberflaeche "gleichauf" statt eines Siegers.
-                k["gleichauf_stamm"] = (None if (stamm is None or k is stamm) else
-                                        tactics.gleichauf(sl["key"], k["leistung"], k.get("minutes"),
-                                                          stamm["leistung"], stamm.get("minutes")))
+                # Kalibrierter Vergleich mit dem Stammspieler (tactics.vorsprung):
+                # Stufe gleichauf / leicht / klar / sicher vorn; das Bool
+                # gleichauf_stamm ist daraus abgeleitet.
+                k["vergleich_stamm"] = (None if (stamm is None or k is stamm) else
+                                        tactics.vergleich_feld(
+                                            sl["key"], (k["id"], k["leistung"], k.get("minutes")),
+                                            (stamm["id"], stamm["leistung"], stamm.get("minutes"))))
+                k["gleichauf_stamm"] = tactics.gleichauf_aus(k["vergleich_stamm"])
                 # Wer anderswo gesetzt ist, ist hier kein echter Herausforderer –
                 # sonst stuende Correia als Konkurrent fuer links, obwohl er
                 # rechts spielt.
@@ -1411,14 +1414,16 @@ class Api:
             t = tiefe["slots"][sl["key"]]
             stamm = kurz(sl["key"], *(t["stamm"] or (None, None)), mit_gesamt=True)
             backup = kurz(sl["key"], *(t["backup"] or (None, None)))
+            bv = (tactics.vergleich_feld(sl["key"], (backup["id"], backup["leistung"], backup["minutes"]),
+                                         (stamm["id"], stamm["leistung"], stamm["minutes"]))
+                  if stamm and backup else None)
             slots.append({**{k: sl[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz",
                                                  "duty", "x", "y", "gepinnt", "profil",
                                                  "profil_label")},
                           "stamm": stamm, "backup": backup,
-                          # Backup im Rahmen der Messgenauigkeit so gut wie der Stamm?
-                          "gleichauf": (tactics.gleichauf(sl["key"], stamm["leistung"], stamm["minutes"],
-                                                          backup["leistung"], backup["minutes"])
-                                        if stamm and backup else None),
+                          # Backup gegen Stamm, kalibriert (tactics.vorsprung)
+                          "backup_vergleich": bv,
+                          "gleichauf": tactics.gleichauf_aus(bv),
                           "ab_schwelle": t["ab_schwelle"], "duenn": t["duenn"]})
         ueber = [dict(u, neu=u["id"] in neu) for u in tiefe["ueberzaehlig"]]
         elf = self._elf(brett)
@@ -1914,13 +1919,15 @@ class Api:
                 "umschulung": None if not kosten else tactics.GROUP_LABEL.get(von, von),
                 "teile": b["teile"], "verlaesslich": b["verlaesslich"],
                 "carry": b["carry"]}, anfrage_id=anfrage))
-        # Jeder gegen den Stammspieler: gleichauf im Rahmen der Messgenauigkeit?
+        # Jeder gegen den Stammspieler, kalibriert (tactics.vorsprung)
         st = next((z for z in spieler if z.get("rolle") == "stamm"), None)
         for z in spieler:
             if "leistung" in z:
-                z["gleichauf_stamm"] = (None if (st is None or z is st) else
-                                        tactics.gleichauf(slot_key, z["leistung"], z.get("minutes"),
-                                                          st["leistung"], st.get("minutes")))
+                z["vergleich_stamm"] = (None if (st is None or z is st) else
+                                        tactics.vergleich_feld(
+                                            slot_key, (z["id"], z["leistung"], z.get("minutes")),
+                                            (st["id"], st["leistung"], st.get("minutes"))))
+                z["gleichauf_stamm"] = tactics.gleichauf_aus(z["vergleich_stamm"])
         return {"ok": True,
                 "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz", "duty")}
                 | {"profil": profil, "profil_label": moneyball.PROFILE_LABEL[profil]},

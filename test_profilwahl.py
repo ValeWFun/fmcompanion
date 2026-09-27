@@ -337,6 +337,10 @@ try:
     pruefe("Rechen-Cache: REFERENZ_WAHL steckt im Fingerabdruck", api._konstanten() != vorher)
     moneyball.REFERENZ_WAHL = REF_STANDARD
     pruefe("Rechen-Cache: zurueckgesetzt = alter Fingerabdruck", api._konstanten() == vorher)
+    alt_tau = tactics.VORSPRUNG_TAU["st"]
+    tactics.VORSPRUNG_TAU["st"] = 14.7
+    pruefe("Rechen-Cache: die Vorsprung-Konstanten stecken im Fingerabdruck", api._konstanten() != vorher)
+    tactics.VORSPRUNG_TAU["st"] = alt_tau
     alt_sem = tactics.LEISTUNG_SEM["st"]
     tactics.LEISTUNG_SEM["st"] = (9.9, 1378)
     pruefe("Rechen-Cache: die Band-Konstanten stecken im Fingerabdruck", api._konstanten() != vorher)
@@ -358,20 +362,26 @@ try:
     pruefe("Brett: Herausforderer tragen gleichauf_stamm (True/False/None)",
            all(k["gleichauf_stamm"] in (True, False, None) for k in kand)
            and any(k["gleichauf_stamm"] is not None for k in kand))
+    pruefe("Brett: vergleich_stamm kalibriert, gleichauf_stamm daraus abgeleitet",
+           all(k["gleichauf_stamm"] == tactics.gleichauf_aus(k["vergleich_stamm"]) for k in kand)
+           and any((k["vergleich_stamm"] or {}).get("vorsprung_stufe") for k in kand))
     pv = api.planer_vergleich("Ist", {"name": "T", "zugaenge": [fremd]})
     ps = pv["rechts"]["brett"]["slots"]
-    pruefe("Planer: Stamm/Backup mit Band, Slot mit 'gleichauf' und Profil",
+    pruefe("Planer: Stamm/Backup mit Band, Slot mit backup_vergleich, 'gleichauf' und Profil",
            all(("leistung_band" in (sl["stamm"] or {"leistung_band": 0})) and "gleichauf" in sl
+               and "backup_vergleich" in sl
                and sl.get("profil") for sl in ps))
     sc = api.slot_compare("st", [fremd])
     zeilen = [z for z in sc["spieler"] if "leistung" in z]
     pruefe("Slot-Vergleich: Band und gleichauf_stamm je Zeile",
-           zeilen and all("leistung_band" in z and "gleichauf_stamm" in z for z in zeilen))
+           zeilen and all("leistung_band" in z and "gleichauf_stamm" in z and "vergleich_stamm" in z
+                          for z in zeilen))
     st_id = next(sl["startelf_id"] for sl in tb["slots"] if sl["key"] == "st")
     er = api.tactic_replacements("st", st_id, "aehnlich", alle=True)
     pruefe("Ersatzsuche: Original und Treffer mit Band, Treffer mit 'gleichauf'",
            er.get("ok") and "leistung_band" in er["original"]
-           and all("leistung_band" in t and "gleichauf" in t for t in er["treffer"]),
+           and all("leistung_band" in t and "gleichauf" in t and "vergleich_original" in t
+                   for t in er["treffer"]),
            str(er.get("error")))
     conn.close()
 finally:
@@ -397,13 +407,36 @@ pruefe("rechte Slots uebernehmen die Werte der linken",
        and tactics.LEISTUNG_SEM["dmr"] == tactics.LEISTUNG_SEM["dml"])
 pruefe("Tabelle des Analysten", tactics.LEISTUNG_SEM["st"] == (9.8, 1378)
        and tactics.LEISTUNG_SEM["tw"] == (11.1, 1739) and tactics.LEISTUNG_SEM["amc"] == (7.3, 1389))
-# Schwelle zweier Spieler mit je M Minuten: 1,96 x sqrt(2) x SEM_h x sqrt(M_h/M)
-m = 1378 * (1.96 * 2 ** 0.5 * 9.8 / 21.7) ** 2          # Minuten fuer die Schwelle 21,7
-pruefe("gleichauf knapp unter der Schwelle (21,5 bei Schwelle 21,7)",
-       tactics.gleichauf("st", 80, m, 58.5, m) is True)
-pruefe("nicht gleichauf knapp ueber der Schwelle (21,9)", tactics.gleichauf("st", 80, m, 58.1, m) is False)
-pruefe("unter MIN_MINUTES kein 'gleichauf' (None)",
-       tactics.gleichauf("st", 80, 170, 79, 2000) is None and tactics.gleichauf("st", 80, 2000, None, 2000) is None)
+print("== E Vorsprung, kalibriert (Nachtrag 4) ==")
+v = tactics.vorsprung("st", 95, 1681, 88, 3001)          # Mbeumo gegen Samu
+pruefe("Mbeumo 95 (1.681) gegen Samu 88 (3.001): P ~ 53 %, gleichauf",
+       (round(v["vorsprung_p"], 2), v["vorsprung_stufe"], v["vorn"]) == (0.53, "gleichauf", "a"), str(v))
+v = tactics.vorsprung("st", 88, 3001, 73, 722)           # Samu gegen Shpendi
+pruefe("Samu 88 (3.001) gegen Shpendi 73 (722): P ~ 86 %, leicht vorn",
+       (round(v["vorsprung_p"], 2), v["vorsprung_stufe"], v["vorn"]) == (0.86, "leicht", "a"), str(v))
+v2 = tactics.vorsprung("st", 73, 722, 88, 3001)
+pruefe("symmetrisch: umgekehrt fuehrt b mit derselben Wahrscheinlichkeit",
+       v2["vorn"] == "b" and v2["vorsprung_p"] == v["vorsprung_p"]
+       and abs(v2["p_a"] - (1 - v["p_a"])) < 0.002)
+stufen = [tactics.vorsprung("st", 50 + d, 3000, 50, 3000)["vorsprung_stufe"] for d in (0, 5, 12, 25, 40)]
+pruefe("Stufen steigen mit dem Abstand", stufen == ["gleichauf", "gleichauf", "leicht", "klar", "sicher"],
+       str(stufen))
+pruefe("gleicher Wert: gleichauf, niemand vorn",
+       tactics.vorsprung("st", 80, 2000, 80, 2000)["vorn"] is None)
+pruefe("unter MIN_MINUTES oder ohne Wert: keine Aussage",
+       tactics.vorsprung("st", 80, 170, 79, 2000) is None and tactics.vorsprung("st", 80, 2000, None, 2000) is None)
+f = tactics.vergleich_feld("st", (1, 80, 170), (2, 79, 2000))
+pruefe("Feld bei duenner Datenbasis: duenn, ohne Stufe, gleichauf None",
+       f["duenn"] is True and f["vorsprung_stufe"] is None and tactics.gleichauf_aus(f) is None)
+f = tactics.vergleich_feld("st", (7, 73, 722), (9, 88, 3001))
+pruefe("Feld: vorn = id des Fuehrenden, p_besser aus Sicht von 'selbst'",
+       f["vorn"] == 9 and f["p_besser"] < 0.5 and f["vorsprung_stufe"] == "leicht"
+       and tactics.gleichauf_aus(f) is False)
+pruefe("tau je Slot nach dem Analysten, rechte wie linke",
+       tactics.VORSPRUNG_TAU["st"] == 14.6 and tactics.VORSPRUNG_TAU["tw"] == 20.3
+       and tactics.VORSPRUNG_TAU["amr"] == 15.0 and tactics.VORSPRUNG_TAU["ivr"] == 10.7
+       and tactics.VORSPRUNG_TAU["rv"] == tactics.VORSPRUNG_TAU["lv"])
+pruefe("die alte binaere Regel gibt es nicht mehr", not hasattr(tactics, "gleichauf"))
 
 # ------------------------------------------------ F: Vereins-DNA
 print("== F Vereins-DNA folgt dem Listen-Profil ==")
