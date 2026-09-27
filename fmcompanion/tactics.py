@@ -369,6 +369,65 @@ for _sl in FORMATION:
     assert len(_pr) == 1, f"Slot {_sl['key']}: mehrere Profile {_pr}"
 
 MIN_MINUTES = 180          # darunter sind /90-Raten Rauschen
+
+# ------------------------------------------------------ Unsicherheitsbaender
+# Messfehler der Leistung sqrt(Fit x Score) im Slot-Profil, je Slot: SEM_h =
+# SD(L1 - L2) / sqrt(2) ueber zwei Halbserien, M_h = mittlere Minuten je
+# Halbserie. Quelle: Datenanalyst, Auftrag 5, Nachtrag C2, 27.09.2026
+# (D19-Einstellung: Slot-Profil, Referenz "alle mit der Gruppe", TW wie
+# heute). Die rechten Slots uebernehmen die Werte der linken.
+# Slot -> (SEM_h, M_h)
+LEISTUNG_SEM = {
+    "tw": (11.1, 1739),
+    "lv": (5.7, 1539), "rv": (5.7, 1539),
+    "ivl": (6.6, 1602), "ivr": (6.6, 1602),
+    "dml": (5.8, 1457), "dmr": (5.8, 1457),
+    "aml": (7.0, 1380), "amc": (7.3, 1389), "amr": (6.8, 1392),
+    "st": (9.8, 1378),
+}
+Z95 = 1.96                 # zweiseitiges 95-%-Band
+assert set(LEISTUNG_SEM) == {s["key"] for s in FORMATION}, "Band fuer jeden Slot"
+
+
+def leistung_sem(slot_key, minuten):
+    """Messfehler der Leistung bei `minuten` Minuten: SEM_h x sqrt(M_h / M).
+    None ohne Minuten."""
+    if not minuten or float(minuten) <= 0:
+        return None
+    sem_h, m_h = LEISTUNG_SEM[slot_key]
+    return sem_h * (m_h / float(minuten)) ** 0.5
+
+
+def leistung_band(slot_key, minuten):
+    """Band +-95 % der Leistung in Punkten, auf die Skala gedeckelt (hoechstens
+    100): beim ST sind es mit 180 Minuten +-53, mit 900 +-24, mit 3000 +-13.
+    None ohne Minuten."""
+    sem = leistung_sem(slot_key, minuten)
+    return None if sem is None else round(min(100.0, Z95 * sem), 1)
+
+
+def band_felder(slot_key, leistung, minuten):
+    """js_api-Felder einer Slot-Bewertung: leistung, leistung_band (+- Punkte)
+    und das Intervall leistung_von/leistung_bis, auf 0-100 begrenzt."""
+    b = leistung_band(slot_key, minuten)
+    ok = b is not None and leistung is not None
+    return {"leistung": leistung, "leistung_band": b,
+            "leistung_von": max(0, round(leistung - b)) if ok else None,
+            "leistung_bis": min(100, round(leistung + b)) if ok else None}
+
+
+def gleichauf(slot_key, l_a, min_a, l_b, min_b):
+    """Liegen zwei Spieler auf DERSELBEN Position im Rahmen der Messgenauigkeit
+    gleichauf? |L_a - L_b| < 1,96 x sqrt(SEM_a^2 + SEM_b^2), jeder SEM auf die
+    eigenen Minuten umgerechnet. -> True/False, oder None ohne Aussage: ein
+    Wert fehlt, oder einer hat weniger als MIN_MINUTES – dann gilt ohnehin
+    die Markierung "duenne Datenbasis", ein "gleichauf" waere dort geraten."""
+    if l_a is None or l_b is None:
+        return None
+    if (min_a or 0) < MIN_MINUTES or (min_b or 0) < MIN_MINUTES:
+        return None
+    sa, sb = leistung_sem(slot_key, min_a), leistung_sem(slot_key, min_b)
+    return abs(l_a - l_b) < Z95 * (sa * sa + sb * sb) ** 0.5
 VERLAESSLICH_MIN = 180     # Bezug der Stichprobenguete: min/(min+180), ~2 Spiele
 
 # ------------------------------------------------------------ Kadererkennung
@@ -1242,6 +1301,10 @@ def find_replacements(slot, original, kandidaten, reference,
                              f"„{archetyp}“."}
     ziel_fit, alter = ob["score"], original.get("age")
     ziel = gesamt(ziel_fit, None, original.get("pers_score"))
+    # Leistung sqrt(Fit x Slot-Score) mit Band, fuer "gleichauf" (D19). Die
+    # Suche selbst sortiert weiter nach Fit und Charakter.
+    sp = slot_profil(slot)
+    ziel_leistung = gesamt(ziel_fit, moneyball.profil_score(original, sp))
     if modus == "juenger" and alter is None:
         return {"ok": False, "error": "Von diesem Spieler ist kein Geburtsdatum "
                                       "bekannt – ohne Alter keine Suche nach "
@@ -1274,6 +1337,7 @@ def find_replacements(slot, original, kandidaten, reference,
             continue
         fit = max(0, min(100, round(b["score"] - kosten)))
         score = gesamt(fit, None, p.get("pers_score"))
+        leistung = gesamt(fit, moneyball.profil_score(p, sp))
         a = p.get("age")
         spez = None
         if modus == "besser":
@@ -1324,6 +1388,9 @@ def find_replacements(slot, original, kandidaten, reference,
             "delta_score": score - ziel,
             "delta_age": None if (a is None or alter is None) else round(a - alter, 1),
             "verlaesslich": b["verlaesslich"], "teile": b["teile"],
+            **band_felder(slot["key"], leistung, p.get("minutes")),
+            "gleichauf": gleichauf(slot["key"], leistung, p.get("minutes"),
+                                   ziel_leistung, original.get("minutes")),
         })
 
     if modus == "aehnlich":
@@ -1344,6 +1411,7 @@ def find_replacements(slot, original, kandidaten, reference,
                          "score": ziel, "fit": ziel_fit,
                          "charakter": original.get("pers_score"),
                          "teile": ob["teile"],
+                         **band_felder(slot["key"], ziel_leistung, original.get("minutes")),
                          "carry": ob["carry"], "liga_koeff": ob["liga_koeff"],
                          "archetyp_pct": (_archetyp_pct(ob["teile"], spez_stats)
                                           if spez_stats else None)},

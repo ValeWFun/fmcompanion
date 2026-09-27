@@ -985,6 +985,9 @@ class Api:
                 k["fit"] = k["score"]
                 k["charakter"] = k.get("pers_score")
                 k["score"] = tactics.gesamt(k["fit"], k.get("mb"), k.get("pers_score"))
+                # Leistung sqrt(Fit x Slot-Score) mit Band +-95 % (D19)
+                k.update(tactics.band_felder(sl["key"], tactics.gesamt(k["fit"], k.get("mb")),
+                                             k.get("minutes")))
             sl["kandidaten"].sort(key=lambda k: -k["score"])
         elf = tactics.startelf(slots, pins)
         # Nur die Pins zurueckmelden, die auch greifen – ein Pin auf einen
@@ -1001,7 +1004,13 @@ class Api:
             # einzeln nachzuladen kostete elf weitere Fahrten ueber die
             # pywebview-Bruecke, mitten im Startpfad der Oberflaeche.
             sl["archetypen_liste"] = tactics.archetypen_fuer(sl["key"])
+            stamm = elf.get(sl["key"])
             for k in sl["kandidaten"]:
+                # Gleichauf mit dem Stammspieler im Rahmen der Messgenauigkeit?
+                # Dann zeigt die Oberflaeche "gleichauf" statt eines Siegers.
+                k["gleichauf_stamm"] = (None if (stamm is None or k is stamm) else
+                                        tactics.gleichauf(sl["key"], k["leistung"], k.get("minutes"),
+                                                          stamm["leistung"], stamm.get("minutes")))
                 # Wer anderswo gesetzt ist, ist hier kein echter Herausforderer –
                 # sonst stuende Correia als Konkurrent fuer links, obwohl er
                 # rechts spielt.
@@ -1388,10 +1397,11 @@ class Api:
         neu = set(z_ok)
         st_slot = next(sl for sl in tactics.FORMATION if sl["key"] == "st")
 
-        def kurz(k, lst, mit_gesamt=False):
+        def kurz(key, k, lst, mit_gesamt=False):
             if k is None:
                 return None
-            d = {"id": k["id"], "name": k.get("name"), "leistung": lst, "neu": k["id"] in neu}
+            d = {"id": k["id"], "name": k.get("name"), "neu": k["id"] in neu,
+                 "minutes": k.get("minutes"), **tactics.band_felder(key, lst, k.get("minutes"))}
             if mit_gesamt:
                 d.update(gesamt=k.get("score"), fit=k.get("fit"), mb=k.get("mb"))
             return d
@@ -1399,10 +1409,16 @@ class Api:
         slots = []
         for sl in brett["slots"]:
             t = tiefe["slots"][sl["key"]]
+            stamm = kurz(sl["key"], *(t["stamm"] or (None, None)), mit_gesamt=True)
+            backup = kurz(sl["key"], *(t["backup"] or (None, None)))
             slots.append({**{k: sl[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz",
-                                                 "duty", "x", "y", "gepinnt")},
-                          "stamm": kurz(*(t["stamm"] or (None, None)), mit_gesamt=True),
-                          "backup": kurz(*(t["backup"] or (None, None))),
+                                                 "duty", "x", "y", "gepinnt", "profil",
+                                                 "profil_label")},
+                          "stamm": stamm, "backup": backup,
+                          # Backup im Rahmen der Messgenauigkeit so gut wie der Stamm?
+                          "gleichauf": (tactics.gleichauf(sl["key"], stamm["leistung"], stamm["minutes"],
+                                                          backup["leistung"], backup["minutes"])
+                                        if stamm and backup else None),
                           "ab_schwelle": t["ab_schwelle"], "duenn": t["duenn"]})
         ueber = [dict(u, neu=u["id"] in neu) for u in tiefe["ueberzaehlig"]]
         elf = self._elf(brett)
@@ -1693,6 +1709,12 @@ class Api:
         basis = self._basis(conn)
         referenz = alle + basis["referenz"][len(basis["export_rows"]):]
         moneyball.add_dna(pool, referenz, ligen, ref_dists=self._ref_dna(basis))
+        # Moneyball-Score je Profil fuer die Leistung und ihr Band (D19): die
+        # Ersatzsuche sortiert weiter nach Fit und Charakter, zeigt aber
+        # Leistung +-95 % und "gleichauf" zum Original. Alle Profile, weil ein
+        # positionsfremder Kandidat im Profil des gesuchten Slots zaehlt.
+        moneyball.add_scores(pool, referenz, ligen, ref_stats=self._ref_scores(basis),
+                             zusatz_profile=moneyball.PROFIL_REIHENFOLGE)
         self._pl_markieren(conn, pool, bz)
         self._repl_cache = (key, pool, referenz, kader_ids)
         return pool, referenz, kader_ids
@@ -1810,7 +1832,8 @@ class Api:
         def vom_brett(k):
             return {"gesamt": k["score"], "fit": k["fit"], "mb": k.get("mb"),
                     "abzug": 0, "umschulung": None, "teile": k.get("teile") or [],
-                    "verlaesslich": k.get("verlaesslich"), "carry": k.get("carry")}
+                    "verlaesslich": k.get("verlaesslich"), "carry": k.get("carry"),
+                    **tactics.band_felder(slot_key, k.get("leistung"), k.get("minutes"))}
 
         # Kopien: die Zeilen stecken im Cache der Ersatzsuche
         def kopie(e):
@@ -1885,10 +1908,18 @@ class Api:
             mb = moneyball.profil_score(r, profil)
             spieler.append(zeile("kandidat", r, {
                 "gesamt": tactics.gesamt(fit, mb, r.get("pers_score")),
+                **tactics.band_felder(slot_key, tactics.gesamt(fit, mb), r.get("minutes")),
                 "fit": fit, "mb": mb, "abzug": round(kosten),
                 "umschulung": None if not kosten else tactics.GROUP_LABEL.get(von, von),
                 "teile": b["teile"], "verlaesslich": b["verlaesslich"],
                 "carry": b["carry"]}, anfrage_id=anfrage))
+        # Jeder gegen den Stammspieler: gleichauf im Rahmen der Messgenauigkeit?
+        st = next((z for z in spieler if z.get("rolle") == "stamm"), None)
+        for z in spieler:
+            if "leistung" in z:
+                z["gleichauf_stamm"] = (None if (st is None or z is st) else
+                                        tactics.gleichauf(slot_key, z["leistung"], z.get("minutes"),
+                                                          st["leistung"], st.get("minutes")))
         return {"ok": True,
                 "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz", "duty")}
                 | {"profil": profil, "profil_label": moneyball.PROFILE_LABEL[profil]},

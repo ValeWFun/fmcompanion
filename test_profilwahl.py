@@ -202,6 +202,10 @@ pruefe("'haupt': nur die erste Gruppe", moneyball.referenz_profile(om_st) == ("o
 print("== B Nur Hauptprofil erlaubt: bitgleich zum Stand vor D19 (Referenz 'haupt') ==")
 # Der Algorithmus selbst muss mit der alten Referenz exakt das Alte liefern;
 # mit 'gruppe' aendern sich die Verteilungen und damit jeder Score – gewollt.
+# Die Invariante gilt NUR, wenn das einzige erlaubte Profil das Hauptprofil
+# ist. Fluegel vom Typ 'M (L), OM (RL)' (Hauptprofil mid, erlaubt nur off,
+# in Summer3 96 von 502 Ein-Profil-Spielern) wechseln im Listen-Score GEWOLLT
+# auf off – das ist keine Regression (Datenanalyst, D19-Abnahme).
 rows = [zeile(1000 + i, POSITIONEN[i % len(POSITIONEN)]) for i in range(420)]
 ligen = {r["eid"]: r["league"] for r in rows}
 basis = als_spieler(rows)
@@ -333,9 +337,73 @@ try:
     pruefe("Rechen-Cache: REFERENZ_WAHL steckt im Fingerabdruck", api._konstanten() != vorher)
     moneyball.REFERENZ_WAHL = REF_STANDARD
     pruefe("Rechen-Cache: zurueckgesetzt = alter Fingerabdruck", api._konstanten() == vorher)
+    alt_sem = tactics.LEISTUNG_SEM["st"]
+    tactics.LEISTUNG_SEM["st"] = (9.9, 1378)
+    pruefe("Rechen-Cache: die Band-Konstanten stecken im Fingerabdruck", api._konstanten() != vorher)
+    tactics.LEISTUNG_SEM["st"] = alt_sem
+
+    print("== D Baender und 'gleichauf' in Brett, Planer, Slot-Vergleich, Ersatzsuche ==")
+    tb = api.tactic_board()
+    kand = [k for sl in tb["slots"] for k in sl["kandidaten"]]
+    pruefe("Brett: jede Bewertung hat Leistung und Band",
+           all({"leistung", "leistung_band", "leistung_von", "leistung_bis"} <= set(k) for k in kand))
+    pruefe("Brett: Leistung = sqrt(Fit x Slot-Score)",
+           all(k["leistung"] == tactics.gesamt(k["fit"], k["mb"]) for k in kand))
+    pruefe("Brett: Band nach der Formel des Analysten",
+           all(k["leistung_band"] == tactics.leistung_band(sl["key"], k["minutes"])
+               for sl in tb["slots"] for k in sl["kandidaten"]))
+    stamm_ok = all(next(k for k in sl["kandidaten"] if k["id"] == sl["startelf_id"])["gleichauf_stamm"] is None
+                   for sl in tb["slots"] if sl["startelf_id"] is not None)
+    pruefe("Brett: der Stammspieler selbst hat kein 'gleichauf'", stamm_ok)
+    pruefe("Brett: Herausforderer tragen gleichauf_stamm (True/False/None)",
+           all(k["gleichauf_stamm"] in (True, False, None) for k in kand)
+           and any(k["gleichauf_stamm"] is not None for k in kand))
+    pv = api.planer_vergleich("Ist", {"name": "T", "zugaenge": [fremd]})
+    ps = pv["rechts"]["brett"]["slots"]
+    pruefe("Planer: Stamm/Backup mit Band, Slot mit 'gleichauf' und Profil",
+           all(("leistung_band" in (sl["stamm"] or {"leistung_band": 0})) and "gleichauf" in sl
+               and sl.get("profil") for sl in ps))
+    sc = api.slot_compare("st", [fremd])
+    zeilen = [z for z in sc["spieler"] if "leistung" in z]
+    pruefe("Slot-Vergleich: Band und gleichauf_stamm je Zeile",
+           zeilen and all("leistung_band" in z and "gleichauf_stamm" in z for z in zeilen))
+    st_id = next(sl["startelf_id"] for sl in tb["slots"] if sl["key"] == "st")
+    er = api.tactic_replacements("st", st_id, "aehnlich", alle=True)
+    pruefe("Ersatzsuche: Original und Treffer mit Band, Treffer mit 'gleichauf'",
+           er.get("ok") and "leistung_band" in er["original"]
+           and all("leistung_band" in t and "gleichauf" in t for t in er["treffer"]),
+           str(er.get("error")))
     conn.close()
 finally:
     shutil.rmtree(ordner, ignore_errors=True)
+
+# ------------------------------------------------ E: Baender, reine Formeln
+print("== E Unsicherheitsbaender (Datenanalyst, Auftrag 5, Nachtrag C2) ==")
+pruefe("ST-Band bei 900 / 1.800 / 3.000 Min etwa +-24 / +-17 / +-13",
+       [round(tactics.leistung_band("st", m)) for m in (900, 1800, 3000)] == [24, 17, 13],
+       str([tactics.leistung_band("st", m) for m in (900, 1800, 3000)]))
+pruefe("ST-Band bei 180 Min etwa +-53", round(tactics.leistung_band("st", 180)) == 53)
+baender = [tactics.leistung_band("st", m) for m in (200, 500, 1000, 2000, 4000)]
+pruefe("Band schrumpft mit den Minuten", baender == sorted(baender, reverse=True))
+pruefe("0 Minuten / ohne Minuten -> None",
+       tactics.leistung_band("st", 0) is None and tactics.leistung_band("st", None) is None)
+pruefe("Band gedeckelt bei 100 (1 Minute)", tactics.leistung_band("tw", 1) == 100.0)
+f = tactics.band_felder("st", 95, 900)
+pruefe("Intervall auf 0-100 begrenzt", (f["leistung_von"], f["leistung_bis"]) == (71, 100)
+       and tactics.band_felder("st", 5, 900)["leistung_von"] == 0)
+pruefe("rechte Slots uebernehmen die Werte der linken",
+       tactics.LEISTUNG_SEM["rv"] == tactics.LEISTUNG_SEM["lv"]
+       and tactics.LEISTUNG_SEM["ivr"] == tactics.LEISTUNG_SEM["ivl"]
+       and tactics.LEISTUNG_SEM["dmr"] == tactics.LEISTUNG_SEM["dml"])
+pruefe("Tabelle des Analysten", tactics.LEISTUNG_SEM["st"] == (9.8, 1378)
+       and tactics.LEISTUNG_SEM["tw"] == (11.1, 1739) and tactics.LEISTUNG_SEM["amc"] == (7.3, 1389))
+# Schwelle zweier Spieler mit je M Minuten: 1,96 x sqrt(2) x SEM_h x sqrt(M_h/M)
+m = 1378 * (1.96 * 2 ** 0.5 * 9.8 / 21.7) ** 2          # Minuten fuer die Schwelle 21,7
+pruefe("gleichauf knapp unter der Schwelle (21,5 bei Schwelle 21,7)",
+       tactics.gleichauf("st", 80, m, 58.5, m) is True)
+pruefe("nicht gleichauf knapp ueber der Schwelle (21,9)", tactics.gleichauf("st", 80, m, 58.1, m) is False)
+pruefe("unter MIN_MINUTES kein 'gleichauf' (None)",
+       tactics.gleichauf("st", 80, 170, 79, 2000) is None and tactics.gleichauf("st", 80, 2000, None, 2000) is None)
 
 print(f"\n{_bestanden} von {_gesamt} Prüfungen bestanden")
 sys.exit(0 if _bestanden == _gesamt else 1)
