@@ -664,6 +664,60 @@ REFERENZ_WAHL = "gruppe"
 LISTEN_WAHL = "bester"
 
 
+# Band und Vergleich des LISTEN-Scores, je Profil des Listen-Scores.
+# Quelle: Datenanalyst, Listenband, 27.09.2026 (gemessen mit dem D19-Code,
+# LISTEN_WAHL "bester", REFERENZ_WAHL "gruppe"). Profil -> (mu, tau, SEM_h,
+# M_h). mu gilt JE PROFIL, nicht 50: das Maximum ueber die Profile hebt den
+# Schnitt. Die Vergleichsformel dazu steht in tactics (listen_vorsprung).
+LISTEN_BAND = {
+    "st": (56.4, 12.7, 10.4, 1385), "off": (57.1, 13.9, 7.8, 1385),
+    "mid": (53.0, 10.7, 6.8, 1444), "iv": (52.2, 9.2, 7.8, 1634),
+    "av": (58.2, 10.1, 6.1, 1490), "tw": (50.0, 21.1, 12.2, 1739),
+}
+assert set(LISTEN_BAND) == set(PROFIL_REIHENFOLGE), "Listenband fuer jedes Profil"
+BAND_MIN_MINUTES = 180     # wie tactics.MIN_MINUTES: darunter "duenne Datenbasis"
+
+
+def score_sem(profil, minuten):
+    """Messfehler des Listen-Scores bei `minuten` Minuten: SEM_h x sqrt(M_h / M).
+    None ohne Profil oder Minuten."""
+    if profil not in LISTEN_BAND or not minuten or float(minuten) <= 0:
+        return None
+    _mu, _tau, sem_h, m_h = LISTEN_BAND[profil]
+    return sem_h * (m_h / float(minuten)) ** 0.5
+
+
+LISTEN_M_F = 1500          # Minuten der naechsten Halbserie, wie im Slot-Vergleich
+
+
+def score_kalibriert(profil, score, minuten):
+    """Bausteine des kalibrierten Listen-Vergleichs -> (kal, var) oder (None, None).
+
+    kal = mu + rel x (score - mu) mit rel = tau^2 / (tau^2 + SEM(M)^2) – der zur
+    Mitte des Profils geschrumpfte Score; var = rel x SEM(M)^2 + SEM(M_f)^2 –
+    Restunsicherheit plus Rauschen der naechsten Halbserie. Zwei Spieler:
+    P(A besser) = Phi((kal_A - kal_B) / sqrt(var_A + var_B)). Genau diese Form
+    rechnet tactics.listen_vorsprung; die Oberflaeche bekommt kal und
+    sqrt(var) je Zeile, weil sie selbst filtert und sortiert. Unter
+    BAND_MIN_MINUTES keine Aussage."""
+    if score is None or (minuten or 0) < BAND_MIN_MINUTES or profil not in LISTEN_BAND:
+        return None, None
+    mu, tau, _sem_h, _m_h = LISTEN_BAND[profil]
+    sem2 = score_sem(profil, minuten) ** 2
+    rel = tau * tau / (tau * tau + sem2)
+    return mu + rel * (score - mu), rel * sem2 + score_sem(profil, LISTEN_M_F) ** 2
+
+
+def score_band(profil, minuten):
+    """Band +-95 % des Listen-Scores in Punkten, ungeschrumpft wie das
+    Slot-Band, gedeckelt bei 100. None unter BAND_MIN_MINUTES (duenne
+    Datenbasis) und ohne Profil."""
+    if (minuten or 0) < BAND_MIN_MINUTES:
+        return None
+    sem = score_sem(profil, minuten)
+    return None if sem is None else round(min(100.0, 1.96 * sem), 1)
+
+
 def erlaubte_profile(p):
     """Profile, die die Positionen eines Spielers erlauben -> set.
 
@@ -1042,6 +1096,7 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
             p["score"] = None
             p["score_parts"] = []
             p["profile_label"] = "unbekannt"
+            p["score_band"] = p["score_kal"] = p["score_sd"] = None
             continue
         w = je[wahl]
         p["score"] = w["score"]
@@ -1052,6 +1107,12 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
         # um 36 % (8,3 -> 11,3 MB), nur mit Score und Label um 1 %.
         p["score_je_profil"] = {pr: {"score": x["score"], "label": x["label"],
                                      "talent": x.get("talent")} for pr, x in je.items()}
+        # Band +-95 % des Listen-Scores (LISTEN_BAND, Profil des Listen-Scores)
+        p["score_band"] = score_band(wahl, p.get("minutes")) if w["score"] is not None else None
+        # Bausteine des kalibrierten Vergleichs fuer die Oberflaeche (score_kalibriert)
+        kal, var = score_kalibriert(wahl, w["score"], p.get("minutes"))
+        p["score_kal"] = None if kal is None else round(kal, 3)
+        p["score_sd"] = None if var is None else round(var ** 0.5, 4)
         if w["score"] is None:
             continue
         p["age_band"] = w["band"]
