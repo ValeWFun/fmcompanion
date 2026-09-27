@@ -391,6 +391,14 @@ try:
     db.save_export(conn, alt, None, datei="alt", ts="2026-09-01T10:00:00")
     ls = api.load_saved()
     zl = {int(p["eid"]): p for p in ls["players"]}
+    try:                                   # pywebview serialisiert ohne default=
+        json.dumps(ls)
+        json.dumps(api.signals())
+        pruefe("load_saved und signals lassen sich wie in pywebview serialisieren", True)
+    except TypeError as e:
+        pruefe("load_saved und signals lassen sich wie in pywebview serialisieren", False, str(e))
+    pruefe("kein Merk-Schluessel _gruppen an den Zeilen",
+           not any("_gruppen" in p for p in ls["players"]))
     pruefe("load_saved: jede Zeile hat aktuell (bool) und profile_erlaubt (Liste)",
            ls.get("ok") and all(isinstance(p["aktuell"], bool) and isinstance(p["profile_erlaubt"], list)
                                 for p in ls["players"]))
