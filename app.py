@@ -254,7 +254,7 @@ class Api:
         """pl_status/pl_grenzfall/pl_text je Spieler (tactics.pl_status)."""
         return tactics.pl_markieren(players, *self._meldebasis(conn, players, bz))
 
-    def _add_scores(self, players, reference=None):
+    def _add_scores(self, players, reference=None, basis=None):
         """Moneyball-Scores der Tabelle, des Scans und der Signale.
 
         Seit D22 gegen DIESELBE Referenz wie Brett und Ersatzsuche: die
@@ -265,10 +265,13 @@ class Api:
         Nur REFERENZ_MENGE "export+kohorte" rechnet wie vor D22: Perzentil-
         Basis ist `reference` (Default: der RAM-Pool) PLUS die namenlose
         Vergleichskohorte. Liga-Koeffizienten kommen aus dem Export
-        (EID-Join); Kohorten-Spieler haben keine EID -> Faktor 1.0."""
+        (EID-Join); Kohorten-Spieler haben keine EID -> Faktor 1.0.
+
+        basis: fertige _basis, wenn der Aufrufer sie ohnehin braucht – jeder
+        _basis-Aufruf prueft den Fingerabdruck (~0,2 s)."""
         conn = self._db()
         if not moneyball.referenz_braucht_kohorte():
-            basis = self._basis(conn)
+            basis = basis or self._basis(conn)
             moneyball.add_scores(players, basis["referenz"], basis["ligen"],
                                  ref_stats=self._ref_scores(basis))
             moneyball.add_dna(players, basis["referenz"], basis["ligen"],
@@ -524,15 +527,9 @@ class Api:
                 gesehen.add(e)
             dedup.append(p)
         players = dedup
-        self._add_scores(players, reference=players)
+        basis = self._basis(conn)
+        self._add_scores(players, reference=players, basis=basis)
         self._listen_felder(conn, players)
-        # Die DNA-Aufschluesselung (7 Dicts je Spieler) machte 46 % eines
-        # 26-MB-Pakets aus, das bei jedem Laden ueber die pywebview-Bruecke
-        # geht und dort als JSON geparst wird – die Tabelle zeigt davon nur
-        # einen Tooltip. Brett und Ersatzsuche behalten sie fuer ihre paar
-        # Spieler; hier fliegt sie raus.
-        for p in players:
-            p.pop("dna_teile", None)
         # Fair-Value-Modell: sagt den Marktwert aus Leistung, Alter, Liga und
         # Position vorher; interessant ist die Abweichung. Der Fit laeuft bei
         # jedem Aufruf neu – 500 Zeilen mal 20 Features sind fuer lstsq ein
@@ -555,11 +552,67 @@ class Api:
                 p[k] = fv[k] if fv else None
         # Meldestatus bei UNS: heimisch / braucht Auslaenderplatz / U21
         self._pl_markieren(conn, players, bz)
-        return {"ok": True, "players": players, "count": len(players),
+        return {"ok": True, "players": self._tabellen_zeilen(players), "count": len(players),
                 "snapshots": db.snapshot_count(conn), "exports": len(exp),
                 "aus_export": aus_export,
-                "referenz": self._basis(conn)["referenz_status"],
+                # stand: Grenze des aktuellen Stands, snapshot_stand: Zeitpunkt
+                # des letzten Scans (RAM-Zeilen tragen im Modus 'last' kein
+                # eigenes Datum) – fuer "Stand: ..." bei nicht aktuellen Zeilen
+                "referenz": dict(basis["referenz_status"], stand=basis["stand"]),
+                "snapshot_stand": db.latest_snapshot_at(conn),
                 "value_model": fair_model.status() if fair_model else None}
+
+    # Felder einer Tabellenzeile, die die Oberflaeche liest (D23): Feldliste des
+    # Designers aus dem UI-Code, gegengeprueft an 1.068 gerenderten Ansichten
+    # (0 Abweichungen ohne die uebrigen Felder). load_saved liefert 13.700
+    # Zeilen mit ~160 Feldern ueber die pywebview-Bruecke; ohne die 54 nie
+    # gelesenen waren es 28 statt 35 MB. Frueher flog hier nur die
+    # DNA-Aufschluesselung heraus (46 % eines 26-MB-Pakets). Braucht eine neue
+    # Spalte ein Feld, gehoert es HIER dazu, sonst kommt es nie an. Die
+    # Schluessel der Ranglisten (moneyball.RANKINGS, EXPORT_RANKINGS) kommen
+    # automatisch dazu – die Oberflaeche sortiert nach ihnen.
+    TABELLEN_FELDER = (
+        # Kennung, Filter, Herkunft
+        "id", "eid", "name", "club", "league", "age", "age_band", "minutes",
+        "pos_label", "pos_groups", "pos_mask", "is_gk", "position", "info", "source",
+        "stat_quelle", "stat_stand", "exp_at", "imported_at", "aktuell", "reliability",
+        "stale", "taken_at", "profile_erlaubt",
+        # Score und Profil
+        "score", "score_kal", "score_sd", "score_band", "score_je_profil", "profil",
+        "profile_label", "score_parts", "talent", "prospect", "league_coeff", "dna",
+        "dna_pass", "dna_ball", "value_score",
+        # Wert und Preis
+        "value_m", "value", "value_delta_pct", "fair_value_m", "fair_urteil", "fair_text",
+        "value_reliable", "transfer_fee", "wage",
+        # Charakter
+        "pers_score", "pers_label", "pers_stufe", "pers_medien", "pers_hinweise",
+        "pers_ment", "pers_dev", "pers_stand", "foot",
+        # Meldeliste
+        "pl_status", "pl_text", "pl_grenzfall", "homegrown", "homegrown_stand",
+        # Kennzahlen Feldspieler
+        "goals", "assists", "xg", "xa", "shots_on", "dribbles", "duels", "prog_passes",
+        "rating", "fouls", "headers_won", "clearances", "interceptions", "press_win",
+        "losses", "pass_pct", "duel_pct", "shot_acc", "finishing", "header_pct",
+        "press_pct", "goals_p90", "assists_p90", "xg_p90", "xa_p90", "attack_p90",
+        "shots_p90", "dribbles_p90", "duels_p90", "press_p90", "prog_p90", "int_p90",
+        "keyp_p90", "loss_p90", "rec_p90",
+        # Torhueter
+        "note_resid", "save_pct", "gp_shot", "goals_prevented", "sot_faced", "conceded",
+        "conceded_p90", "xga", "apps", "pen_saved", "pen_faced",
+    )
+
+    @classmethod
+    def _tabellen_schluessel(cls):
+        """TABELLEN_FELDER plus die Sortierschluessel aller Ranglisten."""
+        return (frozenset(cls.TABELLEN_FELDER)
+                | {k for k, _ in moneyball.RANKINGS.values()}
+                | {k for k, _ in moneyball.EXPORT_RANKINGS.values()})
+
+    def _tabellen_zeilen(self, players):
+        """Kopien der Zeilen mit nur den Feldern, die die Tabelle liest. Die
+        Zeilen selbst bleiben vollstaendig."""
+        felder = self._tabellen_schluessel()
+        return [{k: v for k, v in p.items() if k in felder} for p in players]
 
     def _listen_felder(self, conn, players):
         """Felder der Spielerliste fuer Positionsreiter und Spitzengruppe (D19).
@@ -1101,7 +1154,7 @@ class Api:
         return {"ok": True, "slots": slots, "startelf": list(elf), "pins": pins_aktiv,
                 "verein": db.get_setting(conn, "own_club", "") or "",
                 "char_gewicht": tactics.CHAR_GEWICHT,
-                "referenz": basis["referenz_status"],
+                "referenz": dict(basis["referenz_status"], stand=basis["stand"]),
                 "kader": len(kader), "ohne_daten": fehlt, "aus_export": aus_export,
                 "mit_form": len(form), "teams_bekannt": len(teams),
                 "export_positionen": sum(1 for p in kader if p.get("position")),
