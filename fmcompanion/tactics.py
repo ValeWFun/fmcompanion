@@ -11,6 +11,7 @@ Bewusst dokumentiert, was NICHT messbar ist: die Datenbasis sind Ereigniszaehler
 aus dem Speicher, keine Laufwege und keine Positionsdaten. Aufgaben wie
 "Raum fuer den Aussenverteidiger freilaufen" erzeugen keine einzige Statistik.
 """
+import math
 import re
 
 from . import moneyball
@@ -416,18 +417,94 @@ def band_felder(slot_key, leistung, minuten):
             "leistung_bis": min(100, round(leistung + b)) if ok else None}
 
 
-def gleichauf(slot_key, l_a, min_a, l_b, min_b):
-    """Liegen zwei Spieler auf DERSELBEN Position im Rahmen der Messgenauigkeit
-    gleichauf? |L_a - L_b| < 1,96 x sqrt(SEM_a^2 + SEM_b^2), jeder SEM auf die
-    eigenen Minuten umgerechnet. -> True/False, oder None ohne Aussage: ein
-    Wert fehlt, oder einer hat weniger als MIN_MINUTES – dann gilt ohnehin
-    die Markierung "duenne Datenbasis", ein "gleichauf" waere dort geraten."""
+# ------------------------------------------------------------- Vorsprung
+# Wer liegt auf DERSELBEN Position vorn – und wie sicher? Kalibriert vom
+# Datenanalysten (D19, Nachtrag 4 des Head Scouts, 27.09.2026). Die rohe
+# Formel Phi(dL / sqrt(SEM_a^2 + SEM_b^2)) war zu selbstsicher: wo sie 75 %
+# sagte, traf sie nur in 63-66 % der Faelle. Deshalb erst zur Mitte
+# schrumpfen (wenig Minuten = viel Rauschen), dann das Rauschen der NAECHSTEN
+# Halbserie (M_f Minuten) dazunehmen; so trifft sie in 75-77 % bzw. 94-95 %.
+#   SEM(M) = SEM_h x sqrt(M_h / M)                      (LEISTUNG_SEM)
+#   rel    = tau^2 / (tau^2 + SEM(M)^2)
+#   post   = mu + rel x (L - mu),  v = rel x SEM(M)^2
+#   p(a)   = Phi((post_a - post_b) / sqrt(v_a + v_b + SEM_a(M_f)^2 + SEM_b(M_f)^2))
+# Angezeigte Leistung und +-Band bleiben UNGESCHRUMPFT; das Schrumpfen steckt
+# nur in diesem Vergleich. Formel, Konstanten und Stufen stehen nur hier.
+VORSPRUNG_MU = 50.0
+VORSPRUNG_M_F = 1500       # Minuten der naechsten Halbserie
+VORSPRUNG_TAU = {          # wahre Streuung der Leistung je Slot
+    "tw": 20.3, "lv": 14.1, "rv": 14.1, "ivl": 10.7, "ivr": 10.7,
+    "dml": 11.8, "dmr": 11.8, "aml": 14.5, "amc": 14.6, "amr": 15.0, "st": 14.6,
+}
+assert set(VORSPRUNG_TAU) == set(LEISTUNG_SEM), "tau fuer jeden Slot"
+# Stufe nach P_fav = max(p, 1 - p); darunter "gleichauf"
+VORSPRUNG_STUFEN = ((0.975, "sicher"), (0.90, "klar"), (0.70, "leicht"))
+
+
+def _phi(x):
+    """Verteilungsfunktion der Standardnormalverteilung."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def vorsprung(slot_key, l_a, min_a, l_b, min_b):
+    """Kalibrierter Vergleich zweier Leistungen auf demselben Slot.
+
+    -> {"p_a": P(a besser), "vorsprung_p": P_fav, "vorsprung_stufe":
+    "gleichauf"|"leicht"|"klar"|"sicher", "vorn": "a"|"b"|None}, oder None
+    ohne Aussage: ein Wert fehlt oder einer hat weniger als MIN_MINUTES – dort
+    gilt die Markierung "duenne Datenbasis"."""
     if l_a is None or l_b is None:
         return None
     if (min_a or 0) < MIN_MINUTES or (min_b or 0) < MIN_MINUTES:
         return None
-    sa, sb = leistung_sem(slot_key, min_a), leistung_sem(slot_key, min_b)
-    return abs(l_a - l_b) < Z95 * (sa * sa + sb * sb) ** 0.5
+    tau2 = VORSPRUNG_TAU[slot_key] ** 2
+
+    def geschrumpft(leistung, minuten):
+        s2 = leistung_sem(slot_key, minuten) ** 2
+        rel = tau2 / (tau2 + s2)
+        return VORSPRUNG_MU + rel * (leistung - VORSPRUNG_MU), rel * s2
+
+    post_a, v_a = geschrumpft(l_a, min_a)
+    post_b, v_b = geschrumpft(l_b, min_b)
+    s_f2 = leistung_sem(slot_key, VORSPRUNG_M_F) ** 2
+    p = _phi((post_a - post_b) / math.sqrt(v_a + v_b + 2 * s_f2))
+    fav = max(p, 1.0 - p)
+    stufe = next((name for grenze, name in VORSPRUNG_STUFEN if fav >= grenze), "gleichauf")
+    return {"p_a": round(p, 3), "vorsprung_p": round(fav, 3), "vorsprung_stufe": stufe,
+            "vorn": "a" if p > 0.5 else ("b" if p < 0.5 else None)}
+
+
+def vergleich_feld(slot_key, selbst, bezug):
+    """js_api-Objekt 'Spieler gegen Bezugsperson' auf demselben Slot.
+
+    selbst/bezug: (id, leistung, minuten). -> {vorsprung_p, vorsprung_stufe,
+    vorn (id des Fuehrenden oder None), p_besser (P, dass SELBST besser ist),
+    duenn (True = keine Aussage, duenne Datenbasis)}."""
+    v = vorsprung(slot_key, selbst[1], selbst[2], bezug[1], bezug[2])
+    if v is None:
+        return {"vorsprung_p": None, "vorsprung_stufe": None, "vorn": None,
+                "p_besser": None, "duenn": True}
+    return {"vorsprung_p": v["vorsprung_p"], "vorsprung_stufe": v["vorsprung_stufe"],
+            "vorn": selbst[0] if v["vorn"] == "a" else (bezug[0] if v["vorn"] == "b" else None),
+            "p_besser": v["p_a"], "duenn": False}
+
+
+def _vergleich_original(slot_key, selbst, original):
+    """Treffer der Ersatzsuche gegen das Original: vergleich_original und das
+    daraus abgeleitete Bool gleichauf."""
+    v = vergleich_feld(slot_key, selbst, original)
+    return {"vergleich_original": v, "gleichauf": gleichauf_aus(v)}
+
+
+def gleichauf_aus(vergleich):
+    """Bool fuer die Oberflaeche, aus der Stufe abgeleitet (gleichauf =
+    P_fav < 70 %); None ohne Aussage. Das fruehere eigene 95-%-Kriterium
+    entfaellt (Nachtrag 4)."""
+    if not vergleich or vergleich.get("duenn"):
+        return None
+    return vergleich["vorsprung_stufe"] == "gleichauf"
+
+
 VERLAESSLICH_MIN = 180     # Bezug der Stichprobenguete: min/(min+180), ~2 Spiele
 
 # ------------------------------------------------------------ Kadererkennung
@@ -1389,8 +1466,8 @@ def find_replacements(slot, original, kandidaten, reference,
             "delta_age": None if (a is None or alter is None) else round(a - alter, 1),
             "verlaesslich": b["verlaesslich"], "teile": b["teile"],
             **band_felder(slot["key"], leistung, p.get("minutes")),
-            "gleichauf": gleichauf(slot["key"], leistung, p.get("minutes"),
-                                   ziel_leistung, original.get("minutes")),
+            **_vergleich_original(slot["key"], (pid, leistung, p.get("minutes")),
+                                  (eigen, ziel_leistung, original.get("minutes"))),
         })
 
     if modus == "aehnlich":
