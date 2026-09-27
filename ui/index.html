@@ -990,6 +990,15 @@
   .dprof{font-size:11.5px;color:var(--muted);margin:-4px 0 12px;line-height:20px}
   .dprof .proftag{margin:0 5px 0 0}
 
+  /* ---------- Referenz-Status (D22) ----------
+     Leise Fußzeile; deutlich nur bei „schmal" (orange Randmarke wie die
+     übrigen Hinweise zum Stand, gestrichelter Rahmen – kein Rot). */
+  .refbasis{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:10px 0 6px;letter-spacing:.02em;cursor:default}
+  .refschmal{font-size:12px;margin:0 0 10px;padding:7px 11px;border:1px dashed var(--dim);border-left:3px solid var(--mark);
+    background:var(--surface2);line-height:1.5}
+  #tableHost > .refbasis{padding:0 8px 16px}
+  .tactnav .refschmal{margin:10px 0 0}
+
   /* ---------- Bewegung nur, wenn erwünscht ---------- */
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{animation-duration:.001ms !important;
@@ -1457,6 +1466,26 @@ const vglStufen = () => ((VGL_KONST && VGL_KONST.stufen) || [[0.975,"sicher"],[0
 const gleichGrenze = () => vglStufen()[0][0];
 const pZahl = p => (p*100).toLocaleString("de-DE", {maximumFractionDigits:1});
 const stufenText = () => vglStufen().map(s => pZahl(s[0])).join(" / ") + " %";
+
+// ---- Referenz-Status (D22) ---------------------------------------------------
+// Gegen welche Menge Perzentile und Scores gerechnet sind: Spieler aus dem
+// aktuellen Export. Leise als Fußzeile unter Tabelle und Brett; deutlich nur,
+// wenn die Menge „schmal" ist – dann kann die Skala verschoben sein. Das Feld
+// `referenz` kommt mit load_saved und tactic_board; referenz_status() wird
+// bewusst nicht zusätzlich gerufen (jeder Aufruf prüft den Rechen-Fingerabdruck).
+let REFERENZ = null;
+function referenzZeile(r){
+  if(!r || r.zeilen==null) return "";
+  const tip = "Perzentile und Scores beziehen sich auf diese Vergleichsmenge: alle Spieler aus dem aktuellen "
+    + "Export-Stand. Mitgezählt sind nur Ligen mit genug Spielern und Torhüter mit Detailstatistik und genug Minuten.";
+  return `<div class="refbasis" title="${escAttr(tip)}">Vergleichsbasis: ${(+r.zeilen).toLocaleString("de-DE")} Spieler · ${
+    r.ligen} Ligen · ${r.keeper} Torhüter</div>`;
+}
+function referenzWarnung(r){
+  if(!r || !r.schmal) return "";
+  return `<div class="refschmal"><b>Referenz schmal</b> – Perzentile und Scores können verschoben sein: ${
+    (r.gruende || []).map(esc2).join(" · ")}. Abhilfe: weitere aktuelle Scoutinglisten exportieren und importieren.</div>`;
+}
 const halbserien = p => `in etwa ${Math.round(p*10)} von 10 Halbserien`;
 const prozentVorn = p => p==null ? null : p >= 0.995 ? "> 99 %" : Math.round(p*100) + " %";
 function stufeHtml(v, gleichauf, diff, neutral, kompakt, namen){
@@ -2120,7 +2149,7 @@ function tactNav(){
     <button class="${TACT_VIEW==="brett"?"on":""}" onclick="setTactView('brett')">Brett</button>
     <button class="${TACT_VIEW==="liga"?"on":""}" onclick="setTactView('liga')">Ligavergleich</button>
     <button class="${TACT_VIEW==="plan"?"on":""}" onclick="setTactView('plan')">Planspiel</button>
-  </div></div>`;
+  </div>${referenzWarnung((TACT && TACT.referenz) || REFERENZ)}</div>`;
 }
 function setTactView(v){ TACT_VIEW = v; renderTactic(); }
 
@@ -2359,6 +2388,7 @@ function drawTactic(host){
                <button class="linkbtn" onclick="pinsLoesen()">alle lösen</button>` : ""}
       </div>
       ${meldeZeile(TACT.meldeliste)}
+      ${referenzZeile(TACT.referenz || REFERENZ)}
     </div>
     <div class="tactpanel">
       <div class="dsec" style="margin-top:0">${esc2(slot.label)}</div>
@@ -3808,7 +3838,7 @@ function renderTable(rows, C){
       <button class="linkbtn" onclick="tableAlle()">alle ${rows.length} anzeigen</button>
       – oder über Suche, Minuten und Filter eingrenzen.</div>` : "";
   document.getElementById("tableHost").innerHTML =
-    `${spitze}<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${rest}`;
+    `${referenzWarnung(REFERENZ)}${spitze}<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${rest}${referenzZeile(REFERENZ)}`;
 }
 
 function niceStep(raw){
@@ -3922,6 +3952,7 @@ async function loadData(){
   const res = await window.pywebview.api.load_saved(SRC);
   if(res.ok){
     PLAYERS = res.players;
+    REFERENZ = res.referenz || REFERENZ;
     // Zustand des Fair-Value-Modells (Minutenschwelle für den Hinweis im
     // Preislot). Fehlt er, bleibt die geplante Vorgabe stehen.
     if(res.value_model && res.value_model.threshold) FAIR_MIN_MIN = res.value_model.threshold;
