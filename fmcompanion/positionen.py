@@ -85,21 +85,37 @@ def groups_from_position(text):
     return out
 
 
-def player_groups(p):
-    """Positionsgruppen eines Spielers. Export schlaegt Speichermaske.
+_GRUPPEN_CACHE = {}
 
-    Das Ergebnis wird am Spieler-Dict gemerkt (`_gruppen`). Grund: slot_dists()
+
+def player_groups(p):
+    """Positionsgruppen eines Spielers -> (frozenset, Quelle). Export schlaegt
+    Speichermaske.
+
+    Gemerkt je (Position, Maske) in einem Modul-Cache. Grund: slot_dists()
     laeuft je Position einmal ueber die GANZE Vergleichsmenge und ruft dabei
     eligible() -> player_groups() auf. Bei elf Positionen und ~47.000 Spielern
     sind das 515.000 Aufrufe pro Taktikbrett, die alle dasselbe ausrechnen –
-    gemessen 4,2 der 10 Sekunden. Der Unterstrich haelt den Schluessel aus der
-    pywebview-Spiegelung heraus.
+    gemessen 4,2 der 10 Sekunden.
+
+    Frueher stand das Ergebnis als `_gruppen` (mit einem set) am Spieler-Dict.
+    Seit D19 bekommt jede Tabellenzeile Profile und damit diesen Schluessel –
+    und pywebview serialisiert Rueckgabewerte VOLLSTAENDIG, der Unterstrich
+    schuetzt nur Attribute des js_api-Objekts. load_saved scheiterte mit
+    "Object of type set is not JSON serializable", die App zeigte keine
+    Spieler. Deshalb nichts mehr am Dict, und frozenset: niemand darf das
+    gemerkte Ergebnis veraendern.
     """
-    gemerkt = p.get("_gruppen")
+    pos, maske = p.get("position"), p.get("pos_mask")
+    schluessel = (pos, maske)
+    gemerkt = _GRUPPEN_CACHE.get(schluessel)
     if gemerkt is not None:
         return gemerkt
-    g = groups_from_position(p.get("position"))
-    ergebnis = (g, "export") if g else (
-        (lambda m: (m, "ram" if m else "unbekannt"))(groups_from_mask(p.get("pos_mask"))))
-    p["_gruppen"] = ergebnis
+    g = groups_from_position(pos)
+    if g:
+        ergebnis = (frozenset(g), "export")
+    else:
+        m = groups_from_mask(maske)
+        ergebnis = (frozenset(m), "ram" if m else "unbekannt")
+    _GRUPPEN_CACHE[schluessel] = ergebnis
     return ergebnis
