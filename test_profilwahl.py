@@ -405,5 +405,46 @@ pruefe("nicht gleichauf knapp ueber der Schwelle (21,9)", tactics.gleichauf("st"
 pruefe("unter MIN_MINUTES kein 'gleichauf' (None)",
        tactics.gleichauf("st", 80, 170, 79, 2000) is None and tactics.gleichauf("st", 80, 2000, None, 2000) is None)
 
+# ------------------------------------------------ F: Vereins-DNA
+print("== F Vereins-DNA folgt dem Listen-Profil ==")
+G = moneyball.DNA_GRUPPE_VON_PROFIL
+namen = {"Mbeumo": "M (L), OM (RLZ), ST (Z)", "Amad": "M (RZ), OM (RLZ), ST (Z)",
+         "Güler": "DM, M (Z), OM (RZ)", "Desembargador": "M/OM (L)"}
+vier = als_spieler([zeile(7000 + i, pos) for i, pos in enumerate(namen.values())])
+dna_welt = copy.deepcopy(basis) + vier
+moneyball.add_scores(dna_welt, dna_welt, ligen)
+moneyball.add_dna(dna_welt, dna_welt, ligen)
+
+
+def erlaubte_gruppen(p):
+    return {G[pr] for pr in moneyball.erlaubte_profile(p)} - {None}
+
+
+for (name, pos), p in zip(namen.items(), dna_welt[-4:]):
+    g = moneyball._dna_gruppe(p)
+    pruefe(f"{name} ({pos}): DNA-Gruppe {g} ist spielbar und die des Listen-Profils ({p['profil']})",
+           g in erlaubte_gruppen(p) and g == G[p["profil"]])
+    pruefe(f"{name}: vor D19 waere es 'mid' gewesen", moneyball._dna_gruppe_position(p) == "mid")
+feld = [p for p in dna_welt if not p.get("is_gk") and p.get("profil")]
+pruefe("keine DNA-Gruppe mehr, die der Spieler nicht spielen kann",
+       all(moneyball._dna_gruppe(p) in erlaubte_gruppen(p) for p in feld))
+pruefe("DNA-Gruppe = Gruppe des Listen-Profils bei allen Feldspielern",
+       all(moneyball._dna_gruppe(p) == G[p["profil"]] for p in feld))
+pruefe("Torhueter ohne DNA", all(p.get("dna") is None for p in dna_welt if p.get("is_gk")))
+pruefe("Referenz: 'M (L), OM (RLZ), ST (Z)' speist die DNA-Gruppen off und st",
+       moneyball._dna_gruppen_referenz(dna_welt[-4]) == ("off", "st"))
+pruefe("ohne Score (kein 'profil') gilt die Positionsgruppe wie frueher",
+       moneyball._dna_gruppe(beispiel["M (L)"]) == moneyball._dna_gruppe_position(beispiel["M (L)"]))
+# Mit den alten Schaltern ("haupt"/"haupt") exakt die alte Zuordnung
+alt_ref, alt_lst = moneyball.REFERENZ_WAHL, moneyball.LISTEN_WAHL
+moneyball.REFERENZ_WAHL, moneyball.LISTEN_WAHL = "haupt", "haupt"
+alt_welt = copy.deepcopy(basis) + copy.deepcopy(vier)
+moneyball.add_scores(alt_welt, alt_welt, ligen)
+pruefe("Schalter 'haupt': DNA-Gruppen bitgleich zu vor D19 (Spieler und Referenz)",
+       all(moneyball._dna_gruppe(p) == moneyball._dna_gruppe_position(p) for p in alt_welt)
+       and all(moneyball._dna_gruppen_referenz(p) == tuple(g for g in [moneyball._dna_gruppe_position(p)] if g)
+               for p in alt_welt))
+moneyball.REFERENZ_WAHL, moneyball.LISTEN_WAHL = alt_ref, alt_lst
+
 print(f"\n{_bestanden} von {_gesamt} Prüfungen bestanden")
 sys.exit(0 if _bestanden == _gesamt else 1)

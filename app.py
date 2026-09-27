@@ -1708,13 +1708,14 @@ class Api:
         # Export plus Kohorte ist genau die Referenz der Basis.
         basis = self._basis(conn)
         referenz = alle + basis["referenz"][len(basis["export_rows"]):]
-        moneyball.add_dna(pool, referenz, ligen, ref_dists=self._ref_dna(basis))
         # Moneyball-Score je Profil fuer die Leistung und ihr Band (D19): die
         # Ersatzsuche sortiert weiter nach Fit und Charakter, zeigt aber
         # Leistung +-95 % und "gleichauf" zum Original. Alle Profile, weil ein
-        # positionsfremder Kandidat im Profil des gesuchten Slots zaehlt.
+        # positionsfremder Kandidat im Profil des gesuchten Slots zaehlt. VOR
+        # add_dna: die DNA-Gruppe ist die Gruppe des Listen-Profils.
         moneyball.add_scores(pool, referenz, ligen, ref_stats=self._ref_scores(basis),
                              zusatz_profile=moneyball.PROFIL_REIHENFOLGE)
+        moneyball.add_dna(pool, referenz, ligen, ref_dists=self._ref_dna(basis))
         self._pl_markieren(conn, pool, bz)
         self._repl_cache = (key, pool, referenz, kader_ids)
         return pool, referenz, kader_ids

@@ -1103,8 +1103,42 @@ DNA_GRUPPEN = ("def", "mid", "off", "st")
 DNA_MIN_MINUTES = 180      # darunter gehoert niemand in die Vergleichsbasis
 
 
+# DNA-Gruppe eines Score-Profils (D19). Torhueter bekommen keine DNA.
+DNA_GRUPPE_VON_PROFIL = {"st": "st", "off": "off", "mid": "mid",
+                         "iv": "def", "av": "def", "tw": None}
+
+
 def _dna_gruppe(p):
-    """Positionsgruppe fuer die DNA-Perzentile – Export-Position vor RAM-Maske.
+    """DNA-Gruppe eines BEWERTETEN Spielers: die Gruppe seines Listen-Profils.
+
+    Bis D19 die erste (defensivste) Positionsgruppe – derselbe Fehler wie bei
+    den Scores: Mbeumo, Amad und Desembargador standen als Mittelfeld in der
+    DNA, eine Position, die sie laut Profilwahl gar nicht spielen (Datenanalyst:
+    478 nicht erlaubte DNA-Gruppen, 1.407 abweichend vom Listen-Profil). Wer
+    noch keinen Score hat (kein 'profil'), bekommt die Positionsgruppe wie
+    frueher – add_scores deshalb VOR add_dna aufrufen.
+    """
+    if "profil" in p:
+        return DNA_GRUPPE_VON_PROFIL.get(p["profil"]) if p["profil"] else None
+    return _dna_gruppe_position(p)
+
+
+def _dna_gruppen_referenz(r):
+    """DNA-Gruppen, in deren Verteilungen eine Referenzzeile eingeht – ueber
+    dieselbe Schalterstelle wie die Scores (referenz_profile, REFERENZ_WAHL):
+    unter "gruppe" jede Gruppe, die seine Positionen erlauben; unter "haupt"
+    genau die Positionsgruppe von frueher."""
+    aus = []
+    for pr in referenz_profile(r):
+        g = DNA_GRUPPE_VON_PROFIL.get(pr)
+        if g and g not in aus:
+            aus.append(g)
+    return tuple(aus)
+
+
+def _dna_gruppe_position(p):
+    """Positionsgruppe fuer die DNA-Perzentile – Export-Position vor RAM-Maske
+    (Stand vor D19, fuer Spieler ohne Score).
 
     Die Maske aus dem Speicher zeigt nur, wo der Spieler zuletzt stand, und ist
     bei Kaderspielern oft leer oder falsch: Correia ('V (RL), FV (R)') kam als
@@ -1141,15 +1175,18 @@ def dna_referenz(reference, leagues=None):
 
     dists = {}
     for r in reference:
-        g = _dna_gruppe(r)
-        if not g or (r.get("minutes") or 0) < DNA_MIN_MINUTES:
+        if (r.get("minutes") or 0) < DNA_MIN_MINUTES:
+            continue
+        gruppen = _dna_gruppen_referenz(r)
+        if not gruppen:
             continue
         c = league_coeff(lg(r))
         for _, mets in DNA.values():
             for key, _, _, _ in mets:
                 v = _dna_wert(r, key, c)
                 if v is not None:
-                    dists.setdefault((g, key), []).append(v)
+                    for g in gruppen:
+                        dists.setdefault((g, key), []).append(v)
     for v in dists.values():
         v.sort()
     return dists
