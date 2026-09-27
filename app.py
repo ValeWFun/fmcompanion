@@ -153,12 +153,17 @@ class Api:
             for k in self.EXPORT_STAMM:
                 if e.get(k) not in (None, ""):
                     p[k] = e[k]
-            # Maske 0 heisst "Position unbekannt" (Spiegel-Records, siehe D20):
-            # POS stand auf "?", pos_groups auf "unk", obwohl die Export-Position
-            # in derselben Zeile steht. Dann aus ihr, wie bei reinen
-            # Export-Zeilen (enrich baut pos_label/pos_groups aus der Maske).
-            if not p.get("pos_mask") and e.get("position"):
-                p["pos_mask"] = moneyball.pos_mask_from_string(e["position"])
+            # Die Export-Position schlaegt die RAM-Maske (D22, wie bei is_gk und
+            # positionen.player_groups): sie ist FMs Liste der gelernten
+            # Positionen, also das, was der Scouting-Bericht zeigt. Die Maske
+            # zeigt nur, wo der Spieler zuletzt stand (Mac Allister "DM" bei
+            # "DM, M/OM (Z), ST (Z)"), und ist bei Spiegel-Records 0 – dann
+            # stand POS auf "?" (1.546 Zeilen). enrich baut pos_label und
+            # pos_groups aus der Maske. Liefert die Position keine Maske,
+            # bleibt die aus dem RAM.
+            maske = moneyball.pos_mask_from_string(e["position"]) if e.get("position") else 0
+            if maske:
+                p["pos_mask"] = maske
             aktuell = (self.AKTUELLER_EXPORT_GEWINNT
                        and (e.get("imported_at") or "") >= grenze)
             if not aktuell and (e.get("minutes") or 0) <= (p.get("minutes") or 0):
