@@ -1039,6 +1039,11 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
         p["score"] = w["score"]
         p["score_parts"] = w["parts"]
         p["profile_label"] = w["label"]
+        # Die Aufschluesselung bleibt nur beim Listen-Score (score_parts): je
+        # Profil voll mitgegeben wuchs die Spielertabelle fuer die Oberflaeche
+        # um 36 % (8,3 -> 11,3 MB), nur mit Score und Label um 1 %.
+        p["score_je_profil"] = {pr: {"score": x["score"], "label": x["label"],
+                                     "talent": x.get("talent")} for pr, x in je.items()}
         if w["score"] is None:
             continue
         p["age_band"] = w["band"]
