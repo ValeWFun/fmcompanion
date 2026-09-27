@@ -141,6 +141,12 @@ class Api:
             for k in self.EXPORT_STAMM:
                 if e.get(k) not in (None, ""):
                     p[k] = e[k]
+            # Maske 0 heisst "Position unbekannt" (Spiegel-Records, siehe D20):
+            # POS stand auf "?", pos_groups auf "unk", obwohl die Export-Position
+            # in derselben Zeile steht. Dann aus ihr, wie bei reinen
+            # Export-Zeilen (enrich baut pos_label/pos_groups aus der Maske).
+            if not p.get("pos_mask") and e.get("position"):
+                p["pos_mask"] = moneyball.pos_mask_from_string(e["position"])
             if (e.get("minutes") or 0) <= (p.get("minutes") or 0):
                 continue                      # RAM ist vollstaendiger
             for k in self.EXPORT_STATS:
