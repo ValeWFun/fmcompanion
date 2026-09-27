@@ -1942,11 +1942,11 @@ class Api:
         return {"ok": True}
 
     def listen_vergleich(self, eintraege):
-        """Vergleich einer sortierten Liste (Tabelle, Rangliste) mit ihrem
-        Ersten, kalibriert wie im Slot, dazu die Groesse der Spitzengruppe
-        (tactics.listen_vergleich). Die Oberflaeche sortiert und filtert
-        selbst; sie schickt die angezeigte Reihenfolge als
-        [{id, score, minutes, profil}] – die Formel bleibt so an einer Stelle."""
+        """Vergleich einer Liste (Tabelle, Rangliste) mit ihrem Bezug (hoechstes
+        score_kal), kalibriert wie im Slot, dazu die Groesse der Spitzengruppe
+        (tactics.listen_vergleich). Fuer Skripte und als Gegenprobe – die
+        Oberflaeche rechnet dasselbe aus score_kal/score_sd. Eingabe:
+        [{id, score, minutes, profil}]."""
         if not isinstance(eintraege, list):
             return {"ok": False, "error": "Liste erwartet."}
         zeilen = [{"id": e.get("id"), "score": e.get("score"), "minutes": e.get("minutes"),
@@ -1961,6 +1961,7 @@ class Api:
         ein."""
         return {"ok": True, "stufen": [[g, n] for g, n in tactics.VORSPRUNG_STUFEN],
                 "unter_stufen": "gleichauf", "spitzengruppe_p": tactics.SPITZENGRUPPE_P,
+                "spitzengruppe_bezug": "hoechstes score_kal",
                 "min_minutes": tactics.MIN_MINUTES}
 
     def rankings(self):
