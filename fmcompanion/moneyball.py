@@ -687,6 +687,27 @@ def score_sem(profil, minuten):
     return sem_h * (m_h / float(minuten)) ** 0.5
 
 
+LISTEN_M_F = 1500          # Minuten der naechsten Halbserie, wie im Slot-Vergleich
+
+
+def score_kalibriert(profil, score, minuten):
+    """Bausteine des kalibrierten Listen-Vergleichs -> (kal, var) oder (None, None).
+
+    kal = mu + rel x (score - mu) mit rel = tau^2 / (tau^2 + SEM(M)^2) – der zur
+    Mitte des Profils geschrumpfte Score; var = rel x SEM(M)^2 + SEM(M_f)^2 –
+    Restunsicherheit plus Rauschen der naechsten Halbserie. Zwei Spieler:
+    P(A besser) = Phi((kal_A - kal_B) / sqrt(var_A + var_B)). Genau diese Form
+    rechnet tactics.listen_vorsprung; die Oberflaeche bekommt kal und
+    sqrt(var) je Zeile, weil sie selbst filtert und sortiert. Unter
+    BAND_MIN_MINUTES keine Aussage."""
+    if score is None or (minuten or 0) < BAND_MIN_MINUTES or profil not in LISTEN_BAND:
+        return None, None
+    mu, tau, _sem_h, _m_h = LISTEN_BAND[profil]
+    sem2 = score_sem(profil, minuten) ** 2
+    rel = tau * tau / (tau * tau + sem2)
+    return mu + rel * (score - mu), rel * sem2 + score_sem(profil, LISTEN_M_F) ** 2
+
+
 def score_band(profil, minuten):
     """Band +-95 % des Listen-Scores in Punkten, ungeschrumpft wie das
     Slot-Band, gedeckelt bei 100. None unter BAND_MIN_MINUTES (duenne
@@ -1075,7 +1096,7 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
             p["score"] = None
             p["score_parts"] = []
             p["profile_label"] = "unbekannt"
-            p["score_band"] = None
+            p["score_band"] = p["score_kal"] = p["score_sd"] = None
             continue
         w = je[wahl]
         p["score"] = w["score"]
@@ -1088,6 +1109,10 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
                                      "talent": x.get("talent")} for pr, x in je.items()}
         # Band +-95 % des Listen-Scores (LISTEN_BAND, Profil des Listen-Scores)
         p["score_band"] = score_band(wahl, p.get("minutes")) if w["score"] is not None else None
+        # Bausteine des kalibrierten Vergleichs fuer die Oberflaeche (score_kalibriert)
+        kal, var = score_kalibriert(wahl, w["score"], p.get("minutes"))
+        p["score_kal"] = None if kal is None else round(kal, 3)
+        p["score_sd"] = None if var is None else round(var ** 0.5, 4)
         if w["score"] is None:
             continue
         p["age_band"] = w["band"]

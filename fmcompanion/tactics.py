@@ -487,15 +487,14 @@ def listen_vorsprung(a, b):
     a/b: (score, minuten, profil des Listen-Scores). Dieselbe Formel wie im
     Slot, aber mit den Konstanten des jeweiligen Profils (moneyball.LISTEN_BAND:
     mu je Profil, tau, SEM_h, M_h) – zwei Spieler einer Liste koennen
-    verschiedene Profile haben. -> wie vorsprung(), oder None ohne Aussage."""
-    teile = []
-    for score, minuten, profil in (a, b):
-        if score is None or (minuten or 0) < MIN_MINUTES or profil not in moneyball.LISTEN_BAND:
-            return None
-        mu, tau, _sem_h, _m_h = moneyball.LISTEN_BAND[profil]
-        post, v = _geschrumpft(score, moneyball.score_sem(profil, minuten) ** 2, mu, tau * tau)
-        teile += [post, v, moneyball.score_sem(profil, VORSPRUNG_M_F) ** 2]
-    return _vorsprung_aus(*teile)
+    verschiedene Profile haben. Die Bausteine je Spieler liefert
+    moneyball.score_kalibriert (dieselben, die die Oberflaeche als score_kal /
+    score_sd bekommt). -> wie vorsprung(), oder None ohne Aussage."""
+    kal_a, var_a = moneyball.score_kalibriert(a[2], a[0], a[1])
+    kal_b, var_b = moneyball.score_kalibriert(b[2], b[0], b[1])
+    if kal_a is None or kal_b is None:
+        return None
+    return _vorsprung_aus(kal_a, var_a, 0.0, kal_b, var_b, 0.0)
 
 
 # Spitzengruppe einer sortierten Liste: alle, gegen die der Erste mit P unter

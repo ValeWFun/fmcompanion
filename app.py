@@ -1953,6 +1953,16 @@ class Api:
                    "profil": e.get("profil")} for e in eintraege if isinstance(e, dict)]
         return dict(tactics.listen_vergleich(zeilen), ok=True)
 
+    def vergleich_konstanten(self):
+        """Stufen und Schwellen des kalibrierten Vergleichs fuer die
+        Oberflaeche – damit sie nur in tactics stehen. Die Oberflaeche rechnet
+        in Listen P(A besser) = Phi((score_kal_A - score_kal_B) /
+        sqrt(score_sd_A^2 + score_sd_B^2)) und ordnet ueber P_fav = max(P, 1 - P)
+        ein."""
+        return {"ok": True, "stufen": [[g, n] for g, n in tactics.VORSPRUNG_STUFEN],
+                "unter_stufen": "gleichauf", "spitzengruppe_p": tactics.SPITZENGRUPPE_P,
+                "min_minutes": tactics.MIN_MINUTES}
+
     def rankings(self):
         return [{"title": t, "key": k, "desc": d}
                 for t, (k, d) in moneyball.RANKINGS.items()]

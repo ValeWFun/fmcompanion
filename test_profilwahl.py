@@ -535,6 +535,20 @@ pruefe("Erster ohne Aussage (unter 180 Min): keine Spitzengruppe",
        tactics.listen_vergleich(liste[4:] + liste[:1])["spitzengruppe"] is None)
 pruefe("js_api listen_vergleich liefert dasselbe",
        app.Api().listen_vergleich(liste)["spitzengruppe"] == lv["spitzengruppe"])
+zeilen_mit = [p for p in dna_welt if p.get("score_kal") is not None]
+pruefe("Zeilen tragen score_kal/score_sd (Bausteine fuer die Oberflaeche)",
+       len(zeilen_mit) > 100 and all(p.get("score_sd", 0) > 0 for p in zeilen_mit))
+a_, b_ = zeilen_mit[0], zeilen_mit[1]
+p_ui = 0.5 * (1 + _m.erf((a_["score_kal"] - b_["score_kal"])
+                         / _m.sqrt(a_["score_sd"] ** 2 + b_["score_sd"] ** 2) / _m.sqrt(2)))
+p_py = tactics.listen_vorsprung((a_["score"], a_["minutes"], a_["profil"]),
+                                (b_["score"], b_["minutes"], b_["profil"]))["p_a"]
+pruefe("Phi((kal_A - kal_B) / sqrt(sd_A^2 + sd_B^2)) = listen_vorsprung (3 Stellen)",
+       abs(p_ui - p_py) < 0.0006, f"{p_ui:.4f} / {p_py}")
+kv = app.Api().vergleich_konstanten()
+pruefe("js_api vergleich_konstanten: Stufen und Schwellen aus tactics",
+       kv["stufen"] == [[0.975, "sicher"], [0.90, "klar"], [0.70, "leicht"]]
+       and kv["spitzengruppe_p"] == 0.90 and kv["min_minutes"] == 180)
 vorher = app.Api._konstanten()
 alt_lb = moneyball.LISTEN_BAND["st"]
 moneyball.LISTEN_BAND["st"] = (56.5, 12.7, 10.4, 1385)
