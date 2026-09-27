@@ -4,7 +4,7 @@ Ueber-/Unterperformance gegenueber den Expected-Werten (xG/xA)."""
 import bisect
 import re
 
-from . import charakter
+from . import charakter, positionen
 
 
 def _p90(value, minutes):
@@ -611,6 +611,10 @@ PROFILE_LABEL = {"st": "Stürmer", "off": "Flügel/OM", "mid": "Mittelfeld",
 
 
 def _profile(p):
+    """HAUPTPROFIL: das Profil der ersten Positionsgruppe. pos_info liefert die
+    Gruppen in Bit-Reihenfolge, das ist die DEFENSIVSTE Gruppe des Spielers.
+    Bis D19 war das das einzige Profil jedes Spielers – ein 'OM (RL), ST (Z)'
+    wurde auch im Sturm als Fluegel bewertet (siehe erlaubte_profile)."""
     if p.get("is_gk"):
         return "tw"
     groups = p.get("pos_groups") or ["unk"]
@@ -618,6 +622,121 @@ def _profile(p):
     if g == "def":
         return "iv" if int(p.get("pos_mask") or 0) & (1 << 4) else "av"
     return g if g in ("mid", "off", "st") else None
+
+
+# --- Profilwahl (D19) ---------------------------------------------------------
+# Bis D19 bekam jeder Spieler EIN Profil, das seiner defensivsten Gruppe. Von
+# 306 ST-faehigen Spielern (ab 1350 Min) bewertete der ST-Slot 255 mit dem
+# Fluegel- oder Mittelfeldprofil; "M (L)"/"M (R)" lief als zentrales
+# Mittelfeld (Amad, Mbeumo). Yuri Alberto: Score 61, als Stuermer 92.
+# Jetzt rechnet add_scores einen Score je erlaubtem Profil (score_je_profil),
+# und jeder Slot zaehlt den Score SEINES Profils (tactics.slot_profil).
+#
+# Taktische Positionsgruppe (positionen.player_groups) -> Score-Profil. Jede
+# Gruppe gehoert zu genau einem Profil, damit auch jeder Slot.
+PROFIL_VON_GRUPPE = {"tw": "tw", "lv": "av", "rv": "av", "iv": "iv",
+                     "dm": "mid", "zm": "mid",
+                     "oml": "off", "ml": "off", "omz": "off", "omr": "off", "mr": "off",
+                     "st": "st"}
+# Reihenfolge fuer Schleifen und Gleichstaende: defensiv -> offensiv
+PROFIL_REIHENFOLGE = ("tw", "iv", "av", "mid", "off", "st")
+# Wer geht in die Perzentil-Verteilungen eines Profils ein (Quoten-Prior,
+# Kennzahl-Verteilungen, Altersbaender)? EINE umschaltbare Stelle, die Wahl
+# trifft der Datenanalyst (Auftrag D19); bis dahin der Stand vor D19:
+#   "haupt":  nur Spieler, deren Hauptprofil (_profile) es ist – Stand vor D19
+#   "gruppe": jede Gruppe aus pos_groups (Maske/Export), so abgebildet, wie
+#             _profile sie als erste Gruppe abbilden wuerde ("M (L)" -> mid)
+#   "slot":   jedes Profil, das die Positionen erlauben (erlaubte_profile,
+#             "M (L)" -> off) – also jeder, der einen Slot des Profils spielen kann
+REFERENZ_WAHL = "haupt"
+# Welcher Profil-Score ist DER Score eines Spielers in Tabelle, Ranglisten,
+# Talent-Board und value_score (listen_profil)? Ebenfalls eine Stelle:
+#   "bester": der hoechste ueber die erlaubten Profile (Vorschlag Head Scout)
+#   "haupt":  das Hauptprofil (Stand vor D19)
+LISTEN_WAHL = "bester"
+
+
+def erlaubte_profile(p):
+    """Profile, die die Positionen eines Spielers erlauben -> set.
+
+    Aus den taktischen Gruppen (Export-Position vor Speichermaske), ueber
+    PROFIL_VON_GRUPPE. Torhueter (is_gk) haben nur das Torwartprofil – wie
+    im Hauptprofil entscheidet is_gk, nicht ein Maskenbit. Ohne jede Gruppe
+    bleibt das Hauptprofil.
+    """
+    if p.get("is_gk"):
+        return {"tw"}
+    gruppen, _quelle = positionen.player_groups(p)
+    aus = {PROFIL_VON_GRUPPE[g] for g in gruppen if g != "tw" and g in PROFIL_VON_GRUPPE}
+    if not aus:
+        h = _profile(p)
+        return {h} if h else set()
+    return aus
+
+
+def _gruppen_profile(p):
+    """Profile ALLER pos_groups, jede wie im Hauptprofil abgebildet (fuer
+    REFERENZ_WAHL "gruppe")."""
+    if p.get("is_gk"):
+        return {"tw"}
+    maske = int(p.get("pos_mask") or 0)
+    aus = set()
+    for g in p.get("pos_groups") or ():
+        if g == "def":
+            aus.add("iv" if maske & (1 << 4) else "av")
+        elif g in ("mid", "off", "st"):
+            aus.add(g)
+    return aus
+
+
+def referenz_profile(r):
+    """Profile, in deren Verteilungen eine Referenzzeile eingeht (REFERENZ_WAHL)."""
+    if REFERENZ_WAHL == "haupt":
+        h = _profile(r)
+        return (h,) if h else ()
+    if REFERENZ_WAHL == "gruppe":
+        menge = _gruppen_profile(r)
+    elif REFERENZ_WAHL == "slot":
+        menge = erlaubte_profile(r)
+    else:
+        raise ValueError(f"Unbekannte REFERENZ_WAHL: {REFERENZ_WAHL!r}")
+    return tuple(pr for pr in PROFIL_REIHENFOLGE if pr in menge)
+
+
+def listen_profil(p, je_profil, erlaubt):
+    """Profil des Listen-Scores (LISTEN_WAHL) -> Profilschluessel oder None.
+
+    je_profil: {profil: Wertung} aus add_scores, erlaubt: erlaubte_profile(p).
+    "bester" nimmt den hoechsten Score der erlaubten Profile; bei Gleichstand
+    und wenn keiner einen Score hat, das Hauptprofil, sonst das defensivste.
+    """
+    haupt = _profile(p)
+    if LISTEN_WAHL == "haupt":
+        if haupt in je_profil:
+            return haupt
+    elif LISTEN_WAHL != "bester":
+        raise ValueError(f"Unbekannte LISTEN_WAHL: {LISTEN_WAHL!r}")
+    kandidaten = [pr for pr in PROFIL_REIHENFOLGE if pr in erlaubt and pr in je_profil]
+    if not kandidaten:
+        return haupt if haupt in je_profil else None
+    mit = [pr for pr in kandidaten if je_profil[pr]["score"] is not None]
+    if not mit:
+        return haupt if haupt in kandidaten else kandidaten[0]
+    best = max(je_profil[pr]["score"] for pr in mit)
+    beste = [pr for pr in mit if je_profil[pr]["score"] == best]
+    return haupt if haupt in beste else beste[0]
+
+
+def profil_score(p, profil):
+    """Moneyball-Score eines Spielers im Profil `profil` (Slot-Score), oder None.
+
+    Spieler, die add_scores noch nicht kennt (ohne score_je_profil), liefern
+    ihren Listen-Score – so bleiben Aufrufer ohne Profilwahl lauffaehig."""
+    je = p.get("score_je_profil")
+    if je is None:
+        return p.get("score")
+    w = je.get(profil)
+    return w["score"] if w else None
 
 
 # --- Quoten: Bayes-Shrinkage -------------------------------------------------
@@ -662,31 +781,33 @@ def quoten_prior(reference):
     Gepoolt (Summe gewonnen / Summe gesamt), nicht gemittelt: so zaehlt jeder
     Zweikampf gleich viel, und Spieler mit drei Duellen verzerren den Schnitt
     nicht. Je Profil, weil ein Innenverteidiger eine andere Zweikampf-Basis
-    hat als ein Fluegel.
+    hat als ein Fluegel. Welche Profile eine Zeile speist, sagt
+    referenz_profile (REFERENZ_WAHL).
     """
     summe = {}
     for r in reference:
-        prof = _profile(r)
-        if not prof:
-            continue
-        for key, (w, t) in QUOTEN.items():
-            tot = r.get(t) or 0
-            # Zeilen ohne den Zaehler (RAM-Kohorte kennt keine Fernschuss-
-            # tore) duerfen den Prior nicht als 0 nach unten ziehen.
-            if not tot or r.get(w) is None:
-                continue
-            s = summe.setdefault((prof, key), [0.0, 0.0])
-            s[0] += float(r.get(w) or 0)
-            s[1] += float(tot)
+        for prof in referenz_profile(r):
+            for key, (w, t) in QUOTEN.items():
+                tot = r.get(t) or 0
+                # Zeilen ohne den Zaehler (RAM-Kohorte kennt keine Fernschuss-
+                # tore) duerfen den Prior nicht als 0 nach unten ziehen.
+                if not tot or r.get(w) is None:
+                    continue
+                s = summe.setdefault((prof, key), [0.0, 0.0])
+                s[0] += float(r.get(w) or 0)
+                s[1] += float(tot)
     return {k: w / t for k, (w, t) in summe.items() if t}
 
 
-def _score_metrics(p, coeff, priors=None):
+def _score_metrics(p, coeff, priors=None, prof=None):
     """Kennzahlen fuers Scoring: /90-Raten geshrinkt (min/(min+180)) und mit
     Liga-Koeffizient skaliert; Quoten Bayes-geschrumpft (siehe _quote); Note
     bleibt roh. Angezeigt werden weiterhin die Rohwerte aus enrich() – die
-    Schrumpfung steckt nur im Perzentil."""
-    prof = _profile(p)
+    Schrumpfung steckt nur im Perzentil.
+
+    prof: Profil, dessen Quoten-Prior gilt (seit D19 wird je Profil gerechnet);
+    ohne Angabe das Hauptprofil. Nur die Quoten haengen am Profil."""
+    prof = prof or _profile(p)
     pri = lambda key: (priors or {}).get((prof, key))
     m = p.get("minutes") or 0
     sh = (m / (m + SHRINK_MIN)) * coeff if m else 0.0
@@ -791,18 +912,21 @@ def score_referenz(reference, leagues=None):
     # verglichen.
     priors = quoten_prior(reference)
 
-    # Verteilungen je (Profil, Metrik) aus der Referenzmenge
+    # Verteilungen je (Profil, Metrik) aus der Referenzmenge. Welche Profile
+    # eine Zeile speist, entscheidet referenz_profile (REFERENZ_WAHL).
     dists = {}
     ref_mets = []
     for r in reference:
-        prof = _profile(r)
-        if not prof:
+        profs = referenz_profile(r)
+        if not profs:
             continue
-        mets = _score_metrics(r, league_coeff(lg(r)), priors)
-        ref_mets.append((r, prof, mets))
-        for key, _, _, _ in PROFILES[prof]:
-            if mets[key] is not None:
-                dists.setdefault((prof, key), []).append(mets[key])
+        coeff = league_coeff(lg(r))
+        for prof in profs:
+            mets = _score_metrics(r, coeff, priors, prof)
+            ref_mets.append((r, prof, mets))
+            for key, _, _, _ in PROFILES[prof]:
+                if mets[key] is not None:
+                    dists.setdefault((prof, key), []).append(mets[key])
     for v in dists.values():
         v.sort()
 
@@ -828,10 +952,57 @@ def score_referenz(reference, leagues=None):
     return priors, dists, age_dists
 
 
-def add_scores(players, reference=None, leagues=None, ref_stats=None):
+def _profil_wertung(p, prof, coeff, priors, dists, age_dists):
+    """Score eines Spielers in EINEM Profil -> {score, parts, label, talent, band}.
+
+    score None, wenn die Datengrundlage fehlt (dann ohne talent/band)."""
+    # Torwart ohne Detailstatistik (Liga ohne xG/Paraden, im Save die
+    # saudischen): Note und Gegentore sind da, alles andere fehlt. Die
+    # Ueberspringen-Regel unten machte daraus einen Score aus 70 % Note –
+    # und drei Saudi-Keeper standen mit 89–94 ganz oben. Kein Urteil ist
+    # hier ehrlicher als ein halbes.
+    if prof == "tw" and p.get("xga") is None and p.get("sot_faced") is None:
+        return {"score": None, "parts": [], "label": "Torhüter – keine Detailstatistik"}
+    mets = _score_metrics(p, coeff, priors, prof)
+    # Fehlende Kennzahlen (None) werden uebersprungen und die uebrigen
+    # Gewichte hochgerechnet – dieselbe Regel wie in tactics.score_slot.
+    # Sonst stuende ein Kohorten-Spieler bei "Chancen kreiert" auf 0 und
+    # jeder Export-Spieler mit einem echten Wert automatisch ueber ihm.
+    total, wsum, parts = 0.0, 0.0, []
+    for key, label, w, inv in PROFILES[prof]:
+        if mets[key] is None:
+            parts.append({"label": label, "pct": None, "w": w})
+            continue
+        pct = _pct(dists.get((prof, key), []), mets[key])
+        if inv:
+            pct = 100.0 - pct
+        total += w * pct
+        wsum += w
+        parts.append({"label": label, "pct": round(pct), "w": w})
+    if wsum < 0.5:
+        return {"score": None, "parts": parts, "label": PROFILE_LABEL[prof]}
+    total = total / wsum
+    # Talent = wie gut ist er FUER SEIN ALTER auf dieser Position. Ein
+    # 19-Jaehriger im 90. Perzentil der 19-20-Jaehrigen ist ein Kandidat,
+    # derselbe Score bei einem 28-Jaehrigen ist Normalmass.
+    band = age_band(p.get("age"))
+    pool = age_dists.get((prof, band), []) if band else []
+    return {"score": round(total), "parts": parts, "label": PROFILE_LABEL[prof],
+            "band": band, "talent": round(_pct(pool, total)) if len(pool) >= 8 else None}
+
+
+def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_profile=()):
     """Ergaenzt jeden Spieler um score (0-100), score_parts (Tooltip),
     profile_label, league(+coeff). Perzentile werden je Positionsprofil ueber
     die reference-Menge (idealerweise der Pool) gebildet.
+
+    Seit D19 je Profil: score_je_profil = {profil: {score, parts, label,
+    talent}} fuer jedes erlaubte Profil (erlaubte_profile) plus das
+    Hauptprofil. Slots rechnen mit dem Score ihres Profils (profil_score,
+    tactics.slot_profil); score/score_parts/profile_label/talent/prospect sind
+    der LISTEN-Score (listen_profil), 'profil' sein Schluessel.
+    zusatz_profile: weitere Profile, etwa das Slot-Profil eines
+    positionsfremden Kandidaten im Slot-Vergleich (zaehlt nie als Listen-Score).
 
     ref_stats: fertiges Ergebnis von score_referenz(reference, leagues). Wer
     dieselbe Referenz oft benutzt (Brett, Liga-/CL-Vergleich, Kaderplaner),
@@ -847,58 +1018,31 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None):
                                 else score_referenz(reference, leagues))
 
     for p in players:
-        prof = _profile(p)
         league = lg(p)
         coeff = league_coeff(league)
         p["league"] = league
         p["league_coeff"] = round(coeff, 2)
-        if not prof:
+        erlaubt = erlaubte_profile(p)
+        haupt = _profile(p)
+        profs = erlaubt | set(zusatz_profile) | ({haupt} if haupt else set())
+        je = {prof: _profil_wertung(p, prof, coeff, priors, dists, age_dists)
+              for prof in PROFIL_REIHENFOLGE if prof in profs}
+        p["score_je_profil"] = je
+        wahl = listen_profil(p, je, erlaubt)
+        p["profil"] = wahl
+        if wahl is None:
             p["score"] = None
             p["score_parts"] = []
             p["profile_label"] = "unbekannt"
             continue
-        # Torwart ohne Detailstatistik (Liga ohne xG/Paraden, im Save die
-        # saudischen): Note und Gegentore sind da, alles andere fehlt. Die
-        # Ueberspringen-Regel unten machte daraus einen Score aus 70 % Note –
-        # und drei Saudi-Keeper standen mit 89–94 ganz oben. Kein Urteil ist
-        # hier ehrlicher als ein halbes.
-        if prof == "tw" and p.get("xga") is None and p.get("sot_faced") is None:
-            p["score"] = None
-            p["score_parts"] = []
-            p["profile_label"] = "Torhüter – keine Detailstatistik"
+        w = je[wahl]
+        p["score"] = w["score"]
+        p["score_parts"] = w["parts"]
+        p["profile_label"] = w["label"]
+        if w["score"] is None:
             continue
-        mets = _score_metrics(p, coeff, priors)
-        # Fehlende Kennzahlen (None) werden uebersprungen und die uebrigen
-        # Gewichte hochgerechnet – dieselbe Regel wie in tactics.score_slot.
-        # Sonst stuende ein Kohorten-Spieler bei "Chancen kreiert" auf 0 und
-        # jeder Export-Spieler mit einem echten Wert automatisch ueber ihm.
-        total, wsum, parts = 0.0, 0.0, []
-        for key, label, w, inv in PROFILES[prof]:
-            if mets[key] is None:
-                parts.append({"label": label, "pct": None, "w": w})
-                continue
-            pct = _pct(dists.get((prof, key), []), mets[key])
-            if inv:
-                pct = 100.0 - pct
-            total += w * pct
-            wsum += w
-            parts.append({"label": label, "pct": round(pct), "w": w})
-        if wsum < 0.5:
-            p["score"] = None
-            p["score_parts"] = parts
-            p["profile_label"] = PROFILE_LABEL[prof]
-            continue
-        total = total / wsum
-        p["score"] = round(total)
-        p["score_parts"] = parts
-        p["profile_label"] = PROFILE_LABEL[prof]
-        # Talent = wie gut ist er FUER SEIN ALTER auf seiner Position.
-        # Ein 19-Jaehriger im 90. Perzentil der 19-20-Jaehrigen ist ein
-        # Kandidat, derselbe Score bei einem 28-Jaehrigen ist Normalmass.
-        band = age_band(p.get("age"))
-        pool = age_dists.get((prof, band), []) if band else []
-        p["age_band"] = band
-        p["talent"] = round(_pct(pool, total)) if len(pool) >= 8 else None
+        p["age_band"] = w["band"]
+        p["talent"] = w["talent"]
         # Talent-Board: dasselbe Mass, aber nur fuer die Jahrgaenge, um die es
         # dabei geht. Sonst steht in der Rangliste "Talente" ein 31-jaehriger
         # Weltklassetorwart ganz oben – im eigenen Altersband ist er zu Recht

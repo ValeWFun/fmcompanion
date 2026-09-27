@@ -166,11 +166,13 @@ class Kit:
         if not tactics.eligible(p, slot)[0]:
             return None
         b = tactics.score_slot(p, slot, self.dists[slot_key], self.teams)
-        if not b or p.get("score") is None:
+        # Moneyball-Score im Profil des Slots (D19), wie auf dem Brett
+        mb = moneyball.profil_score(p, tactics.slot_profil(slot))
+        if not b or mb is None:
             return None
-        return {"fit": b["score"], "score": p["score"],
-                "leistung": tactics.gesamt(b["score"], p["score"], None),
-                "gesamt": tactics.gesamt(b["score"], p["score"], p.get("pers_score")),
+        return {"fit": b["score"], "score": mb,
+                "leistung": tactics.gesamt(b["score"], mb, None),
+                "gesamt": tactics.gesamt(b["score"], mb, p.get("pers_score")),
                 "carry": b.get("carry")}
 
     def niveau_von(self, slot_key):
@@ -224,12 +226,14 @@ class Kit:
         verteil = {mk: sorted(v for v in (r.get(mk) for r in peers) if v is not None)
                    for _, (mk, _) in dims.items()}
         leist = []
+        profil = tactics.slot_profil(slot)       # D19: Score im Slot-Profil
         for r in peers:
-            if r.get("score") is None:
+            mb = moneyball.profil_score(r, profil)
+            if mb is None:
                 continue
             b = tactics.score_slot(r, slot, self.dists[slot_key], self.teams)
             if b:
-                leist.append(tactics.gesamt(b["score"], r["score"], None))
+                leist.append(tactics.gesamt(b["score"], mb, None))
         verteil["_leistung"] = sorted(leist)
         med_vol = {mk: (sorted(r.get(vk) or 0 for r in peers)[len(peers) // 2]
                         if peers else 0)
@@ -491,7 +495,8 @@ class Kit:
             fit = moneyball.enrich([als_spieler(z[2][1]) for z in zu_scoren], **self.bezug)
             moneyball.add_scores(mb, self.referenz, self.ligen)
             for (eintrag, feld, _), z_mb, z_fit in zip(zu_scoren, mb, fit):
-                for k in ("score", "score_parts", "profile_label", "talent", "prospect"):
+                for k in ("score", "score_parts", "profile_label", "talent", "prospect",
+                          "score_je_profil", "profil"):
                     z_fit[k] = z_mb.get(k)
                 eintrag[feld] = z_fit
         return aus
