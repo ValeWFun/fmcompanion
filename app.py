@@ -119,20 +119,32 @@ class Api:
     RAM_ONLY_STATS = ("fouls",
                       "fouls_against", "yellow")
 
-    def _merge_export_stats(self, rows, exp_by_eid):
+    # Seit D22: ein Export des aktuellen Stands gewinnt immer gegen den RAM
+    # (siehe _merge_export_stats). False = Regel vor D22 (mehr Minuten gewinnt).
+    AKTUELLER_EXPORT_GEWINNT = True
+
+    def _merge_export_stats(self, rows, exp_by_eid, stand=None):
         """Export-Zahlen in die RAM-Zeilen ziehen. VOR moneyball.enrich rufen.
 
-        Regel: der Export gewinnt, ausser der RAM hat mehr Minuten.
+        Regel: ein Export des aktuellen Stands (imported_at ab `stand`, der
+        Grenze aus _pool_stand – dieselbe Menge wie scoutkit.aktuell) gewinnt
+        immer. Aeltere Exporte gewinnen, ausser der RAM hat mehr Minuten.
 
         Der Export ist FMs eigene Zahl und damit exakt – aber nur so frisch wie
         der letzte Import. Der RAM ist live, sieht jedoch nur, was FM gerade
         geladen hat: an Buendia gemessen 10 Minuten im RAM gegen 337 im Export,
         ueber 300 Spieler stimmten beide Quellen nur in 5 % der Faelle ueberein.
-        Wer mehr Minuten hat, hat den vollstaendigeren Stand.
+        Bis D22 galt deshalb "mehr Minuten gewinnt". Im September 2026 passte
+        das nicht mehr: der letzte Scan (06.09.) war AELTER als der Export
+        (22./23.09.), und Spiegel-Records blaehen die RAM-Minuten auf (Yoro
+        1.780 im RAM gegen 768 im Export). 130 aktuelle Spieler trugen in der
+        Tabelle RAM-Zahlen, darunter fuenf aus dem eigenen Kader – waehrend
+        Brett und Referenz aus dem Export rechnen.
 
         Stammdaten (Position, Verein, Liga, Marktwert) kommen IMMER aus dem
         Export – die kennt der RAM-Scan gar nicht.
         """
+        grenze = stand or ""
         n = 0
         for p in rows:
             e = exp_by_eid.get(int(p["eid"])) if p.get("eid") else None
@@ -141,13 +153,20 @@ class Api:
             for k in self.EXPORT_STAMM:
                 if e.get(k) not in (None, ""):
                     p[k] = e[k]
-            # Maske 0 heisst "Position unbekannt" (Spiegel-Records, siehe D20):
-            # POS stand auf "?", pos_groups auf "unk", obwohl die Export-Position
-            # in derselben Zeile steht. Dann aus ihr, wie bei reinen
-            # Export-Zeilen (enrich baut pos_label/pos_groups aus der Maske).
-            if not p.get("pos_mask") and e.get("position"):
-                p["pos_mask"] = moneyball.pos_mask_from_string(e["position"])
-            if (e.get("minutes") or 0) <= (p.get("minutes") or 0):
+            # Die Export-Position schlaegt die RAM-Maske (D22, wie bei is_gk und
+            # positionen.player_groups): sie ist FMs Liste der gelernten
+            # Positionen, also das, was der Scouting-Bericht zeigt. Die Maske
+            # zeigt nur, wo der Spieler zuletzt stand (Mac Allister "DM" bei
+            # "DM, M/OM (Z), ST (Z)"), und ist bei Spiegel-Records 0 – dann
+            # stand POS auf "?" (1.546 Zeilen). enrich baut pos_label und
+            # pos_groups aus der Maske. Liefert die Position keine Maske,
+            # bleibt die aus dem RAM.
+            maske = moneyball.pos_mask_from_string(e["position"]) if e.get("position") else 0
+            if maske:
+                p["pos_mask"] = maske
+            aktuell = (self.AKTUELLER_EXPORT_GEWINNT
+                       and (e.get("imported_at") or "") >= grenze)
+            if not aktuell and (e.get("minutes") or 0) <= (p.get("minutes") or 0):
                 continue                      # RAM ist vollstaendiger
             for k in self.EXPORT_STATS:
                 p[k] = e.get(k)
@@ -236,12 +255,25 @@ class Api:
         return tactics.pl_markieren(players, *self._meldebasis(conn, players, bz))
 
     def _add_scores(self, players, reference=None):
-        """Moneyball-Scores: Perzentil-Basis ist der Pool PLUS die namenlose
-        Vergleichskohorte aus dem RAM. Ohne sie rechnen die Perzentile gegen
-        gut hundert Spieler, mit ihr gegen Zehntausende – erst dann heisst
-        'im 90. Perzentil' auch etwas. Liga-Koeffizienten kommen aus dem
-        Export (EID-Join); Kohorten-Spieler haben keine EID -> Faktor 1.0."""
+        """Moneyball-Scores der Tabelle, des Scans und der Signale.
+
+        Seit D22 gegen DIESELBE Referenz wie Brett und Ersatzsuche: die
+        Export-Zeilen des aktuellen Stands (_basis, moneyball.REFERENZ_MENGE),
+        mit den gecachten Verteilungen. RAM-Zeilen werden gegen sie bewertet,
+        gehen aber nicht in sie ein; `reference` wird dann nicht gebraucht.
+
+        Nur REFERENZ_MENGE "export+kohorte" rechnet wie vor D22: Perzentil-
+        Basis ist `reference` (Default: der RAM-Pool) PLUS die namenlose
+        Vergleichskohorte. Liga-Koeffizienten kommen aus dem Export
+        (EID-Join); Kohorten-Spieler haben keine EID -> Faktor 1.0."""
         conn = self._db()
+        if not moneyball.referenz_braucht_kohorte():
+            basis = self._basis(conn)
+            moneyball.add_scores(players, basis["referenz"], basis["ligen"],
+                                 ref_stats=self._ref_scores(basis))
+            moneyball.add_dna(players, basis["referenz"], basis["ligen"],
+                              ref_dists=self._ref_dna(basis))
+            return players
         bz = self._bezug(conn)
         if reference is None:
             reference = moneyball.enrich(db.pool_players(conn), **bz)
@@ -452,7 +484,7 @@ class Api:
         raw = db.pool_players(conn) if mode == "pool" else db.latest_players(conn)
         exp = db.load_export(conn)
         exp_by_eid = {int(e["eid"]): e for e in exp if e.get("eid")}
-        aus_export = self._merge_export_stats(raw, exp_by_eid)
+        aus_export = self._merge_export_stats(raw, exp_by_eid, self._pool_stand(conn))
         players = moneyball.enrich(raw, **bz)
         for p in players:
             p.setdefault("id", p.get("player_id"))
@@ -526,6 +558,7 @@ class Api:
         return {"ok": True, "players": players, "count": len(players),
                 "snapshots": db.snapshot_count(conn), "exports": len(exp),
                 "aus_export": aus_export,
+                "referenz": self._basis(conn)["referenz_status"],
                 "value_model": fair_model.status() if fair_model else None}
 
     def _listen_felder(self, conn, players):
@@ -880,17 +913,22 @@ class Api:
         return moneyball.enrich(rows, **bz)
 
     def _basis(self, conn):
-        """Gemeinsame Rechengrundlage von Brett, Liga-/CL-Vergleich und
-        Kaderplaner: Bezugsdatum, Export, angereicherte Export-Zeilen und die
-        Vergleichsmenge fuer die Perzentile (ganzer Export PLUS Kohorte).
+        """Gemeinsame Rechengrundlage von Brett, Liga-/CL-Vergleich,
+        Kaderplaner, Ersatzsuche und Tabelle: Bezugsdatum, Export, angereicherte
+        Export-Zeilen und die Vergleichsmenge fuer die Perzentile.
 
-        Frueher nur Kader + Kohorte ("die Kohorte reicht") – seit dem
-        Nachschaerfen des Torwarts reicht sie nicht mehr: die Note ueber
-        Erwartung gibt es nur im Export, die Kohorte kennt fuer Keeper nur Note
-        und Passquote. Mit ihr allein hatte der Torwart-Slot keine acht Werte je
-        Kennzahl, score_slot gab None und das Brett zeigte gar keinen Torwart.
-        Die Ersatzsuche (_repl_pool) benutzt dieselbe Menge – sonst waeren die
-        Scores nicht vergleichbar.
+        Die Vergleichsmenge bestimmt moneyball.REFERENZ_MENGE. Seit D22 sind
+        das die Export-Zeilen des aktuellen Stands (_pool_stand), ohne RAM-
+        Kohorte: die Kohorte hob die Skala um 6–15 Punkte, alle Baender und
+        Schrumpfungen sind aber auf der Export-Skala geschaetzt. Die Kohorte
+        wird dann gar nicht erst geladen.
+
+        Frueher (vor D13) war es nur Kader + Kohorte ("die Kohorte reicht"):
+        die Note ueber Erwartung gibt es nur im Export, die Kohorte kennt fuer
+        Keeper nur Note und Passquote. Der Torwart-Slot hatte keine acht Werte
+        je Kennzahl, score_slot gab None und das Brett zeigte keinen Torwart.
+        Der aktuelle Export-Stand hat 66 Keeper ab 900 Minuten; faellt er unter
+        REFERENZ_MIN_KEEPER, meldet 'referenz_status' die Referenz als schmal.
 
         Aufgehoben im Speicher (_rechen_cache), solange _rechenstand gleich
         bleibt. 'verteilungen' nimmt die daraus abgeleiteten Perzentil-
@@ -910,14 +948,18 @@ class Api:
             export = db.load_export(conn)
             export_rows = moneyball.enrich(
                 [self._export_row_to_player(e) for e in export if e.get("eid")], **bz)
-            kohorte = moneyball.enrich(db.cohort_load(conn), **bz)
+            kohorte = (moneyball.enrich(db.cohort_load(conn), **bz)
+                       if moneyball.referenz_braucht_kohorte() else [])
+            stand = self._pool_stand(conn)
+            referenz = moneyball.referenz_menge(export_rows, kohorte, stand)
+            ligen = {int(e["eid"]): e["league"] for e in export
+                     if e.get("eid") and e.get("league")}
             # Teamstaerke fuer den Carry-Zuschlag: aus den EXPORT-Zeilen, nicht aus
             # dem Kader – gebraucht werden die Schnitte FREMDER Vereine, und nur der
             # Export kennt Verein und Note zu jedem Spieler.
             basis = {"bz": bz, "export": export, "export_rows": export_rows,
-                     "referenz": export_rows + kohorte,
-                     "ligen": {int(e["eid"]): e["league"] for e in export
-                               if e.get("eid") and e.get("league")},
+                     "referenz": referenz, "stand": stand, "ligen": ligen,
+                     "referenz_status": moneyball.referenz_status(referenz, ligen),
                      "teams": tactics.team_strength(export),
                      "verteilungen": {}}
             if key is not None:
@@ -927,10 +969,11 @@ class Api:
     def _rechenstand(self, conn, bz):
         """Fingerabdruck von allem, woraus _basis rechnet: Tabellenstand
         (db.rechenstand – jeder Import, jeder Scan, auch aus anderen
-        Prozessen), Bezugsdatum, die Modul-Konstanten der Rechnung und der
+        Prozessen), Bezugsdatum, die Grenze des aktuellen Stands (seit D22
+        bestimmt sie die Referenz), die Modul-Konstanten der Rechnung und der
         App-Zaehler _rechen_gen. Gleicher Fingerabdruck = dieselben Zahlen."""
         return (self._rechen_gen, db.rechenstand(conn), tuple(sorted(bz.items())),
-                self._konstanten())
+                self._pool_stand(conn), self._konstanten())
 
     @staticmethod
     def _konstanten():
@@ -971,8 +1014,8 @@ class Api:
 
     def tactic_board(self):
         """Je Position der Formation die passenden Kaderspieler mit Score und
-        Aufschluesselung. Perzentile gegen alle Spieler, die dort spielen
-        koennen (Export + namenlose Vergleichskohorte, siehe _basis)."""
+        Aufschluesselung. Perzentile gegen alle Spieler der Referenz, die dort
+        spielen koennen (aktueller Export-Stand, siehe _basis)."""
         conn = self._db()
         eids = self._squad_eids(conn)
         if not eids:
@@ -993,7 +1036,7 @@ class Api:
         aus_export = len(kader)
         fehlt = len(eids) - len(kader)
         # Moneyball-Score der Kaderspieler – gegen DIESELBE Referenz wie die
-        # Tabelle (ganzer Export + Kohorte), sonst hiesse "73" hier etwas
+        # Tabelle (_basis, REFERENZ_MENGE), sonst hiesse "73" hier etwas
         # anderes als dort. Unter 'mb' abgelegt, weil build_board 'score' mit
         # dem Positions-Fit belegt.
         moneyball.add_scores(kader, referenz, ligen, ref_stats=self._ref_scores(basis))
@@ -1058,6 +1101,7 @@ class Api:
         return {"ok": True, "slots": slots, "startelf": list(elf), "pins": pins_aktiv,
                 "verein": db.get_setting(conn, "own_club", "") or "",
                 "char_gewicht": tactics.CHAR_GEWICHT,
+                "referenz": basis["referenz_status"],
                 "kader": len(kader), "ohne_daten": fehlt, "aus_export": aus_export,
                 "mit_form": len(form), "teams_bekannt": len(teams),
                 "export_positionen": sum(1 for p in kader if p.get("position")),
@@ -1718,9 +1762,11 @@ class Api:
 
         Jetzt: Export-Zeilen, die seit dem letzten Kader-Import eingelesen
         wurden (minus POOL_TOLERANZ_TAGE fuer Scoutinglisten, die man kurz
-        davor importiert hat). `alle` hebt die Zeitgrenze auf. Der RAM bleibt
-        als namenlose Vergleichskohorte fuer die Perzentile – dieselbe wie im
-        Taktikbrett, sonst hiesse "besser als 71" nichts.
+        davor importiert hat). `alle` hebt die Zeitgrenze der SUCHMENGE auf.
+        Die Vergleichsmenge fuer die Perzentile ist immer die Referenz der
+        Basis (_basis, moneyball.REFERENZ_MENGE) – dieselbe wie im
+        Taktikbrett, sonst hiesse "besser als 71" nichts. Seit D22 ist das der
+        aktuelle Export-Stand, auch wenn `alle` aeltere Zeilen sucht.
         """
         eids = frozenset(self._squad_eids(conn))
         stand = None if alle else self._pool_stand(conn)
@@ -1733,21 +1779,18 @@ class Api:
                 and self._repl_cache[0] == key):
             return self._repl_cache[1:]
         roh = [e for e in db.load_export(conn) if e.get("eid")]
-        # ALLE Export-Zeilen anreichern: die Suchmenge sind nur die aktuellen,
-        # die Vergleichsmenge fuer die Perzentile aber ganzer Export + Kohorte
-        # – dieselbe wie im Taktikbrett (siehe dort, Torwart-Kennzahlen).
+        # Eigene Kopien der Export-Zeilen: add_scores schreibt in die Suchmenge,
+        # die Zeilen der Basis bleiben unberuehrt.
         alle = moneyball.enrich([self._export_row_to_player(e) for e in roh], **bz)
         pool = [p for p in alle
                 if not stand or (p.get("imported_at") or "") >= stand]
         ligen = {int(e["eid"]): e.get("league") for e in roh if e.get("league")}
         kader_ids = frozenset(p["id"] for p in pool if int(p["eid"]) in eids)
-        # Die Kohorte aus der Rechengrundlage (_basis) mitbenutzen statt sie ein
-        # zweites Mal anzureichern: dieselben Zeilen mit demselben Bezugsdatum,
-        # rund 200 MB weniger im Speicher. Beide haengen am selben
-        # Fingerabdruck; gelesen wird nur. Ebenso die DNA-Verteilungen –
-        # Export plus Kohorte ist genau die Referenz der Basis.
+        # Vergleichsmenge und Verteilungen aus der Rechengrundlage (_basis):
+        # dieselbe Referenz wie im Brett, am selben Fingerabdruck; gelesen
+        # wird nur.
         basis = self._basis(conn)
-        referenz = alle + basis["referenz"][len(basis["export_rows"]):]
+        referenz = basis["referenz"]
         # Moneyball-Score je Profil fuer die Leistung und ihr Band (D19): die
         # Ersatzsuche sortiert weiter nach Fit und Charakter, zeigt aber
         # Leistung +-95 % und "gleichauf" zum Original. Alle Profile, weil ein
@@ -1808,7 +1851,8 @@ class Api:
     def slot_compare(self, slot_key, player_ids=None):
         """Slot-Vergleich: Stamm, Backup und bis zu drei Kandidaten auf EINER
         Position nebeneinander – gegen dieselbe Referenz wie Brett und
-        Ersatzsuche (ganzer Export + Kohorte).
+        Ersatzsuche (_basis, moneyball.REFERENZ_MENGE). Vergleichen lassen
+        sich alle Export-Zeilen, auch aeltere Importe.
 
         - Stamm = Brett-Elf samt Pins; Backup = bester Kaderspieler auf dem
           Slot, der weder Stamm ist noch anderswo in der Elf steht.
@@ -1833,14 +1877,17 @@ class Api:
         if not brett.get("ok"):
             return brett
         bs = next(s for s in brett["slots"] if s["key"] == slot_key)
-        _, referenz, _ = self._repl_pool(conn)
-        nach_eid = {int(r["eid"]): r for r in referenz
+        # Nachschlagen in ALLEN Export-Zeilen der Basis (nur lesen, kopie()
+        # unten), bewertet gegen die Referenz der Basis mit ihren gecachten
+        # Verteilungen – dieselbe wie Brett und Ersatzsuche.
+        rb = self._basis(conn)
+        referenz = rb["referenz"]
+        nach_eid = {int(r["eid"]): r for r in rb["export_rows"]
                     if r.get("source") == "export" and r.get("eid")}
-        export = db.load_export(conn)
-        teams = tactics.team_strength(export)
-        ligen = {int(e["eid"]): e["league"] for e in export
-                 if e.get("eid") and e.get("league")}
-        dists, basis = tactics.slot_dists(slot, referenz)
+        export = rb["export"]
+        teams = rb["teams"]
+        ligen = rb["ligen"]
+        dists, basis = tactics.slot_dists(slot, referenz, cache=rb["verteilungen"])
         fair, _ = valuemodel.fair_values(export)
 
         def zeile(rolle, r, w, anfrage_id=None, gepinnt=None):
@@ -1928,7 +1975,8 @@ class Api:
         # positionsfremde Kandidaten (Umschulung), deshalb als Zusatzprofil
         profil = tactics.slot_profil(slot)
         if offen:
-            moneyball.add_scores(offen, referenz, ligen, zusatz_profile=(profil,))
+            moneyball.add_scores(offen, referenz, ligen, ref_stats=self._ref_scores(rb),
+                                 zusatz_profile=(profil,))
             self._pl_markieren(conn, offen)
         for anfrage, r in folge:
             if "fehlt" in r:
@@ -1998,6 +2046,15 @@ class Api:
                 "unter_stufen": "gleichauf", "spitzengruppe_p": tactics.SPITZENGRUPPE_P,
                 "spitzengruppe_bezug": "hoechstes score_kal",
                 "min_minutes": tactics.MIN_MINUTES}
+
+    def referenz_status(self):
+        """Umfang der Perzentil-Referenz und der Hinweis "Referenz schmal"
+        (moneyball.referenz_status, D22): zeilen, ligen, top5_fehlen, keeper,
+        schmal, gruende, dazu menge (REFERENZ_MENGE) und stand (Grenze des
+        aktuellen Stands). Dieselbe Angabe steckt als 'referenz' in
+        tactic_board und load_saved."""
+        basis = self._basis(self._db())
+        return dict(basis["referenz_status"], ok=True, stand=basis["stand"])
 
     def rankings(self):
         return [{"title": t, "key": k, "desc": d}

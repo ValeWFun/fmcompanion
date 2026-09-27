@@ -1,7 +1,7 @@
 """Scoutkit – die App-Logik der Kaderplanung, rein lesend nutzbar.
 
 Baut aus einer READ-ONLY-Verbindung zur Datenbank dieselbe Sicht wie das
-Taktikbrett: angereicherte Export-Spieler, Perzentil-Referenz (Export + Kohorte),
+Taktikbrett: angereicherte Export-Spieler, Perzentil-Referenz (REFERENZ_MENGE),
 Positionsverteilungen, eigenes Niveau je Position. Darauf setzen Aufrufer-
 Skripte (Carries, Kaderlücken, Kandidatenlisten) auf.
 
@@ -128,8 +128,12 @@ class Kit:
         self.rows = moneyball.enrich(
             [api._export_row_to_player(e) for e in self.export if e.get("eid")],
             **self.bezug)
-        self.kohorte = moneyball.enrich(db.cohort_load(conn), **self.bezug)
-        self.referenz = self.rows + self.kohorte
+        # Referenz wie in der App (moneyball.REFERENZ_MENGE, seit D22 der
+        # aktuelle Export-Stand ohne RAM-Kohorte). Die Kohorte wird nur
+        # geladen, wenn die Einstellung sie verlangt.
+        self.kohorte = (moneyball.enrich(db.cohort_load(conn), **self.bezug)
+                        if moneyball.referenz_braucht_kohorte() else [])
+        self.referenz = moneyball.referenz_menge(self.rows, self.kohorte, self.stand)
         self.ligen = {int(e["eid"]): e["league"] for e in self.export
                       if e.get("eid") and e.get("league")}
         moneyball.add_scores(self.rows, self.referenz, self.ligen)

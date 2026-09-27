@@ -228,9 +228,24 @@ try:
     geaendert("SQL-Aenderung", s2, s3, ["Planer"])
 
     # ------------------------------------------------ Kohorte (Scan)
+    # Seit D22 (REFERENZ_MENGE "aktuell") steckt die Kohorte nicht mehr in der
+    # Referenz: ein Scan aendert keine Zahl. Mit "export+kohorte" (Stand vor
+    # D22) muss eine neue Kohorte wieder ankommen.
     db.cohort_save(fremd, kohorte(400, faktor=3.0))
     s4 = vergleich("Neue Kohorte")
-    geaendert("Neue Kohorte", s3, s4, ["Brett", "Liga 450"])
+    pruefe("Neue Kohorte: keine Zahl aendert sich (Referenz ohne Kohorte)", s4 == s3,
+           str([n for n in s4 if s4[n] != s3[n]]))
+    moneyball.REFERENZ_MENGE = "export+kohorte"
+    s4k = vergleich("REFERENZ_MENGE export+kohorte")
+    geaendert("Schalter auf export+kohorte", s4, s4k, ["Brett", "Liga 450"])
+    db.cohort_save(fremd, kohorte(400))
+    s4k2 = vergleich("export+kohorte, neue Kohorte")
+    geaendert("export+kohorte: neue Kohorte", s4k, s4k2, ["Brett", "Liga 450"])
+    db.cohort_save(fremd, kohorte(400, faktor=3.0))
+    moneyball.REFERENZ_MENGE = "aktuell"
+    s4b = vergleich("REFERENZ_MENGE zurueck auf aktuell")
+    pruefe("Schalter zurueck: wieder die Zahlen von vorher", s4b == s4,
+           str([n for n in s4b if s4b[n] != s4[n]]))
 
     # ------------------------------------------------ Pins, Kader, min_minutes
     b_vor = mit._basis(mit._db())
@@ -251,6 +266,19 @@ try:
     s7 = vergleich("Bezugsjahr zurueck")
     pruefe("Bezugsjahr zurueck: wieder die Zahlen von vorher", s7 == s6,
            str([n for n in s7 if s7[n] != s6[n]]))
+
+    # ------------------------------------------------ Grenze des aktuellen Stands (D22)
+    # Die Referenz ist der aktuelle Export-Stand; seine Grenze (_pool_stand)
+    # haengt an Einstellungen, die nicht in db.rechenstand stehen.
+    db.set_setting(fremd, "squad_imported_prev", "2026-09-22T12:00:00")
+    db.set_setting(fremd, "squad_imported_at", "2026-09-23T08:00:00")
+    s7s = vergleich("Grenze des aktuellen Stands verschoben")
+    geaendert("Grenze verschoben", s7, s7s, ["Brett", "Liga 450"])
+    db.set_setting(fremd, "squad_imported_prev", "")
+    db.set_setting(fremd, "squad_imported_at", "2026-09-22T11:00:00")
+    s7r = vergleich("Grenze zurueck")
+    pruefe("Grenze zurueck: wieder die Zahlen von vorher", s7r == s7,
+           str([n for n in s7r if s7r[n] != s7[n]]))
 
     # ------------------------------------------------ Konstanten zur Laufzeit
     slot = next(s for s in tactics.FORMATION if s["key"] == "st")
