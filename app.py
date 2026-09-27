@@ -1941,6 +1941,18 @@ class Api:
         db.watchlist_set(self._db(), int(player_id), status or "", note or "")
         return {"ok": True}
 
+    def listen_vergleich(self, eintraege):
+        """Vergleich einer sortierten Liste (Tabelle, Rangliste) mit ihrem
+        Ersten, kalibriert wie im Slot, dazu die Groesse der Spitzengruppe
+        (tactics.listen_vergleich). Die Oberflaeche sortiert und filtert
+        selbst; sie schickt die angezeigte Reihenfolge als
+        [{id, score, minutes, profil}] – die Formel bleibt so an einer Stelle."""
+        if not isinstance(eintraege, list):
+            return {"ok": False, "error": "Liste erwartet."}
+        zeilen = [{"id": e.get("id"), "score": e.get("score"), "minutes": e.get("minutes"),
+                   "profil": e.get("profil")} for e in eintraege if isinstance(e, dict)]
+        return dict(tactics.listen_vergleich(zeilen), ok=True)
+
     def rankings(self):
         return [{"title": t, "key": k, "desc": d}
                 for t, (k, d) in moneyball.RANKINGS.items()]

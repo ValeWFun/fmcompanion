@@ -479,5 +479,70 @@ pruefe("Schalter 'haupt': DNA-Gruppen bitgleich zu vor D19 (Spieler und Referenz
                for p in alt_welt))
 moneyball.REFERENZ_WAHL, moneyball.LISTEN_WAHL = alt_ref, alt_lst
 
+# ------------------------------------------------ G: Listen-Score, Band und Vergleich
+print("== G Listen-Score: Band, Vergleich, Spitzengruppe (Datenanalyst, Listenband) ==")
+import math as _m
+SOLL = {"st": (56.4, 12.7, 10.4, 1385), "off": (57.1, 13.9, 7.8, 1385), "mid": (53.0, 10.7, 6.8, 1444),
+        "iv": (52.2, 9.2, 7.8, 1634), "av": (58.2, 10.1, 6.1, 1490), "tw": (50.0, 21.1, 12.2, 1739)}
+pruefe("Konstanten je Profil nach dem Analysten (mu, tau, SEM_h, M_h)", moneyball.LISTEN_BAND == SOLL)
+
+
+def listen_p(a, b):
+    """Unabhaengig nachgerechnet: p(a besser) nach Nachtrag 4, mu/tau/SEM je Profil."""
+    teile = []
+    for s, mm, pr in (a, b):
+        mu, tau, sh, mh = SOLL[pr]
+        sem2 = (sh * _m.sqrt(mh / mm)) ** 2
+        rel = tau ** 2 / (tau ** 2 + sem2)
+        teile.append((mu + rel * (s - mu), rel * sem2, (sh * _m.sqrt(mh / 1500)) ** 2))
+    (pa, va, fa), (pb, vb, fb) = teile
+    return 0.5 * (1 + _m.erf((pa - pb) / _m.sqrt(va + vb + fa + fb) / _m.sqrt(2)))
+
+
+for pr in SOLL:                                          # je Profil ein Testfall
+    v = tactics.listen_vorsprung((82, 2400, pr), (74, 900, pr))
+    soll = listen_p((82, 2400, pr), (74, 900, pr))
+    pruefe(f"{pr}: 82 (2.400 Min) gegen 74 (900 Min) = {soll:.3f} ({v['vorsprung_stufe']})",
+           abs(v["p_a"] - soll) < 0.0006)
+    mu, tau, sh, mh = SOLL[pr]
+    pruefe(f"{pr}: score_band bei 1.500 Min = 1,96 x SEM_h x sqrt(M_h/1500)",
+           moneyball.score_band(pr, 1500) == round(1.96 * sh * _m.sqrt(mh / 1500), 1))
+pruefe("verschiedene Profile in einer Liste: je eigene Konstanten",
+       abs(tactics.listen_vorsprung((80, 2000, "st"), (70, 1000, "off"))["p_a"]
+           - listen_p((80, 2000, "st"), (70, 1000, "off"))) < 0.0006)
+pruefe("score_band unter 180 Min / ohne Profil: None (duenne Datenbasis)",
+       moneyball.score_band("st", 179) is None and moneyball.score_band(None, 2000) is None)
+pruefe("score_band gedeckelt bei 100", moneyball.score_band("tw", 180) <= 100.0)
+pruefe("Slot-Vergleich unveraendert (Mbeumo/Samu 0,533, Samu/Shpendi 0,861)",
+       tactics.vorsprung("st", 95, 1681, 88, 3001)["p_a"] == 0.533
+       and tactics.vorsprung("st", 88, 3001, 73, 722)["p_a"] == 0.861)
+pruefe("Spielerzeilen tragen score_band zum Listen-Profil",
+       all(p.get("score_band") == moneyball.score_band(p["profil"], p.get("minutes"))
+           for p in dna_welt if p.get("score") is not None))
+liste = [{"id": 1, "score": 90, "minutes": 3000, "profil": "st"},
+         {"id": 2, "score": 88, "minutes": 2500, "profil": "off"},
+         {"id": 3, "score": 84, "minutes": 1200, "profil": "st"},
+         {"id": 4, "score": 70, "minutes": 3000, "profil": "mid"},
+         {"id": 5, "score": 89, "minutes": 150, "profil": "st"}]
+lv = tactics.listen_vergleich(liste)
+erwartet = 1 + sum(1 for e in liste[1:] if e["minutes"] >= 180 and
+                   1 - listen_p((e["score"], e["minutes"], e["profil"]), (90, 3000, "st")) < 0.90)
+pruefe(f"Spitzengruppe = Erster + alle, gegen die er mit P < 90 % vorn liegt ({erwartet})",
+       lv["spitzengruppe"] == erwartet, str(lv["spitzengruppe"]))
+pruefe("der Erste hat keinen Vergleich, duenne Datenbasis zaehlt nicht zur Gruppe",
+       lv["eintraege"][0]["vergleich_erster"] is None and lv["eintraege"][4]["vergleich_erster"]["duenn"])
+pruefe("Erster ohne Aussage (unter 180 Min): keine Spitzengruppe",
+       tactics.listen_vergleich(liste[4:] + liste[:1])["spitzengruppe"] is None)
+pruefe("js_api listen_vergleich liefert dasselbe",
+       app.Api().listen_vergleich(liste)["spitzengruppe"] == lv["spitzengruppe"])
+vorher = app.Api._konstanten()
+alt_lb = moneyball.LISTEN_BAND["st"]
+moneyball.LISTEN_BAND["st"] = (56.5, 12.7, 10.4, 1385)
+pruefe("Rechen-Cache: LISTEN_BAND steckt im Fingerabdruck", app.Api._konstanten() != vorher)
+moneyball.LISTEN_BAND["st"] = alt_lb
+tactics.SPITZENGRUPPE_P = 0.91
+pruefe("Rechen-Cache: SPITZENGRUPPE_P steckt im Fingerabdruck", app.Api._konstanten() != vorher)
+tactics.SPITZENGRUPPE_P = 0.90
+
 print(f"\n{_bestanden} von {_gesamt} Prüfungen bestanden")
 sys.exit(0 if _bestanden == _gesamt else 1)

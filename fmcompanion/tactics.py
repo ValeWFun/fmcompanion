@@ -437,6 +437,7 @@ VORSPRUNG_TAU = {          # wahre Streuung der Leistung je Slot
     "dml": 11.8, "dmr": 11.8, "aml": 14.5, "amc": 14.6, "amr": 15.0, "st": 14.6,
 }
 assert set(VORSPRUNG_TAU) == set(LEISTUNG_SEM), "tau fuer jeden Slot"
+assert moneyball.BAND_MIN_MINUTES == MIN_MINUTES, "duenne Datenbasis ueberall gleich"
 # Stufe nach P_fav = max(p, 1 - p); darunter "gleichauf"
 VORSPRUNG_STUFEN = ((0.975, "sicher"), (0.90, "klar"), (0.70, "leicht"))
 
@@ -444,6 +445,22 @@ VORSPRUNG_STUFEN = ((0.975, "sicher"), (0.90, "klar"), (0.70, "leicht"))
 def _phi(x):
     """Verteilungsfunktion der Standardnormalverteilung."""
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _geschrumpft(wert, sem2, mu, tau2):
+    """Zur Mitte geschrumpfter Wert und seine Restvarianz: post, v."""
+    rel = tau2 / (tau2 + sem2)
+    return mu + rel * (wert - mu), rel * sem2
+
+
+def _vorsprung_aus(post_a, v_a, f2_a, post_b, v_b, f2_b):
+    """Gemeinsamer Kern von Slot- und Listen-Vergleich: p(a besser) =
+    Phi((post_a - post_b) / sqrt(v_a + v_b + SEM_a(M_f)^2 + SEM_b(M_f)^2))."""
+    p = _phi((post_a - post_b) / math.sqrt(v_a + v_b + f2_a + f2_b))
+    fav = max(p, 1.0 - p)
+    stufe = next((name for grenze, name in VORSPRUNG_STUFEN if fav >= grenze), "gleichauf")
+    return {"p_a": round(p, 3), "vorsprung_p": round(fav, 3), "vorsprung_stufe": stufe,
+            "vorn": "a" if p > 0.5 else ("b" if p < 0.5 else None)}
 
 
 def vorsprung(slot_key, l_a, min_a, l_b, min_b):
@@ -458,20 +475,63 @@ def vorsprung(slot_key, l_a, min_a, l_b, min_b):
     if (min_a or 0) < MIN_MINUTES or (min_b or 0) < MIN_MINUTES:
         return None
     tau2 = VORSPRUNG_TAU[slot_key] ** 2
-
-    def geschrumpft(leistung, minuten):
-        s2 = leistung_sem(slot_key, minuten) ** 2
-        rel = tau2 / (tau2 + s2)
-        return VORSPRUNG_MU + rel * (leistung - VORSPRUNG_MU), rel * s2
-
-    post_a, v_a = geschrumpft(l_a, min_a)
-    post_b, v_b = geschrumpft(l_b, min_b)
     s_f2 = leistung_sem(slot_key, VORSPRUNG_M_F) ** 2
-    p = _phi((post_a - post_b) / math.sqrt(v_a + v_b + 2 * s_f2))
-    fav = max(p, 1.0 - p)
-    stufe = next((name for grenze, name in VORSPRUNG_STUFEN if fav >= grenze), "gleichauf")
-    return {"p_a": round(p, 3), "vorsprung_p": round(fav, 3), "vorsprung_stufe": stufe,
-            "vorn": "a" if p > 0.5 else ("b" if p < 0.5 else None)}
+    post_a, v_a = _geschrumpft(l_a, leistung_sem(slot_key, min_a) ** 2, VORSPRUNG_MU, tau2)
+    post_b, v_b = _geschrumpft(l_b, leistung_sem(slot_key, min_b) ** 2, VORSPRUNG_MU, tau2)
+    return _vorsprung_aus(post_a, v_a, s_f2, post_b, v_b, s_f2)
+
+
+def listen_vorsprung(a, b):
+    """Kalibrierter Vergleich zweier LISTEN-Scores (Tabelle, Ranglisten).
+
+    a/b: (score, minuten, profil des Listen-Scores). Dieselbe Formel wie im
+    Slot, aber mit den Konstanten des jeweiligen Profils (moneyball.LISTEN_BAND:
+    mu je Profil, tau, SEM_h, M_h) – zwei Spieler einer Liste koennen
+    verschiedene Profile haben. -> wie vorsprung(), oder None ohne Aussage."""
+    teile = []
+    for score, minuten, profil in (a, b):
+        if score is None or (minuten or 0) < MIN_MINUTES or profil not in moneyball.LISTEN_BAND:
+            return None
+        mu, tau, _sem_h, _m_h = moneyball.LISTEN_BAND[profil]
+        post, v = _geschrumpft(score, moneyball.score_sem(profil, minuten) ** 2, mu, tau * tau)
+        teile += [post, v, moneyball.score_sem(profil, VORSPRUNG_M_F) ** 2]
+    return _vorsprung_aus(*teile)
+
+
+# Spitzengruppe einer sortierten Liste: alle, gegen die der Erste mit P unter
+# diesem Wert vorn liegt. Einheitlich fuer alle Profile (Entscheidung Head
+# Scout, 27.09.2026); beim IV ist die Formel leicht zu optimistisch, das
+# bleibt unter einer Stufe.
+SPITZENGRUPPE_P = 0.90
+
+
+def listen_vergleich(eintraege):
+    """Sortierte Liste -> Vergleich jedes Eintrags mit dem Ersten und die
+    Groesse der Spitzengruppe.
+
+    eintraege: [{"id", "score", "minutes", "profil"}] in Anzeige-Reihenfolge.
+    -> {"spitzengruppe": n oder None (Erster ohne Aussage), "eintraege":
+    [{"id", "vergleich_erster": vergleich_feld-Objekt oder None beim Ersten}]}.
+    Wer keine Aussage erlaubt (duenne Datenbasis), zaehlt nicht zur Gruppe."""
+    if not eintraege:
+        return {"spitzengruppe": None, "eintraege": []}
+    erster = eintraege[0]
+    a = (erster.get("score"), erster.get("minutes"), erster.get("profil"))
+    aus, gruppe = [{"id": erster.get("id"), "vergleich_erster": None}], 1
+    erster_ok = listen_vorsprung(a, a) is not None
+    for e in eintraege[1:]:
+        v = listen_vorsprung((e.get("score"), e.get("minutes"), e.get("profil")), a)
+        if v is None:
+            feld = {"vorsprung_p": None, "vorsprung_stufe": None, "vorn": None,
+                    "p_besser": None, "duenn": True}
+        else:
+            feld = {"vorsprung_p": v["vorsprung_p"], "vorsprung_stufe": v["vorsprung_stufe"],
+                    "vorn": e.get("id") if v["vorn"] == "a" else (erster.get("id") if v["vorn"] == "b" else None),
+                    "p_besser": v["p_a"], "duenn": False}
+            if 1.0 - v["p_a"] < SPITZENGRUPPE_P:       # Erster liegt mit P < 90 % vorn
+                gruppe += 1
+        aus.append({"id": e.get("id"), "vergleich_erster": feld})
+    return {"spitzengruppe": gruppe if erster_ok else None, "eintraege": aus}
 
 
 def vergleich_feld(slot_key, selbst, bezug):
