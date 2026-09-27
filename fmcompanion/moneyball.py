@@ -662,6 +662,101 @@ REFERENZ_WAHL = "gruppe"
 #             und Slot zeigen fuer dieselbe Rolle dieselbe Zahl.
 #   "haupt":  das Hauptprofil (Stand vor D19)
 LISTEN_WAHL = "bester"
+# Aus welchen Zeilen werden die Perzentil-Verteilungen gebildet (Profil-Scores,
+# Quoten-Prior, Altersbaender, Slot-Verteilungen, Vereins-DNA)? EINE Stelle
+# (D22, 27.09.2026, Datenanalyst: kohorte_effekt, referenz_empfindlichkeit):
+#   "aktuell":        nur Export-Zeilen des aktuellen Stands, also seit
+#                     app.Api._pool_stand eingelesen (wie scoutkit.aktuell).
+#                     RAM-Zeilen und aeltere Importe werden weiter bewertet,
+#                     aber GEGEN diese Referenz, nicht IN ihr.
+#   "export":         alle Export-Zeilen samt aelterer Importe (+0,9 Punkte)
+#   "export+kohorte": alle Export-Zeilen plus die RAM-Kohorte – Stand vor D22.
+#                     Die 49.934 Kohorten-Zeilen, viele aus schwachen Ligen,
+#                     hoben die Skala um 6–15 Punkte (IV +14,8, ST +14,4) bei
+#                     fast gleicher Rangfolge (Spearman 0,98–1,00). LEISTUNG_SEM,
+#                     VORSPRUNG_TAU/MU und LISTEN_BAND sind aber auf der
+#                     Export-Skala geschaetzt: die Schrumpfung zog zu einem zu
+#                     niedrigen mu, die Baender waren ~10 % zu breit.
+REFERENZ_MENGE = "aktuell"
+REFERENZ_MENGEN = ("aktuell", "export", "export+kohorte")
+assert REFERENZ_MENGE in REFERENZ_MENGEN
+
+
+def referenz_braucht_kohorte():
+    """Laedt die aktuelle REFERENZ_MENGE die RAM-Kohorte? Ohne sie bleiben
+    ~50.000 Zeilen ungelesen."""
+    return REFERENZ_MENGE == "export+kohorte"
+
+
+def referenz_menge(export_rows, kohorte=(), stand=None):
+    """Zeilen der Perzentil-Referenz nach REFERENZ_MENGE -> Liste.
+
+    export_rows: angereicherte Export-Zeilen (mit imported_at), kohorte: die
+    angereicherte RAM-Kohorte (nur fuer "export+kohorte" noetig), stand: Grenze
+    des aktuellen Stands (app.Api._pool_stand, None = keine Grenze). Die
+    Zeilen werden nicht kopiert – wer sie veraendert, veraendert die Referenz.
+    """
+    if REFERENZ_MENGE == "aktuell":
+        grenze = stand or ""
+        return [r for r in export_rows if (r.get("imported_at") or "") >= grenze]
+    if REFERENZ_MENGE == "export":
+        return list(export_rows)
+    if REFERENZ_MENGE == "export+kohorte":
+        return list(export_rows) + list(kohorte)
+    raise ValueError(f"Unbekannte REFERENZ_MENGE: {REFERENZ_MENGE!r}")
+
+
+# Hinweis "Referenz schmal" (D22, Datenanalyst, referenz_empfindlichkeit):
+# Die Skala haengt an der Zusammensetzung des aktuellen Stands. Eine fehlende
+# Listengruppe verschiebt das Niveau um 1,5–2 Punkte, nur die Top 5 um −8;
+# die Rangfolge bleibt robust (Spearman 0,99–1,00). Unter einer dieser Grenzen
+# ist das Niveau nicht mehr mit dem gewohnten vergleichbar. Stand 27.09.2026:
+# 1.471 Zeilen, 12 Ligen, 66 Keeper – Hinweis aus.
+# Gezaehlt wird eine Liga erst ab REFERENZ_LIGA_MIN_ZEILEN Spielern (Einzelne
+# aus der League One oder MLS machen keine Liga in der Referenz), ein Keeper
+# nur mit Detailstatistik (xga): ohne sie hat er keinen Torwart-Score.
+REFERENZ_MIN_ZEILEN = 1000
+REFERENZ_MIN_LIGEN = 7
+REFERENZ_LIGA_MIN_ZEILEN = 30
+REFERENZ_TOP5 = ("Premier League", "Spaniens First Division", "Bundesliga",
+                 "Serie A", "Ligue 1 Uber Eats")
+REFERENZ_MIN_KEEPER = 40
+REFERENZ_KEEPER_MIN_MINUTEN = 900
+
+
+def referenz_status(referenz, leagues=None):
+    """Umfang der Perzentil-Referenz und der Hinweis "Referenz schmal" -> dict.
+
+    zeilen, ligen (Ligen ab REFERENZ_LIGA_MIN_ZEILEN Spielern), top5_fehlen
+    (Liste, gleiche Schwelle), keeper (Torhueter mit Detailstatistik ab
+    REFERENZ_KEEPER_MIN_MINUTEN), schmal (bool) und gruende (Texte fuer die
+    Oberflaeche, leer wenn nicht schmal)."""
+    leagues = leagues or {}
+    je_liga = {}
+    for r in referenz:
+        lg = leagues.get(int(r["eid"])) if r.get("eid") else None
+        if lg:
+            je_liga[lg] = je_liga.get(lg, 0) + 1
+    ligen = {lg for lg, n in je_liga.items() if n >= REFERENZ_LIGA_MIN_ZEILEN}
+    keeper = sum(1 for r in referenz
+                 if r.get("is_gk") and r.get("xga") is not None
+                 and (r.get("minutes") or 0) >= REFERENZ_KEEPER_MIN_MINUTEN)
+    top5_fehlen = [lg for lg in REFERENZ_TOP5 if lg not in ligen]
+    gruende = []
+    if len(referenz) < REFERENZ_MIN_ZEILEN:
+        gruende.append(f"nur {len(referenz)} Spieler im aktuellen Stand "
+                       f"(mindestens {REFERENZ_MIN_ZEILEN})")
+    if len(ligen) < REFERENZ_MIN_LIGEN:
+        gruende.append(f"nur {len(ligen)} Ligen mit mindestens {REFERENZ_LIGA_MIN_ZEILEN} "
+                       f"Spielern (mindestens {REFERENZ_MIN_LIGEN})")
+    if top5_fehlen:
+        gruende.append("zu wenig oder keine Spieler aus: " + ", ".join(top5_fehlen))
+    if keeper < REFERENZ_MIN_KEEPER:
+        gruende.append(f"nur {keeper} Torhüter mit Detailstatistik ab "
+                       f"{REFERENZ_KEEPER_MIN_MINUTEN} Minuten (mindestens {REFERENZ_MIN_KEEPER})")
+    return {"menge": REFERENZ_MENGE, "zeilen": len(referenz), "ligen": len(ligen),
+            "top5_fehlen": top5_fehlen, "keeper": keeper,
+            "schmal": bool(gruende), "gruende": gruende}
 
 
 # Band und Vergleich des LISTEN-Scores, je Profil des Listen-Scores.

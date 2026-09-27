@@ -11,6 +11,8 @@ den Score SEINES Profils. Geprueft wird:
 - Brett, Auto-Elf und Ligavergleich rechnen mit dem Slot-Score
 - die Schalter REFERENZ_WAHL und LISTEN_WAHL, das Zusatzprofil fuer
   positionsfremde Kandidaten, der Rechen-Cache-Fingerabdruck, die js_api-Felder
+- D22: die Perzentil-Referenz ist der aktuelle Export-Stand ohne RAM-Kohorte
+  (REFERENZ_MENGE), der Hinweis "Referenz schmal" (referenz_status)
 
 Ausfuehren wie die anderen Skripte, kein pytest:
     .venv\\Scripts\\python.exe test_profilwahl.py
@@ -578,9 +580,9 @@ erwartet = 1 + sum(1 for e in mit_daten if e is not bez and
                                 (bez["score"], bez["minutes"], bez["profil"])) < 0.70)
 pruefe(f"Spitzengruppe = Bezug + alle, die mit ihm gleichauf sind (P < 70 %): {erwartet}",
        lv["spitzengruppe"] == erwartet and 1 < erwartet < len(liste), str(lv["spitzengruppe"]))
-zeile = {e["id"]: e for e in lv["eintraege"]}
+je_id = {e["id"]: e for e in lv["eintraege"]}
 pruefe("der Bezug hat keinen Vergleich, duenne Datenbasis zaehlt nicht zur Gruppe",
-       zeile[2]["vergleich_bezug"] is None and zeile[6]["vergleich_bezug"]["duenn"] is True)
+       je_id[2]["vergleich_bezug"] is None and je_id[6]["vergleich_bezug"]["duenn"] is True)
 pruefe("Reihenfolge der Eingabe egal",
        tactics.listen_vergleich(list(reversed(liste)))["spitzengruppe"] == lv["spitzengruppe"])
 pruefe("niemand mit Aussage: keine Spitzengruppe",
@@ -612,6 +614,119 @@ moneyball.LISTEN_BAND["st"] = alt_lb
 tactics.SPITZENGRUPPE_P = 0.71
 pruefe("Rechen-Cache: SPITZENGRUPPE_P steckt im Fingerabdruck", app.Api._konstanten() != vorher)
 tactics.SPITZENGRUPPE_P = 0.70
+
+# ------------------------------------------------ H: Referenz ohne Kohorte (D22)
+print("== H Perzentil-Referenz: aktueller Export-Stand, ohne RAM-Kohorte (D22) ==")
+pruefe("Standard: REFERENZ_MENGE 'aktuell', Kohorte wird nicht geladen",
+       moneyball.REFERENZ_MENGE == "aktuell" and not moneyball.referenz_braucht_kohorte())
+alt_r = {"eid": 1, "imported_at": "2026-09-01T10:00:00"}
+neu_r = {"eid": 2, "imported_at": "2026-09-26T10:00:00"}
+koh_r = {"id": 900001}
+menge = lambda stand: moneyball.referenz_menge([alt_r, neu_r], [koh_r], stand)
+pruefe("aktuell: nur Zeilen seit der Grenze, ohne Grenze alle Export-Zeilen",
+       menge("2026-09-20T00:00:00") == [neu_r] and menge(None) == [alt_r, neu_r])
+moneyball.REFERENZ_MENGE = "export"
+pruefe("export: alle Export-Zeilen, keine Kohorte", menge("2026-09-20T00:00:00") == [alt_r, neu_r])
+moneyball.REFERENZ_MENGE = "export+kohorte"
+pruefe("export+kohorte: Stand vor D22", menge("2026-09-20T00:00:00") == [alt_r, neu_r, koh_r]
+       and moneyball.referenz_braucht_kohorte())
+moneyball.REFERENZ_MENGE = "gibt es nicht"
+try:
+    menge(None)
+    pruefe("unbekannte REFERENZ_MENGE -> ValueError", False)
+except ValueError:
+    pruefe("unbekannte REFERENZ_MENGE -> ValueError", True)
+moneyball.REFERENZ_MENGE = "aktuell"
+
+LIGEN7 = list(moneyball.REFERENZ_TOP5) + ["Eredivisie", "Portugals Premier League"]
+
+
+def ref_menge(n=1000, ligen=LIGEN7, keeper=40):
+    rows = [{"eid": i, "minutes": 1000 if i < keeper else 500, "is_gk": i < keeper,
+             "xga": 30.0 if i < keeper else None} for i in range(n)]
+    return rows, {i: ligen[i % len(ligen)] for i in range(n)}
+
+
+st = moneyball.referenz_status(*ref_menge())
+pruefe("Referenz an allen Grenzen: nicht schmal",
+       not st["schmal"] and not st["gruende"] and st["zeilen"] == 1000 and st["ligen"] == 7
+       and st["keeper"] == 40 and st["top5_fehlen"] == [], str(st))
+for titel, args in (("999 Zeilen", dict(n=999)), ("6 Ligen", dict(ligen=LIGEN7[:6] + LIGEN7[:1])),
+                    ("Serie A fehlt", dict(ligen=[lg for lg in LIGEN7 if lg != "Serie A"]
+                                           + ["Eliteserien"])),
+                    ("39 Keeper ab 900 Min", dict(keeper=39))):
+    st = moneyball.referenz_status(*ref_menge(**args))
+    pruefe(f"Referenz schmal: {titel}", st["schmal"] and len(st["gruende"]) == 1, str(st["gruende"]))
+st = moneyball.referenz_status(*ref_menge(ligen=[lg for lg in LIGEN7 if lg != "Serie A"]
+                                           + ["Eliteserien"]))
+pruefe("fehlende Top-5-Liga wird genannt",
+       st["top5_fehlen"] == ["Serie A"] and "Serie A" in st["gruende"][0], str(st["gruende"]))
+rows, lg = ref_menge()
+for r in rows[:5]:
+    lg[r["eid"]] = "Sky Bet League One"           # 5 Einzelne machen keine Liga
+rows[0]["xga"] = None                               # Keeper ohne Detailstatistik zaehlt nicht
+st = moneyball.referenz_status(rows, lg)
+pruefe("Liga erst ab REFERENZ_LIGA_MIN_ZEILEN, Keeper nur mit Detailstatistik",
+       st["ligen"] == 7 and st["keeper"] == 39 and st["schmal"], str(st))
+
+ordner = tempfile.mkdtemp(prefix="test_referenz_")
+try:
+    conn = db.connect(os.path.join(ordner, "test.db"))
+    db._init_cohort(conn)
+    aktuell = [zeile(7000 + i, pos, club=("Test FC" if i < 30 else f"Verein {i % 12}"))
+               for i, pos in enumerate(POSITIONEN * 12)]
+    alt = [zeile(8000 + i, pos) for i, pos in enumerate(POSITIONEN * 2)]
+    db.save_export(conn, alt, None, datei="alt", ts="2026-09-01T10:00:00")
+    db.save_export(conn, aktuell, None, datei="syn", ts="2026-09-26T10:00:00")
+    koh = []
+    for i in range(300):
+        p = als_spieler([zeile(950000 + i, POSITIONEN[i % len(POSITIONEN)])])[0]
+        p.update(id=950000 + i, eid=None, is_gk=0.0, pos_mask=float(1 << 14),
+                 birth_year=2000.0, birth_day=100.0)
+        koh.append(p)
+    db.cohort_save(conn, koh)
+    kader = [e["eid"] for e in aktuell if e["club"] == "Test FC"]
+    db.set_setting(conn, "squad_eids", json.dumps(kader))
+    db.set_setting(conn, "own_club", "Test FC")
+    db.set_setting(conn, "squad_imported_at", "2026-09-26T11:00:00")
+    api = app.Api()
+    api._local.conn = conn
+    b = api._basis(conn)
+    pruefe("Basis-Referenz = genau der aktuelle Export-Stand (keine Kohorte, kein alter Import)",
+           sorted(int(r["eid"]) for r in b["referenz"]) == sorted(e["eid"] for e in aktuell)
+           and len(b["export_rows"]) == len(aktuell) + len(alt),
+           f"{len(b['referenz'])} Zeilen")
+    tb = api.tactic_board()
+    tw = next(sl for sl in tb["slots"] if sl["key"] == "tw")
+    pruefe("TW-Slot hat ohne Kohorte einen Torwart mit Fit und Score",
+           tw.get("startelf_id") is not None
+           and any(k["fit"] is not None and k.get("mb") is not None for k in tw["kandidaten"]))
+    pruefe("Brett und js_api nennen den Umfang der Referenz",
+           tb["referenz"]["zeilen"] == len(aktuell) and tb["referenz"]["schmal"] is True
+           and api.referenz_status()["stand"] == api._pool_stand(conn))
+    ram = als_spieler([zeile(0, "ST (Z)")])[0]
+    ram.update(eid=None, source="ram")
+    n_ref = len(b["referenz"])
+    api._add_scores([ram])
+    pruefe("RAM-Zeile wird gegen die Referenz bewertet, geht aber nicht in sie ein",
+           ram.get("score") is not None and len(api._basis(conn)["referenz"]) == n_ref
+           and api._basis(conn) is b)
+    alt_zeile = next(p for p in api._repl_pool(conn, alle=True)[0] if int(p["eid"]) == 8000)
+    pruefe("Ersatzsuche ueber alle Importe: aeltere Zeilen bewertet, Referenz bleibt der Stand",
+           alt_zeile.get("score_je_profil") and api._repl_pool(conn, alle=True)[1] is b["referenz"])
+    ls = api.load_saved()
+    pruefe("load_saved nennt den Umfang der Referenz", ls["referenz"] == b["referenz_status"])
+    vor = {int(e["id"]): e["mb"] for sl in tb["slots"] for e in sl["kandidaten"]}
+    moneyball.REFERENZ_MENGE = "export+kohorte"
+    tb_k = api.tactic_board()
+    nach = {int(e["id"]): e["mb"] for sl in tb_k["slots"] for e in sl["kandidaten"]}
+    pruefe("Schalter export+kohorte: Kohorte in der Referenz, andere Scores",
+           len(api._basis(conn)["referenz"]) == len(aktuell) + len(alt) + len(koh) and vor != nach)
+    moneyball.REFERENZ_MENGE = "aktuell"
+    conn.close()
+finally:
+    moneyball.REFERENZ_MENGE = "aktuell"
+    shutil.rmtree(ordner, ignore_errors=True)
 
 print(f"\n{_bestanden} von {_gesamt} Prüfungen bestanden")
 sys.exit(0 if _bestanden == _gesamt else 1)
