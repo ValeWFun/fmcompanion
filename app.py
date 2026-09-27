@@ -487,6 +487,7 @@ class Api:
             dedup.append(p)
         players = dedup
         self._add_scores(players, reference=players)
+        self._listen_felder(conn, players)
         # Die DNA-Aufschluesselung (7 Dicts je Spieler) machte 46 % eines
         # 26-MB-Pakets aus, das bei jedem Laden ueber die pywebview-Bruecke
         # geht und dort als JSON geparst wird – die Tabelle zeigt davon nur
@@ -520,6 +521,34 @@ class Api:
                 "snapshots": db.snapshot_count(conn), "exports": len(exp),
                 "aus_export": aus_export,
                 "value_model": fair_model.status() if fair_model else None}
+
+    def _listen_felder(self, conn, players):
+        """Felder der Spielerliste fuer Positionsreiter und Spitzengruppe (D19).
+
+        aktuell: die Statistik der Zeile stammt aus einem Export-Import seit
+        _pool_stand – dieselbe Menge wie scoutkit.aktuell. Nur solche Zeilen
+        bekommen in der Liste Gruppe, Bezug, Spanne und erwartete Staerke.
+        Reine RAM-Zeilen und aeltere Importe bleiben stehen, aber ohne
+        Aussage. Eine RAM+Export-Zeile, bei der die RAM-Zahlen gewinnen
+        (stat_quelle nicht "export"), ist nicht aktuell.
+
+        profile_erlaubt: moneyball.erlaubte_profile als Liste in
+        PROFIL_REIHENFOLGE; danach filtern die Positionsreiter. Die Schluessel
+        von score_je_profil reichen dafuer nicht, sie enthalten zusaetzlich das
+        Hauptprofil aus der Speichermaske (Saka: mid und off, erlaubt nur off).
+        """
+        grenze = self._pool_stand(conn) or ""
+        for p in players:
+            if p.get("source") == "export":
+                stand = p.get("imported_at")
+            elif p.get("stat_quelle") == "export":
+                stand = p.get("stat_stand")
+            else:
+                stand = None
+            p["aktuell"] = (p.get("source") == "export"
+                            or p.get("stat_quelle") == "export") and (stand or "") >= grenze
+            erlaubt = moneyball.erlaubte_profile(p)
+            p["profile_erlaubt"] = [pr for pr in moneyball.PROFIL_REIHENFOLGE if pr in erlaubt]
 
     def value_history(self, eid):
         """Marktwert-Verlauf eines Spielers ueber die Export-Importe."""
