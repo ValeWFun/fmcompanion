@@ -744,7 +744,8 @@ try:
     pruefe("Ersatzsuche ueber alle Importe: aeltere Zeilen bewertet, Referenz bleibt der Stand",
            alt_zeile.get("score_je_profil") and api._repl_pool(conn, alle=True)[1] is b["referenz"])
     ls = api.load_saved()
-    pruefe("load_saved nennt den Umfang der Referenz", ls["referenz"] == b["referenz_status"])
+    pruefe("load_saved nennt den Umfang der Referenz samt Grenze",
+           ls["referenz"] == dict(b["referenz_status"], stand=b["stand"]))
 
     print("== H Tabellenzeile: aktueller Export gewinnt; Tabelle = Brett = Scoutkit ==")
     je_eid = {}

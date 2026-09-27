@@ -208,6 +208,31 @@ try:
     nan = [(p.get("name"), k) for p in zeilen for k, v in p.items()
            if isinstance(v, float) and not math.isfinite(v)]
     pruefe("keine NaN/Infinity in Tabellenzeilen", not nan, str(nan[:3]))
+
+    print("== Feldliste der Tabelle (D23) ==")
+    felder = set(app.Api.TABELLEN_FELDER)
+    rang = ({k for k, _ in moneyball.RANKINGS.values()}
+            | {k for k, _ in moneyball.EXPORT_RANKINGS.values()})
+    pruefe("TABELLEN_FELDER ohne Doppelte", len(felder) == len(app.Api.TABELLEN_FELDER))
+    pruefe("jede Rangliste sortiert nach einem gelieferten Feld",
+           rang <= app.Api._tabellen_schluessel())
+    for modus in ("last", "pool"):
+        zeilen = (antworten.get(f"load_saved {modus}") or {}).get("players") or []
+        fremd_felder = {k for p in zeilen for k in p} - app.Api._tabellen_schluessel()
+        pruefe(f"load_saved {modus}: nur Felder aus der Feldliste", zeilen and not fremd_felder,
+               str(sorted(fremd_felder)[:8]))
+    ls = antworten.get("load_saved last") or {}
+    pruefe("Feldliste laesst nichts weg, was die Zeile hat und die Tabelle liest",
+           all(k in p for p in ls.get("players", []) for k in ("score", "aktuell", "profile_erlaubt",
+                                                                  "pos_label", "score_je_profil")))
+    pruefe("load_saved: referenz mit Grenze des aktuellen Stands, snapshot_stand gesetzt",
+           ls.get("referenz", {}).get("stand") == api._pool_stand(conn)
+           and ls.get("snapshot_stand") == db.latest_snapshot_at(conn) is not None
+           and (antworten.get("tactic_board") or {}).get("referenz", {}).get("stand")
+           == api._pool_stand(conn))
+    zwei = api.load_saved("last")
+    pruefe("die Feldliste arbeitet auf Kopien: zweiter Aufruf liefert dasselbe",
+           js(zwei["players"]) == js(ls["players"]))
     conn.close()
 finally:
     shutil.rmtree(ordner, ignore_errors=True)

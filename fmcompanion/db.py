@@ -580,6 +580,12 @@ def latest_snapshot_id(conn):
     return row["id"] if row else None
 
 
+def latest_snapshot_at(conn):
+    """Zeitpunkt (taken_at) des neuesten Snapshots, oder None."""
+    row = conn.execute("SELECT taken_at FROM snapshots ORDER BY id DESC LIMIT 1").fetchone()
+    return row["taken_at"] if row else None
+
+
 def geburtsdaten(conn):
     """{eid: (birth_year, birth_day)} aus dem neuesten Snapshot.
 
