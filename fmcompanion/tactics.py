@@ -15,100 +15,11 @@ import re
 
 from . import moneyball
 
-# ---------------------------------------------------------------- Positionen
-# Gruppencodes, in die BEIDE Quellen uebersetzt werden: die Positionsmaske aus
-# dem Speicher (nur GESPIELTE Positionen) und der Positionsstring aus dem
-# FM-Export (die echte Positionskompetenz, deutlich verlaesslicher).
-GROUPS = ("tw", "iv", "rv", "lv", "dm", "zm", "mr", "ml", "omz", "omr", "oml", "st")
-
-# Speicher-Bitmaske -> Gruppen. Bit-Bedeutung per RE ermittelt (siehe Projekt-
-# notizen). Links/rechts ist dort nur bei den Aussenverteidigern sauber
-# getrennt; Fluegel (Bit 11) und OM (Bit 12/13) kennen keine Seite.
-BIT_GROUPS = {
-    0: ("tw",), 1: ("rv", "lv"), 2: ("rv",), 3: ("lv",), 4: ("iv",),
-    5: ("rv", "lv"), 6: ("dm",), 7: ("dm",), 8: ("mr", "ml"), 9: ("zm",),
-    10: ("zm",), 11: ("mr", "ml", "omr", "oml"), 12: ("omz",),
-    13: ("omz",), 14: ("st",), 15: ("st",),
-}
-
-
-def groups_from_mask(mask):
-    out = set()
-    for bit, gs in BIT_GROUPS.items():
-        if int(mask or 0) & (1 << bit):
-            out.update(gs)
-    return out
-
-
-def groups_from_position(text):
-    """FM-Positionsstring -> Gruppen, z.B. 'OM (RL), ST (Z)' -> {omr, oml, st}.
-    Das ist die AUSSAGEKRAEFTIGERE Quelle: sie nennt alle Positionen, die der
-    Spieler spielen kann, waehrend die Speichermaske nur zeigt, wo er zuletzt
-    tatsaechlich stand.
-
-    Mehrere Koepfe mit SCHRAEGSTRICH teilen sich die Seitenangabe in der
-    Klammer: 'M/OM (R)' heisst rechtes Mittelfeld UND rechtes Offensivmittel-
-    feld. Ohne die Aufteilung passte kein Zweig und der Spieler kam ohne
-    Gruppe zurueck (gleicher Fehler wie in moneyball.pos_mask_from_string).
-    """
-    out = set()
-    for teil in (text or "").split(","):
-        t = teil.strip()
-        if not t:
-            continue
-        koepfe = re.split(r"[ (]", t)[0].upper()
-        m = re.search(r"\(([^)]*)\)", t)
-        seiten = (m.group(1) if m else "").upper()
-        R, L, Z = "R" in seiten, "L" in seiten, "Z" in seiten
-        for kopf in koepfe.split("/"):
-            if kopf == "TW":
-                out.add("tw")
-            elif kopf in ("V", "FV"):
-                if Z or (kopf == "V" and not seiten):
-                    out.add("iv")
-                if R or kopf == "FV" and not seiten:
-                    out.add("rv")
-                if L:
-                    out.add("lv")
-            elif kopf == "DM":
-                out.add("dm")
-            elif kopf == "M":
-                if Z or not seiten:
-                    out.add("zm")
-                if R:
-                    out.add("mr")
-                if L:
-                    out.add("ml")
-            elif kopf == "OM":
-                if Z or not seiten:
-                    out.add("omz")
-                if R:
-                    out.add("omr")
-                if L:
-                    out.add("oml")
-            elif kopf == "ST":
-                out.add("st")
-    return out
-
-
-def player_groups(p):
-    """Positionsgruppen eines Spielers. Export schlaegt Speichermaske.
-
-    Das Ergebnis wird am Spieler-Dict gemerkt (`_gruppen`). Grund: slot_dists()
-    laeuft je Position einmal ueber die GANZE Vergleichsmenge und ruft dabei
-    eligible() -> player_groups() auf. Bei elf Positionen und ~47.000 Spielern
-    sind das 515.000 Aufrufe pro Taktikbrett, die alle dasselbe ausrechnen –
-    gemessen 4,2 der 10 Sekunden. Der Unterstrich haelt den Schluessel aus der
-    pywebview-Spiegelung heraus.
-    """
-    gemerkt = p.get("_gruppen")
-    if gemerkt is not None:
-        return gemerkt
-    g = groups_from_position(p.get("position"))
-    ergebnis = (g, "export") if g else (
-        (lambda m: (m, "ram" if m else "unbekannt"))(groups_from_mask(p.get("pos_mask"))))
-    p["_gruppen"] = ergebnis
-    return ergebnis
+# Positionsgruppen (GROUPS, BIT_GROUPS, groups_from_mask, groups_from_position,
+# player_groups) stehen seit D19 in positionen.py – moneyball braucht sie
+# ebenfalls. Hier re-exportiert, damit tactics.player_groups usw. bleiben.
+from .positionen import (GROUPS, BIT_GROUPS, groups_from_mask,  # noqa: F401
+                         groups_from_position, player_groups)
 
 
 # ------------------------------------------------------------- Umschulung
@@ -443,7 +354,80 @@ FORMATION = [
     },
 ]
 
+
+def slot_profil(slot):
+    """Score-Profil eines Slots (D19): ueber moneyball.PROFIL_VON_GRUPPE aus
+    seinen Gruppen. Der ST-Slot bewertet damit jeden Kandidaten als Stuermer,
+    AML/AMR als Fluegel, auch wenn dessen defensivste Gruppe eine andere ist."""
+    return moneyball.PROFIL_VON_GRUPPE[slot["gruppen"][0]]
+
+
+# Jeder Slot muss GENAU ein Profil haben – sonst waere "der Score des Slots"
+# nicht eindeutig. Lieber beim Import auffliegen.
+for _sl in FORMATION:
+    _pr = {moneyball.PROFIL_VON_GRUPPE[g] for g in _sl["gruppen"]}
+    assert len(_pr) == 1, f"Slot {_sl['key']}: mehrere Profile {_pr}"
+
 MIN_MINUTES = 180          # darunter sind /90-Raten Rauschen
+
+# ------------------------------------------------------ Unsicherheitsbaender
+# Messfehler der Leistung sqrt(Fit x Score) im Slot-Profil, je Slot: SEM_h =
+# SD(L1 - L2) / sqrt(2) ueber zwei Halbserien, M_h = mittlere Minuten je
+# Halbserie. Quelle: Datenanalyst, Auftrag 5, Nachtrag C2, 27.09.2026
+# (D19-Einstellung: Slot-Profil, Referenz "alle mit der Gruppe", TW wie
+# heute). Die rechten Slots uebernehmen die Werte der linken.
+# Slot -> (SEM_h, M_h)
+LEISTUNG_SEM = {
+    "tw": (11.1, 1739),
+    "lv": (5.7, 1539), "rv": (5.7, 1539),
+    "ivl": (6.6, 1602), "ivr": (6.6, 1602),
+    "dml": (5.8, 1457), "dmr": (5.8, 1457),
+    "aml": (7.0, 1380), "amc": (7.3, 1389), "amr": (6.8, 1392),
+    "st": (9.8, 1378),
+}
+Z95 = 1.96                 # zweiseitiges 95-%-Band
+assert set(LEISTUNG_SEM) == {s["key"] for s in FORMATION}, "Band fuer jeden Slot"
+
+
+def leistung_sem(slot_key, minuten):
+    """Messfehler der Leistung bei `minuten` Minuten: SEM_h x sqrt(M_h / M).
+    None ohne Minuten."""
+    if not minuten or float(minuten) <= 0:
+        return None
+    sem_h, m_h = LEISTUNG_SEM[slot_key]
+    return sem_h * (m_h / float(minuten)) ** 0.5
+
+
+def leistung_band(slot_key, minuten):
+    """Band +-95 % der Leistung in Punkten, auf die Skala gedeckelt (hoechstens
+    100): beim ST sind es mit 180 Minuten +-53, mit 900 +-24, mit 3000 +-13.
+    None ohne Minuten."""
+    sem = leistung_sem(slot_key, minuten)
+    return None if sem is None else round(min(100.0, Z95 * sem), 1)
+
+
+def band_felder(slot_key, leistung, minuten):
+    """js_api-Felder einer Slot-Bewertung: leistung, leistung_band (+- Punkte)
+    und das Intervall leistung_von/leistung_bis, auf 0-100 begrenzt."""
+    b = leistung_band(slot_key, minuten)
+    ok = b is not None and leistung is not None
+    return {"leistung": leistung, "leistung_band": b,
+            "leistung_von": max(0, round(leistung - b)) if ok else None,
+            "leistung_bis": min(100, round(leistung + b)) if ok else None}
+
+
+def gleichauf(slot_key, l_a, min_a, l_b, min_b):
+    """Liegen zwei Spieler auf DERSELBEN Position im Rahmen der Messgenauigkeit
+    gleichauf? |L_a - L_b| < 1,96 x sqrt(SEM_a^2 + SEM_b^2), jeder SEM auf die
+    eigenen Minuten umgerechnet. -> True/False, oder None ohne Aussage: ein
+    Wert fehlt, oder einer hat weniger als MIN_MINUTES – dann gilt ohnehin
+    die Markierung "duenne Datenbasis", ein "gleichauf" waere dort geraten."""
+    if l_a is None or l_b is None:
+        return None
+    if (min_a or 0) < MIN_MINUTES or (min_b or 0) < MIN_MINUTES:
+        return None
+    sa, sb = leistung_sem(slot_key, min_a), leistung_sem(slot_key, min_b)
+    return abs(l_a - l_b) < Z95 * (sa * sa + sb * sb) ** 0.5
 VERLAESSLICH_MIN = 180     # Bezug der Stichprobenguete: min/(min+180), ~2 Spiele
 
 # ------------------------------------------------------------ Kadererkennung
@@ -785,6 +769,9 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=Non
     out = []
     for slot in FORMATION:
         dists, basis = slot_dists(slot, reference, min_minutes, cache)
+        # Moneyball-Score im Profil DIESES Slots (D19): im Sturm als Stuermer,
+        # auf dem Fluegel als Fluegel – nicht das Profil der defensivsten Gruppe.
+        sp = slot_profil(slot)
         kandidaten = []
         for p in squad:
             ok, quelle = eligible(p, slot)
@@ -800,7 +787,10 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=Non
                 "club": p.get("club"), "league": p.get("league"),
                 "dna": p.get("dna"), "dna_pass": p.get("dna_pass"),
                 "dna_ball": p.get("dna_ball"),
-                "mb": p.get("mb"),            # Moneyball-Score, vom Aufrufer gesetzt
+                # Moneyball-Score im Slot-Profil; ohne Profilwertung (Aufrufer
+                # ohne add_scores) wie frueher das vom Aufrufer gesetzte 'mb'
+                "mb": (moneyball.profil_score(p, sp) if p.get("score_je_profil") is not None
+                       else p.get("mb")),
                 # Persoenlichkeit (sichtbare Beschreibung) neben dem Score
                 "pers_score": p.get("pers_score"), "pers_label": p.get("pers_label"),
                 "pers_stufe": p.get("pers_stufe"), "pers_medien": p.get("pers_medien"),
@@ -821,7 +811,9 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=Non
         out.append({k: slot[k] for k in
                     ("key", "label", "kurz", "rolle", "rolle_kurz", "duty", "x", "y",
                      "aufgaben", "blind")} | {
-            "kandidaten": kandidaten, "vergleichsbasis": basis})
+            "kandidaten": kandidaten, "vergleichsbasis": basis,
+            # "bewertet als Stuermer" – das Profil, mit dem der Slot rechnet
+            "profil": sp, "profil_label": moneyball.PROFILE_LABEL[sp]})
     return out
 
 
@@ -1023,20 +1015,22 @@ def _positionsvergleich(elf, pool, referenz, gehoert_dazu, teams=None,
     for key, label, skeys in LIGA_POSITIONEN:
         slot = slots[skeys[0]]
         dists, _ = slot_dists(slot, referenz, cache=cache)
+        profil = slot_profil(slot)            # D19: Score im Profil der Position
         je_verein, alle = {}, []
         for p in pool:
             if not gehoert_dazu(p):
                 continue
-            if (p.get("minutes") or 0) < min_minutes or p.get("score") is None:
+            mb = moneyball.profil_score(p, profil)
+            if (p.get("minutes") or 0) < min_minutes or mb is None:
                 continue
             if not eligible(p, slot)[0]:
                 continue
             b = score_slot(p, slot, dists, teams)
             if b is None:
                 continue
-            wert = gesamt(b["score"], p["score"], None)
+            wert = gesamt(b["score"], mb, None)
             eintrag = {"name": p.get("name"), "club": p.get("club"), "leistung": wert,
-                       "fit": b["score"], "score": p["score"], "age": p.get("age"),
+                       "fit": b["score"], "score": mb, "age": p.get("age"),
                        "minutes": p.get("minutes"), "value": p.get("value")}
             je_verein.setdefault(p["club"], []).append(eintrag)
             alle.append(eintrag)
@@ -1074,7 +1068,7 @@ def _positionsvergleich(elf, pool, referenz, gehoert_dazu, teams=None,
                     "top4": top4, "median": median, "beste": werte[0] if werte else None,
                     "abstand_top4": (None if (top4 is None or eigen_wert is None)
                                      else round(eigen_wert - top4, 1)),
-                    "perzentil": pz, "vereine": vereine})
+                    "perzentil": pz, "vereine": vereine, "profil": profil})
     return out
 
 
@@ -1307,6 +1301,10 @@ def find_replacements(slot, original, kandidaten, reference,
                              f"„{archetyp}“."}
     ziel_fit, alter = ob["score"], original.get("age")
     ziel = gesamt(ziel_fit, None, original.get("pers_score"))
+    # Leistung sqrt(Fit x Slot-Score) mit Band, fuer "gleichauf" (D19). Die
+    # Suche selbst sortiert weiter nach Fit und Charakter.
+    sp = slot_profil(slot)
+    ziel_leistung = gesamt(ziel_fit, moneyball.profil_score(original, sp))
     if modus == "juenger" and alter is None:
         return {"ok": False, "error": "Von diesem Spieler ist kein Geburtsdatum "
                                       "bekannt – ohne Alter keine Suche nach "
@@ -1339,6 +1337,7 @@ def find_replacements(slot, original, kandidaten, reference,
             continue
         fit = max(0, min(100, round(b["score"] - kosten)))
         score = gesamt(fit, None, p.get("pers_score"))
+        leistung = gesamt(fit, moneyball.profil_score(p, sp))
         a = p.get("age")
         spez = None
         if modus == "besser":
@@ -1389,6 +1388,9 @@ def find_replacements(slot, original, kandidaten, reference,
             "delta_score": score - ziel,
             "delta_age": None if (a is None or alter is None) else round(a - alter, 1),
             "verlaesslich": b["verlaesslich"], "teile": b["teile"],
+            **band_felder(slot["key"], leistung, p.get("minutes")),
+            "gleichauf": gleichauf(slot["key"], leistung, p.get("minutes"),
+                                   ziel_leistung, original.get("minutes")),
         })
 
     if modus == "aehnlich":
@@ -1409,6 +1411,7 @@ def find_replacements(slot, original, kandidaten, reference,
                          "score": ziel, "fit": ziel_fit,
                          "charakter": original.get("pers_score"),
                          "teile": ob["teile"],
+                         **band_felder(slot["key"], ziel_leistung, original.get("minutes")),
                          "carry": ob["carry"], "liga_koeff": ob["liga_koeff"],
                          "archetyp_pct": (_archetyp_pct(ob["teile"], spez_stats)
                                           if spez_stats else None)},
