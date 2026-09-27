@@ -627,6 +627,7 @@
   table.plankz td:first-child{color:var(--muted);width:170px}
   table.plankz td:last-child{white-space:nowrap}
   table.planpos tr.ae td{background:rgba(var(--mark-rgb),.10)}
+  table.planpos th{white-space:normal}
   .planplaetze{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .planplatz{max-width:360px}
   .planleg{display:inline-block;width:14px;height:9px;border:1px solid var(--border)}
@@ -888,7 +889,7 @@
   table.tcand tr.tsel.telf td:first-child{box-shadow:inset 4px 0 0 var(--accent)}
   /* 1020 statt 920: seit die Zellen nicht mehr umbrechen und die Spalte
      „Vgl" dazukam, braucht die Liste ~960 px; kleine Fenster deckelt 94vw */
-  .replbox{width:1020px}
+  .replbox{width:min(1200px, 96vw)}
   .replhead{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
     margin:10px 0 4px}
   table.repl{width:100%;border-collapse:collapse;margin:8px 0 0;
@@ -946,6 +947,48 @@
     .wrap{padding:12px 14px 30px}
     .comparebar{left:50%}
   }
+
+  /* ---------- Profilwahl und Unsicherheitsbänder (D19) ----------
+     „bewertet als …": kleines Kürzel mit Randmarke in der Positionsfarbe des
+     Profils – dieselbe Rampe wie Leitschild und Positionsfliesen. Leise, wo
+     Slot und Liste übereinstimmen; ausgefüllt (abw), wo der Slot anders
+     bewertet als die Liste. Bänder: flache Linie = Spanne (Fläche, eckig),
+     runder Punkt = Wert (Figur, rund), graue Fläche dahinter = Spanne des
+     Bezugs. Stufen: drei kleine Quadrate, gefüllt je Stufe – vorn grün,
+     hinten violett, gleichauf leer und grau; kein Rot. */
+  .proftag{display:inline-block;margin-left:5px;padding:0 4px 0 5px;font-family:var(--mono);font-size:9.5px;
+    font-weight:600;letter-spacing:.03em;color:var(--muted);border-left:3px solid var(--grp,var(--dim));
+    line-height:14px;vertical-align:1px;white-space:nowrap;cursor:default}
+  .proftag.abw,.proftag.haupt{color:var(--text);background:var(--surface2);box-shadow:inset 0 0 0 1px var(--rule)}
+  .alsprof{font-size:11.5px;color:var(--muted);margin:2px 0 6px}
+  .alsprof b{color:var(--text);font-weight:600}
+  .lpos .alsprof{display:inline;margin:0 0 0 6px;font-size:10.5px}
+  .lband{white-space:nowrap;font-family:var(--mono);font-weight:600}
+  .lband small{color:var(--muted);font-size:10px;font-weight:400;margin-left:3px}
+  .lbar{position:relative;display:inline-block;width:66px;height:10px;vertical-align:middle;margin-left:6px;color:var(--text)}
+  .lbar.breit{display:block;width:100%;max-width:150px;margin:5px 0 0}
+  .lbar::before{content:"";position:absolute;left:0;right:0;top:4.5px;height:1px;background:var(--rule)}
+  .lbar .ref{position:absolute;top:1px;height:8px;background:var(--rule);opacity:.7}
+  .lbar .iv{position:absolute;top:4px;height:2px;background:currentColor}
+  .lbar .grenze{position:absolute;top:-2px;bottom:-2px;width:0;border-left:1px dashed var(--muted)}
+  .lbar b{position:absolute;top:2px;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:currentColor}
+  .stufe{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:11.5px;cursor:default}
+  .stufe i{display:inline-block;width:6px;height:6px;border:1px solid currentColor}
+  .stufe i.an{background:currentColor}
+  .stufe i:last-of-type{margin-right:3px}
+  .stufe.vorn{color:var(--pos)} .stufe.hinten{color:var(--neg)} .stufe.gleich{color:var(--muted)}
+  .stufe small{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:2px}
+  .stufe.kompakt{font-family:var(--mono);font-weight:700;font-size:12px}
+  .stufesatz{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.35}
+  /* Brett-Tabelle: elf Angaben je Zeile – knapperer Innenabstand */
+  table.tcand th, table.tcand td{padding-left:6px;padding-right:6px}
+  /* Spitzengruppe: Satz über der Tabelle, Randmarke an den Mitgliedern,
+     kräftiger am Bezug (der Stärkste) */
+  tr.spitz td:first-child{box-shadow:inset 3px 0 0 var(--muted)}
+  tr.spitz.bezug td:first-child{box-shadow:inset 3px 0 0 var(--text)}
+  .spitze{font-size:12px;margin:0 0 8px;padding:6px 10px;border-left:3px solid var(--muted);background:var(--surface2)}
+  .dprof{font-size:11.5px;color:var(--muted);margin:-4px 0 12px;line-height:20px}
+  .dprof .proftag{margin:0 5px 0 0}
 
   /* ---------- Bewegung nur, wenn erwünscht ---------- */
   @media (prefers-reduced-motion:reduce){
@@ -1188,6 +1231,8 @@ const C_GOALS=["goals","Tore"], C_XG=["xg","xG"], C_FIN=["finishing","Δ xG"],
       C_DPCT=["duel_pct","ZWK %"], C_TS=["shot_acc","T-Sch %"],
       C_KGW=["headers_won","Kopfb."], C_KL=["clearances","Klär."],
       C_SC=["score","Score"], C_PRG=["prog_passes","Pr Päss."],
+      // Erwartete Stärke (D19): Listen-Score zur Mitte des Profils geschrumpft
+      C_KAL=["score_kal","Erwartet"],
       C_PRW=["press_win","Pressing"], C_INT=["interceptions","Abgef."],
       C_LOSS=["losses","Ballverl."],
       C_AGE=["age","Alter"], C_VAL=["value_m","Wert M€"], C_VEFF=["value_score","€-Eff"],
@@ -1202,7 +1247,7 @@ const C_GOALS=["goals","Tore"], C_XG=["xg","xG"], C_FIN=["finishing","Δ xG"],
       C_PERS=["pers_score","Charakter"];
 // Vereins-DNA: passstark × Ballgewinner, 0-100 (moneyball.add_dna)
 const C_DNA=["dna","DNA"];
-const ALL_COLS=[NAME,POS,C_AGE,MIN,C_SC,C_DNA,C_TAL,C_PERS,C_VAL,C_VEFF,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_SH,C_DU,C_DR,C_PP];
+const ALL_COLS=[NAME,POS,C_AGE,MIN,C_SC,C_KAL,C_DNA,C_TAL,C_PERS,C_VAL,C_VEFF,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_SH,C_DU,C_DR,C_PP];
 
 // Minutenschwelle, ab der ein Fair Value als belastbar gilt. Das Backend
 // senkt sie, solange in der laufenden Saison noch niemand 450 Minuten hat,
@@ -1220,6 +1265,9 @@ const NGW_GRUND = "wiederholt sich zwischen zwei Saisonhälften nicht (Split-Hal
 
 // Erklärungen für Spaltenköpfe – nur wo die Überschrift allein zu knapp ist.
 const COL_TIPS = {
+  score_kal: "Erwartete Stärke: der Listen-Score, zur Mitte seines Profils gezogen – je weniger Minuten, desto stärker. "
+    + "Danach sortiert steht der Stärkste oben, und wer auf wenigen Minuten glänzt, rutscht ehrlich nach unten. "
+    + "Nur zum Listen-Profil; unter 180 Minuten keine Aussage.",
   value_delta_pct: "Marktwert gegen den Schätzwert aus Leistung, Alter, Liga und Position – als Urteil, dahinter Markt → Fair in Mio. "
     + "Unterbewertet = die Leistung ist mehr wert, als der Markt verlangt. Das Modell liegt typisch um Faktor 3,7 daneben; "
     + "es trennt nur Extremfälle, deshalb gibt es „leicht“ und „deutlich“. Torhüter: kein Wert. Sortiert nach dem Abstand in %.",
@@ -1241,19 +1289,19 @@ const COL_TIPS = {
 const TABS = {
   all:{title:"Feldspieler", sort:["score",true],           cols:ALL_COLS},
   def:{title:"Abwehr",      sort:["score",true], group:"def",
-       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_DU,C_DPCT,C_KGW,C_KL,C_INT,C_PRG,C_PRW,C_PP,C_FO]},
+       cols:[NAME,POS,MIN,C_SC,C_KAL,C_DNA,C_PERS,C_FAIR,C_NOTE,C_DU,C_DPCT,C_KGW,C_KL,C_INT,C_PRG,C_PRW,C_PP,C_FO]},
   mid:{title:"Mittelfeld",  sort:["score",true],   group:"mid",
-       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_PP,C_PRG,C_PRW,C_LOSS,C_DU,C_DPCT,C_XA,C_AS,C_GOALS]},
+       cols:[NAME,POS,MIN,C_SC,C_KAL,C_DNA,C_PERS,C_FAIR,C_NOTE,C_PP,C_PRG,C_PRW,C_LOSS,C_DU,C_DPCT,C_XA,C_AS,C_GOALS]},
   off:{title:"Offensivspieler", sort:["score",true], group:"off",
-       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_DR,C_SH,C_PRW]},
+       cols:[NAME,POS,MIN,C_SC,C_KAL,C_DNA,C_PERS,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_XA,C_DR,C_SH,C_PRW]},
   st: {title:"Stürmer",     sort:["score",true],   group:"st",
-       cols:[NAME,POS,MIN,C_SC,C_DNA,C_PERS,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_SH,C_TS,C_XA,C_PRW]},
+       cols:[NAME,POS,MIN,C_SC,C_KAL,C_DNA,C_PERS,C_FAIR,C_NOTE,C_GOALS,C_AS,C_XG,C_FIN,C_SH,C_TS,C_XA,C_PRW]},
   // Torwart nach dem Nachschärfen: Note über Erwartung, Paraden je Schuss und
   // die Stichprobe dahinter; "Verhindert gesamt" bleibt als Rohwert sichtbar.
   tw: {title:"Torhüter",    sort:["score",true], gk:true,
        // Kein Fair Value: das Modell belohnt Liga und Minuten, nicht Paraden –
        // bei Torhütern liefert das Backend überall null (D1).
-       cols:[["name","Torhüter"],MIN,C_SC,C_PERS,C_NOTE,["note_resid","Note ü. Erw."],
+       cols:[["name","Torhüter"],MIN,C_SC,C_KAL,C_PERS,C_NOTE,["note_resid","Note ü. Erw."],
              ["conceded","GEG"],["sot_faced","Schüsse"],["save_pct","Paraden %"],
              ["gp_shot","Verh./100"],["goals_prevented","Verhind."],
              ["pen_saved","Elfer par."],C_PP]},
@@ -1264,7 +1312,173 @@ function tabMatch(p){
   const t = TABS[TAB];
   if(t.gk) return !!p.is_gk;
   if(TAB === "all") return !p.is_gk;
+  // D19: Positionsreiter nach den ERLAUBTEN Profilen – „M (L)" steht unter
+  // Offensive wie im Slot, reine Flügelspieler fehlen im Mittelfeld. Ohne das
+  // Feld die Schlüssel von score_je_profil (erlaubt + Hauptprofil), ohne
+  // Profile die Positionsgruppen.
+  const pr = REITER_PROFILE[TAB];
+  const erlaubt = p.profile_erlaubt || (p.score_je_profil ? Object.keys(p.score_je_profil) : null);
+  if(pr && erlaubt && erlaubt.length) return pr.some(k => erlaubt.includes(k));
   return (p.pos_groups||[]).includes(t.group);
+}
+// Aussage über Spanne, erwartete Stärke und Spitzengruppe nur für Zeilen aus
+// dem aktuellen Export (p.aktuell): die Konstanten des Analysten sind an
+// Export-Daten geschätzt, RAM-Minuten sind unzuverlässig, ältere Importe
+// gehören zu einer anderen Saison. Solche Zeilen bleiben sichtbar – „keine Aussage".
+// Warum keine Aussage? Zeigt die Zeile RAM-Zahlen (reine Speicher-Zeile oder
+// der Speicher hat mehr Minuten als der Export), sind Band und Gruppe dafür
+// nicht kalibriert; sonst stammt sie aus einem älteren Import. (Mit D22
+// gewinnt der aktuelle Export – dann gilt das für die RAM-Fälle nicht mehr.)
+function keineAussage(p){
+  const ram = p.source === "ram" || (p.source === "ram+export" && p.stat_quelle !== "export");
+  return ram ? "Zeile zeigt RAM-Zahlen aus dem Scan – für Spanne, erwartete Stärke und Spitzengruppe nicht kalibriert"
+    : `Zahlen aus einem älteren Import${p.exp_at ? ` (Stand ${datumKurz(p.exp_at)})` : ""} – nicht der aktuelle Export, deshalb ohne Spanne und Gruppe`;
+}
+
+// ---- Profilwahl (D19) --------------------------------------------------------
+// Im Slot zählt der Score im Profil der Rolle (slot.profil), in Listen der
+// beste über die erlaubten Profile (p.profil). Die Reiter filtern weiter über
+// pos_groups – „M (L)" steht unter Mittelfeld, bewertet wird er als Flügel/OM.
+// Score und Talent im Reiter kommen deshalb aus score_je_profil.
+const PROFIL_KURZ = {tw:"TW", iv:"IV", av:"AV", mid:"MIT", off:"FL/OM", st:"ST"};
+const PROFIL_NAME = {tw:"Torhüter", iv:"Innenverteidiger", av:"Außenverteidiger", mid:"Mittelfeld",
+  off:"Flügel/OM", st:"Stürmer"};
+const PROFIL_GRP = {tw:"tw", iv:"def", av:"def", mid:"mid", off:"off", st:"st"};
+const REITER_PROFILE = {tw:["tw"], def:["iv","av"], mid:["mid"], off:["off"], st:["st"]};
+// Kürzel mit Randmarke in der Positionsfarbe des Profils. cls: "abw" = der
+// Slot bewertet anders als die Liste, "haupt" = das Listen-Profil
+const profilTag = (profil, text, tip, cls) => profil ? `<span class="proftag${cls ? " "+cls : ""}"
+  style="--grp:var(--pg-${PROFIL_GRP[profil]||"mid"})"${tip ? ` title="${escAttr(tip)}"` : ""}>${
+  text ?? PROFIL_KURZ[profil] ?? profil}</span>` : "";
+// Score im aktuellen Reiter: in „Alle" der Listen-Score, sonst der beste der
+// Reiter-Profile (Abwehr: IV oder AV – je nachdem, was er spielen darf)
+function reiterWert(p){
+  // Zwischenspeicher je Zeile und Reiter – die Sortierung fragt ihn oft
+  if(p._rwTab === TAB && p._rwVon === p.score_je_profil) return p._rw;
+  p._rwTab = TAB; p._rwVon = p.score_je_profil;
+  return (p._rw = reiterWertNeu(p));
+}
+function reiterWertNeu(p){
+  const pr = REITER_PROFILE[TAB], je = p.score_je_profil;
+  // Band, erwartete Stärke (kal) und Streuung (sd) gibt es nur zum
+  // Listen-Profil (Messwerte des Analysten) – im Reiter mit anderem Profil nicht
+  const akt = p.aktuell === true;
+  if(!pr || !je) return {score:p.score, profil:p.profil, label:p.profile_label, talent:p.talent, liste:true, aktuell:akt,
+                         band:akt ? p.score_band : null, kal:akt ? p.score_kal : null, sd:akt ? p.score_sd : null};
+  let best = null;
+  for(const k of pr){
+    const w = je[k];
+    if(w && w.score!=null && (!best || w.score > best.score))
+      best = {score:w.score, profil:k, label:w.label, talent:w.talent};
+  }
+  if(!best){ const k = pr.find(x => je[x]) || pr[0];
+             best = {score:null, profil:k, label:PROFIL_NAME[k], talent:null, band:null}; }
+  best.liste = best.profil === p.profil;
+  best.aktuell = akt;
+  best.band = best.liste && akt ? p.score_band : null;
+  best.kal = best.liste && akt ? p.score_kal : null;
+  best.sd = best.liste && akt ? p.score_sd : null;
+  return best;
+}
+// Sortierwert: Score, Talent und Talent-Board kommen im Reiter aus dem Reiter-Profil
+function sortWert(p, key){
+  if(key==="score") return reiterWert(p).score;
+  if(key==="talent") return reiterWert(p).talent;
+  if(key==="prospect") return p.age!=null && p.age<=21 ? reiterWert(p).talent : null;
+  if(key==="score_kal") return reiterWert(p).kal;
+  return p[key];
+}
+// Listen-Profil eines Kaderspielers (Brett-IDs sind EIDs)
+let LISTE_N = -1, LISTE = new Map();
+function listeVon(eid){
+  if(LISTE_N !== PLAYERS.length){
+    LISTE = new Map(); LISTE_N = PLAYERS.length;
+    PLAYERS.forEach(p => { if(p.eid && p.score_je_profil) LISTE.set(+p.eid, p); });
+  }
+  return eid!=null ? LISTE.get(+eid) || null : null;
+}
+// Kürzel am Slot-Wert, wenn die Liste ihn anders bewertet: „ST 93" = in
+// Listen 93 als Stürmer. Stimmen beide überein, steht nichts – die
+// Überschrift sagt schon, als was bewertet wird.
+function abwTag(eid, slotProfil){
+  const p = listeVon(eid);
+  if(!p || !p.profil || !slotProfil || p.profil===slotProfil || p.score==null) return "";
+  return profilTag(p.profil, `${PROFIL_KURZ[p.profil]} ${p.score}`,
+    `In Listen: ${p.score} als ${PROFIL_NAME[p.profil]} – hier bewertet als ${PROFIL_NAME[slotProfil]}`, "abw");
+}
+const alsProfil = (profil, label, zusatz) => profil || label
+  ? `<div class="alsprof">bewertet als <b>${esc2(label || PROFIL_NAME[profil] || profil)}</b>${zusatz ? ` – ${zusatz}` : ""}</div>` : "";
+
+// ---- Unsicherheitsbänder (D19) ----------------------------------------------
+// Leistung = √(Fit × Score im Profil der Rolle) mit ±95 %-Spanne aus der
+// Spielzeit. Text „90 ±13", Balken auf 0–100: Linie = Spanne, Punkt = Wert,
+// graue Fläche = Spanne des Bezugs (Stamm, Original).
+const bandText = x => x && x.leistung!=null
+  ? `<span class="lband">${x.leistung}${x.leistung_band!=null ? `<small>±${Math.round(x.leistung_band)}</small>` : ""}</span>`
+  : `<span class="muted">–</span>`;
+// Balken von 40 bis 100: fast alle Werte liegen oben, auf 0–100 klebten sie
+// am rechten Rand. Was darunter liegt, beginnt am linken Rand.
+const BAND_AB = 40;
+const bandX = v => Math.max(0, Math.min(100, (v - BAND_AB) / (100 - BAND_AB) * 100));
+const bandStrecke = (lo, hi) => `left:${bandX(lo).toFixed(1)}%;width:${Math.max(1, bandX(hi) - bandX(lo)).toFixed(1)}%`;
+function bandBalken(x, ref, breit){
+  if(!x || x.leistung_von==null || x.leistung_bis==null) return "";
+  const r = ref && ref!==x && ref.leistung_von!=null && ref.leistung_bis!=null
+    ? `<i class="ref" style="${bandStrecke(ref.leistung_von, ref.leistung_bis)}"></i>` : "";
+  return `<span class="lbar${breit ? " breit" : ""}">${r}<i class="iv" style="${bandStrecke(x.leistung_von, x.leistung_bis)}"></i><b style="left:${
+    bandX(x.leistung).toFixed(1)}%"></b></span>`;
+}
+const bandTip = x => x && x.leistung!=null
+  ? `Leistung ${x.leistung}${x.leistung_band!=null ? ` ±${x.leistung_band.toLocaleString("de-DE")} – 95 % liegen zwischen ${
+      x.leistung_von} und ${x.leistung_bis}` : " – ohne Minuten keine Spanne"}, aus ${Math.round(x.minutes||0).toLocaleString("de-DE")} Minuten` : "";
+
+// ---- Stufen im Vergleich (D19, kalibriert) --------------------------------------
+// Das Backend liefert je Vergleich {vorsprung_p, vorsprung_stufe, vorn,
+// p_besser, duenn}. vorsprung_p = Wahrscheinlichkeit, dass der Führende
+// wirklich besser ist (0,5–1). Sie ist vom Analysten kalibriert – „in etwa 8
+// von 10 Halbserien vorn" darf wörtlich gelesen werden. p_besser = dass DIESER
+// Spieler besser ist als der Bezug (gibt die Richtung). Stufen: gleichauf
+// unter 70 %, leicht 70–90, klar 90–97,5, sicher ab 97,5 % (tactics).
+// duenn = keine Aussage: unter 180 Minuten oder Wert fehlt.
+// neutral: ohne Grün/Violett (Planspiel: Backup gegen Stamm ist kein Urteil).
+// kompakt (Tabellen): Quadrate + „≈ / + / −", der Satz steht im Tooltip.
+// namen: [dieser, Bezug] – für „Omorodion liegt in etwa 9 von 10 … vorn".
+const STUFE_N = {gleichauf:0, leicht:1, klar:2, sicher:3};
+// Schwellen der Stufen aus dem Backend (vergleich_konstanten, tactics) – nicht
+// hier eintragen. Rückfall nur, solange die Antwort fehlt.
+let VGL_KONST = null;
+async function vglKonstantenLaden(){
+  const api = API(); if(!api || VGL_KONST) return;
+  try{ const r = await api.vergleich_konstanten(); if(r && r.ok) VGL_KONST = r; }catch(e){}
+}
+const vglStufen = () => ((VGL_KONST && VGL_KONST.stufen) || [[0.975,"sicher"],[0.9,"klar"],[0.7,"leicht"]])
+  .slice().sort((a, b) => a[0] - b[0]);
+// „gleichauf" = unter der kleinsten Schwelle
+const gleichGrenze = () => vglStufen()[0][0];
+const pZahl = p => (p*100).toLocaleString("de-DE", {maximumFractionDigits:1});
+const stufenText = () => vglStufen().map(s => pZahl(s[0])).join(" / ") + " %";
+const halbserien = p => `in etwa ${Math.round(p*10)} von 10 Halbserien`;
+const prozentVorn = p => p==null ? null : p >= 0.995 ? "> 99 %" : Math.round(p*100) + " %";
+function stufeHtml(v, gleichauf, diff, neutral, kompakt, namen){
+  if(v && v.duenn) return `<span class="muted" title="Dünne Datenbasis – unter 180 Minuten oder ohne Wert, keine Aussage">${
+    kompakt ? "–" : "dünne Datenbasis"}</span>`;
+  if(!v || !v.vorsprung_stufe){
+    // Rückfall für ein älteres Backend ohne Vergleichsobjekt: nur ja/nein
+    if(gleichauf==null) return `<span class="muted" title="Keine Aussage">–</span>`;
+    v = {vorsprung_stufe: gleichauf ? "gleichauf" : null};
+  }
+  const n = STUFE_N[v.vorsprung_stufe] ?? null;
+  const vorn = v.p_besser!=null ? v.p_besser >= 0.5 : (diff||0) >= 0;
+  const p = v.vorsprung_p, pText = prozentVorn(p);
+  const wort = n===0 ? "gleichauf" : `${n==null ? "" : v.vorsprung_stufe + " "}${vorn ? "vorn" : "hinten"}`;
+  const cls = n===0 || neutral ? "gleich" : vorn ? "vorn" : "hinten";
+  const fuehrend = namen ? (vorn ? namen[0] : namen[1]) : (vorn ? "Er" : "Der Bezug");
+  const satz = p==null ? "" : `${fuehrend} ${n===0 ? "nur " : ""}${halbserien(p)} vorn`;
+  const zeigen = kompakt ? (n===0 ? "≈" : vorn ? "+" : "−") : wort;
+  const quadrate = [1,2,3].map(i => `<i class="${n!=null && i<=n ? "an" : ""}"></i>`).join("");
+  return `<span class="stufe ${cls}${kompakt ? " kompakt" : ""}" title="${escAttr(
+    `${wort}${pText ? ` (${pText})` : ""}${satz ? `: ${satz}` : ""} – kalibriert, Stufen ab ${stufenText()}`)}">${quadrate}${zeigen}${
+    pText && !kompakt ? `<small>${pText}</small>` : ""}</span>${!kompakt && satz ? `<div class="stufesatz">${esc2(satz)}</div>` : ""}`;
 }
 
 function fmt(v){ return (typeof v==="number" && !Number.isInteger(v)) ? v.toFixed(2) : v; }
@@ -1409,16 +1623,33 @@ function cell(p, key){
   }
   if(key==="sot_faced") return `<td>${p.sot_faced==null?'<span class="muted">–</span>':p.sot_faced}</td>`;
   if(key==="score"){
-    if(p.score==null) return `<td class="muted" title="Keine Positionsgruppe – kein Score">–</td>`;
-    const v=p.score, col = v>=50 ? "var(--heat-pos)" : "var(--heat-neg)";
+    // D19: im Reiter der Score des Reiter-Profils, in „Alle" der Listen-Score
+    const w = reiterWert(p);
+    if(w.score==null) return `<td class="muted" title="${p.score_je_profil
+      ? `Kein Score als ${esc2(w.label||"?")}` : "Keine Positionsgruppe – kein Score"}">–</td>`;
+    const v=w.score, col = v>=50 ? "var(--heat-pos)" : "var(--heat-neg)";
     const a = (0.14 + Math.abs(v-50)/50*0.50).toFixed(2);
     // pct null = Kennzahl fehlt (z.B. Chancen kreiert bei RAM-Spielern) und
     // wurde uebersprungen; das steht im Tooltip, statt "P null" zu zeigen.
-    const parts=(p.score_parts||[]).map(sp=>sp.pct==null
-      ? `${sp.label}: fehlt (übersprungen)` : `${sp.label}: P${sp.pct} × ${sp.w}`).join("&#10;");
+    const parts = w.liste ? (p.score_parts||[]).map(sp=>sp.pct==null
+      ? `${sp.label}: fehlt (übersprungen)` : `${sp.label}: P${sp.pct} × ${sp.w}`).join("&#10;")
+      : `Aufschlüsselung nur zum Listen-Score (${p.score??"–"} als ${p.profile_label||"?"})`;
     const liga = p.league ? `${p.league} (Koeff. ${p.league_coeff})` : "unbekannt (Koeff. 1.0)";
-    const tip = `Profil: ${p.profile_label||"?"}&#10;${parts}&#10;Liga: ${liga}&#10;Perzentile relativ zum Pool, /90-Raten geshrinkt (min/(min+180)) × Liga-Koeffizient`;
-    return `<td><span class="pill" title="${tip}" style="background:rgba(${col},${a})">${v}</span></td>`;
+    const tip = `Score als ${w.label||"?"}${w.band!=null ? ` ±${Math.round(w.band)} (95 %)` : ""}&#10;${parts}&#10;Liga: ${liga}&#10;Perzentile relativ zum Pool, /90-Raten geshrinkt (min/(min+180)) × Liga-Koeffizient`;
+    // In „Alle" steht das Profil immer dabei; im Reiter nur, wenn die Liste ihn anders sieht
+    const tag = TAB==="all" || TAB==="unk" ? profilTag(w.profil, null, `bewertet als ${w.label||"?"}`)
+      : !w.liste && p.profil && p.score!=null ? profilTag(p.profil, `${PROFIL_KURZ[p.profil]} ${p.score}`,
+          `In Listen: ${p.score} als ${p.profile_label} – im Reiter als ${w.label}`, "abw") : "";
+    return `<td style="white-space:nowrap"><span class="pill" title="${tip}" style="background:rgba(${col},${a})">${v}</span>${tag}</td>`;
+  }
+  if(key==="_spanne") return spanneTd(p);
+  if(key==="score_kal"){
+    const w = reiterWert(p);
+    if(w.kal==null) return `<td class="muted" title="${w.score==null ? "Kein Score"
+      : !w.liste ? `Erwartete Stärke gibt es nur zum Listen-Profil (${esc2(p.profile_label||"?")})`
+      : !w.aktuell ? escAttr(keineAussage(p)) : "Dünne Datenbasis – unter 180 Minuten keine Aussage"}">–</td>`;
+    return `<td style="font-family:var(--mono)" title="${escAttr(`Erwartete Stärke ${w.kal.toLocaleString("de-DE", {maximumFractionDigits:1})} – Score ${
+      w.score} zur Mitte des Profils ${w.label||""} gezogen`)}">${Math.round(w.kal)}</td>`;
   }
   if(key==="dna"){
     // Wie der Score als Pill – aber ohne diesen Zweig fiele 'dna' in den
@@ -1459,10 +1690,13 @@ function cell(p, key){
     return `<td class="${cls}">${v.toFixed(2)}</td>`;
   }
   if(key==="talent"||key==="prospect"){
+    // D19: im Reiter das Talent im Reiter-Profil, in „Alle" das des Listen-Scores
+    const w = reiterWert(p), v = sortWert(p, key);
     // ohne Geburtsdatum kein Altersvergleich – das ist "unbekannt", nicht 0
-    if(p[key]==null) return `<td class="muted" title="Kein Geburtsdatum im RAM gefunden – ohne Alter kein Vergleich mit dem Jahrgang">–</td>`;
-    const v=p[key], a=(0.10+v/100*0.45).toFixed(2);
-    return `<td><span class="pill" title="Perzentil im Altersband ${p.age_band||"?"} auf seiner Position (${p.age||"?"} Jahre)" style="background:rgba(var(--heat-pos),${a})">${v}</span></td>`;
+    if(v==null) return `<td class="muted" title="${key==="prospect" && p.age>21
+      ? "Über 21 – nicht auf dem Talent-Board" : "Kein Geburtsdatum im RAM gefunden – ohne Alter kein Vergleich mit dem Jahrgang"}">–</td>`;
+    const a=(0.10+v/100*0.45).toFixed(2);
+    return `<td><span class="pill" title="Perzentil im Altersband ${p.age_band||"?"} als ${esc2(w.label||"?")} (${p.age||"?"} Jahre)" style="background:rgba(var(--heat-pos),${a})">${v}</span></td>`;
   }
   if(key==="conceded"||key==="apps"||key==="fouls") return heatTd(key, p[key]??0, p[key]);
   if(key==="pass_pct"||key==="duel_pct"||key==="shot_acc"||key==="header_pct"||key==="press_pct")
@@ -2056,6 +2290,8 @@ function drawTactic(host){
       ${best ? `<title>${esc2(best.name)} · ${Math.round(best.minutes||0)} Minuten`
         + ` · Stichprobe ${Math.round(best.verlaesslich*100)} %`
         + ` · Gesamt ${best.score} = ${gesamtFormel(best)}`
+        + (s.profil_label ? ` · bewertet als ${s.profil_label}` : "")
+        + (best.leistung!=null && best.leistung_band!=null ? ` · Leistung ${best.leistung} ±${Math.round(best.leistung_band)}` : "")
         + (f ? ` · Form ${f.form_note.toFixed(2)} gegen Saison ${f.saison_note.toFixed(2)}`
              + ` aus ${f.minuten} Minuten` : ` · noch kein Formurteil`) + `</title>
       <rect x="${s.x-4}" y="${s.y+4.2}" width="8" height="0.5" opacity=".3"
@@ -2069,7 +2305,9 @@ function drawTactic(host){
     <tr class="${c.id===TACT_PID?"tsel":""}${c.id===slot.startelf_id?" telf":""}"
         onclick="tactPlayer(${c.id})"
         oncontextmenu="return tactMenu(event,${c.id})"
-        title="Rechtsklick: Ersatz für diesen Spieler suchen">
+        title="${escAttr(`Rechtsklick: Ersatz für diesen Spieler suchen · ${c.stat_quelle==="export"
+          ? "Zahlen aus dem FM-Export – der Speicher hatte weniger Minuten" : "Zahlen aus dem Speicher"}${
+          c.pos_quelle ? ` · Position: ${c.pos_quelle}` : ""}`)}">
       <td class="name">${esc2(c.name)}${formPfeil(c.form)}${
         c.id===slot.startelf_id
           ? (slot.gepinnt
@@ -2081,11 +2319,14 @@ function drawTactic(host){
       <td>${Math.round(c.minutes||0)}</td>
       <td>${scorePill(c)}</td>
       <td class="muted" style="font-family:var(--mono)">${c.fit??"–"}</td>
-      <td class="muted" style="font-family:var(--mono)">${c.mb??"–"}</td>
+      <td class="muted" style="font-family:var(--mono)">${c.mb??"–"}${abwTag(c.id, slot.profil)}</td>
       <td>${dnaCell(c)}</td>
       ${persTd(c)}
-      <td class="muted" title="${c.verlaesslich<DUENN?"Kleine Stichprobe – die Zahl kann ein Ausreißer sein, heruntergerechnet wird sie aber nicht":"ausreichende Stichprobe"}">${Math.round(c.verlaesslich*100)}%</td>
-      <td class="muted" title="${c.stat_quelle==="export"?"Zahlen aus dem FM-Export – der Speicher hatte weniger Minuten":"Zahlen aus dem Speicher"}">${c.stat_quelle==="export"?"Export":c.pos_quelle}</td>
+      <td style="white-space:nowrap" title="${escAttr(bandTip(c) + ` · Stichprobe ${Math.round(c.verlaesslich*100)} %`)}">${
+        bandText(c)}</td>
+      <td>${c.id===slot.startelf_id ? `<span class="muted" style="font-size:11px">Bezug</span>`
+        : stufeHtml(c.vergleich_stamm, c.gleichauf_stamm, (c.leistung??0) - ((stammVon(slot)||{}).leistung??0), false, true,
+            [nachname(c.name), nachname((stammVon(slot)||{}).name)])}</td>
     </tr>`).join("")
     : `<tr><td colspan="10" class="muted">Kein Kaderspieler ist für diese Position hinterlegt.</td></tr>`;
 
@@ -2123,6 +2364,7 @@ function drawTactic(host){
       <div class="dsec" style="margin-top:0">${esc2(slot.label)}</div>
       <div style="font-size:12.5px;margin-bottom:2px"><b>${esc2(slot.rolle)}</b>${rolleKurz(slot)}
         <span class="muted">· ${esc2(slot.duty)}</span></div>
+      ${alsProfil(slot.profil, slot.profil_label, "Score und Leistung im Profil der Rolle")}
       <ul class="taufg">${slot.aufgaben.map(a=>`<li>${esc2(a)}</li>`).join("")}</ul>
       <div class="tcmp"><button class="wbtn" onclick="openCompare('${slot.key}')">Vergleichen…</button>
         <span class="muted">Stamm und Backup gegen bis zu drei Kandidaten – Leistung, Kennzahlen, Preis</span></div>
@@ -2130,11 +2372,11 @@ function drawTactic(host){
         <th style="text-align:left">Spieler</th><th>Alter</th><th>Min</th>
         <th title="${GESAMT_TIP}">Gesamt</th>
         <th title="Positions-Fit: wie gut er DIESE Rolle im 4-2-3-1 ausfüllt (Perzentil gegen alle, die sie spielen können)">Fit</th>
-        <th title="Moneyball-Score: wie gut er allgemein ist, stilneutral – dieselbe Zahl wie in der Tabelle">Score</th>
+        <th title="${escAttr(`Moneyball-Score im Profil der Rolle (${slot.profil_label||"?"}), stilneutral. In Listen steht der beste Score über alle Profile – weicht er ab, steht er als Kürzel dabei.`)}">Score</th>
         <th title="Vereins-DNA: passstark × Ballgewinner">DNA</th>
         <th title="Persönlichkeit aus dem Spielerprofil – neben dem Score, nicht darin">Charakter</th>
-        <th title="Wie belastbar die Stichprobe ist">Basis</th>
-        <th title="Woher die Positionsangabe stammt">Quelle</th>
+        <th title="Leistung = √(Fit × Score im Profil der Rolle) mit 95-%-Spanne aus der Spielzeit – je weniger Minuten, desto breiter">Leistung</th>
+        <th title="${escAttr(`Gegen den Stammspieler: ≈ gleichauf, + vorn, − hinten; die Quadrate zeigen, wie sicher (Stufen ab ${stufenText()} – kalibriert: so oft liegt der Vordere in der nächsten Halbserie vorn)`)}">Stufe</th>
       </tr></thead><tbody>${liste}</tbody></table>
       ${detail}
       <div class="dsec">Was hier nicht messbar ist</div>
@@ -2143,6 +2385,8 @@ function drawTactic(host){
 }
 
 const scoreInk = v => v>=50 ? "var(--pos)" : "var(--neg)";
+// Stammspieler eines Brett-Slots (Bezug für Band und Stufe)
+const stammVon = s => s ? s.kandidaten.find(k => k.id===s.startelf_id) || null : null;
 
 // Gesamt = Fit^0,35 × Score^0,35 × Charakter^0,30 (tactics.gesamt), in der
 // Ersatzsuche ohne Score Fit^0,7 × Charakter^0,3. Ohne gescoutete
@@ -2429,7 +2673,9 @@ function planPlatz(erg, geaendert){
   const tiles = planSlots(erg).map(s => {
     const st = s.stamm, neu = st && st.neu, ae = geaendert.has(s.key);
     const nm = st ? nachname(st.name) : "–";
-    return `<g><title>${escAttr(`${s.label}: ${st ? `${st.name} · Gesamt ${st.gesamt}` : "unbesetzt"}${s.duenn ? " · dünn besetzt" : ""}`)}</title>
+    return `<g><title>${escAttr(`${s.label}: ${st ? `${st.name} · Gesamt ${st.gesamt}` : "unbesetzt"}${
+      s.profil_label ? ` · bewertet als ${s.profil_label}` : ""}${st && st.leistung_band!=null ? ` · Leistung ${st.leistung} ±${Math.round(st.leistung_band)}` : ""}${
+      s.duenn ? " · dünn besetzt" : ""}`)}</title>
       <rect x="${s.x-9.5}" y="${s.y-5.6}" width="19" height="11.2" fill="var(--surface)"
         stroke="${ae ? "var(--mark)" : "var(--border)"}" stroke-width="${ae ? 0.9 : 0.4}"${s.duenn ? ' stroke-dasharray="1.2 0.8"' : ""}/>
       <text x="${s.x}" y="${s.y-1.2}" text-anchor="middle" font-size="2.7" font-family="var(--sans)"
@@ -2627,13 +2873,20 @@ function planErgebnis(R, lName, rName){
     const l = planSlots(L).find(x => x.key === s.key) || {};
     const ae = geaendert.has(s.key);
     const lg = ligaVon(L, s.key), rg = ligaVon(Rr, s.key);
-    const stamm = x => x && x.stamm ? `${esc2(nachname(x.stamm.name))} <b>${x.stamm.gesamt}</b>${x.stamm.neu ? ` <span class="pos">+</span>` : ""}` : `<span class="muted">–</span>`;
+    const stamm = x => x && x.stamm ? `<span title="${escAttr(`${x.stamm.name} · Gesamt ${x.stamm.gesamt} · ${bandTip(x.stamm)}${
+        x.profil_label ? ` · bewertet als ${x.profil_label}` : ""}`)}">${esc2(nachname(x.stamm.name))} <b>${x.stamm.gesamt}</b></span>${
+        x.stamm.neu ? ` <span class="pos">+</span>` : ""}` : `<span class="muted">–</span>`;
+    // Backup gegen Stamm im Szenario: neutral – „gleichauf" heißt hier Tiefe
+    const backup = x => x && x.backup ? `<span title="${escAttr(`${x.backup.name} · ${bandTip(x.backup)}`)}">${esc2(nachname(x.backup.name))}</span> ${
+        stufeHtml(x.backup_vergleich, x.gleichauf, (x.backup.leistung??0) - ((x.stamm||{}).leistung??0), true, true,
+          [nachname(x.backup.name), nachname((x.stamm||{}).name)])}` : `<span class="muted">–</span>`;
     const tiefe = x => x ? `<span class="${x.duenn ? "neg" : ""}" title="Kaderspieler mit Leistung ≥ 72">${x.ab_schwelle ?? "–"}${x.duenn ? " dünn" : ""}</span>` : "–";
     const lz = g => g && g.abstand_top4!=null && (g.vereine_mit_daten||0) >= LIGA_MIN_VEREINE ? fmtDelta(g.abstand_top4) : "–";
     return `<tr class="${ae ? "ae" : ""}"><td><span class="ltile" style="--grp:var(--pg-${SLOT_GRUPPE[s.key]||"mid"})">${esc2(s.kurz)}</span></td>
-      <td>${stamm(l)}</td><td>${stamm(s)}</td><td>${tiefe(l)} → ${tiefe(s)}</td><td>${lz(lg)} → ${lz(rg)}</td></tr>`;
+      <td>${stamm(l)}</td><td>${stamm(s)}</td><td>${backup(s)}</td><td style="white-space:nowrap">${tiefe(l)} → ${tiefe(s)}</td><td style="white-space:nowrap">${lz(lg)} → ${lz(rg)}</td></tr>`;
   }).join("");
   const postab = `<table class="planpos"><thead><tr><th></th><th>Stamm ${esc2(lName)}</th><th>Stamm ${esc2(rName)}</th>
+      <th title="${escAttr(`Bester freier Kaderspieler in „${rName}“, gegen den Stamm im Rahmen der Messgenauigkeit: ≈ gleichauf, − hinten, + vorn`)}">Backup</th>
       <th title="Kaderspieler mit Leistung ≥ 72 auf der Position">Tiefe</th><th title="Abstand zur Top-4-Schwelle der Liga">Δ Top 4</th></tr></thead>
     <tbody>${pos}</tbody></table>`;
   return `${warn.length ? `<div class="planwarn">${warn.map(esc2).join("<br>")}</div>` : ""}
@@ -2814,7 +3067,7 @@ function drawLiga(host){
     return `<tr class="${offen?"lsel":""}${tr?"":" duenn"}" onclick="ligaAuf('${p.key}')" title="Klick: Vereine auf dieser Position">
       <td class="lname"><span class="ltile" style="--grp:var(--pg-${LIGA_GRUPPE[p.key]||"mid"})"${
         p.rolle ? ` title="${escAttr(p.rolle + (p.rolle_kurz ? ` (${p.rolle_kurz})` : ""))}"` : ""}>${esc2(kurz(p))}</span></td>
-      <td class="lname"><div class="lpos">${esc2(p.label)}</div><div class="leig">${eig}</div></td>
+      <td class="lname"><div class="lpos">${esc2(p.label)}${p.profil ? `<span class="alsprof">als ${esc2(PROFIL_NAME[p.profil]||p.profil)}</span>` : ""}</div><div class="leig">${eig}</div></td>
       <td><span class="lwert">${fmtWert(p.wert)}</span></td>
       <td class="lname"><div class="lstrip">${striche}${linie}${ich}</div></td>
       <td>${tr ? `<b>${p.rang}</b><span class="muted">/${M.rangN(p)}</span>` : `<span class="ldim" title="${escAttr(M.keineTip(p))}">–</span>`}</td>
@@ -3138,7 +3391,8 @@ function drawRepl(){
   const kopf = `<div class="dhead">
       <h2>Ersatz suchen${slot?` – ${esc2(slot.label)}`:""}</h2>
       ${vglKnopf}<button class="xbtn" onclick="closeRepl()">✕</button></div>${
-      slot && slot.rolle ? `<div class="replrolle">${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")}</div>` : ""}`;
+      slot && slot.rolle ? `<div class="replrolle">${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")}${
+        slot.profil_label ? ` · bewertet als <b>${esc2(slot.profil_label)}</b>` : ""}</div>` : ""}`;
   if(!REPL){
     box.innerHTML = kopf + `<div class="empty"><span class="spin"></span>
       suche im gesamten Datenbestand…</div>`;
@@ -3167,11 +3421,14 @@ function drawRepl(){
       c.stand ? `<span class="muted" title="Import-Datum dieser Zeile">Stand ${String(c.stand).slice(8,10)}.${String(c.stand).slice(5,7)}.</span>` : ""
     ].filter(Boolean).join(" · ");
     const det = c.id===REPL_PID
-      ? `<tr class="rdet"><td colspan="11">${replDetail(c)}</td></tr>` : "";
+      ? `<tr class="rdet"><td colspan="14">${replDetail(c)}</td></tr>` : "";
     const imVgl = COMPARE.includes(c.id);
     return `<tr class="${c.id===REPL_PID?"rsel":""}" onclick="replPick(${c.id})">
       <td>${scorePill(c)}</td>
       <td class="muted" style="font-family:var(--mono)">${c.fit??"–"}</td>
+      <td style="white-space:nowrap" title="${escAttr(bandTip(c))}">${bandText(c)}${bandBalken(c, o)}</td>
+      <td>${stufeHtml(c.vergleich_original, c.gleichauf, (c.leistung??0) - (o.leistung??0), false, true,
+        [nachname(c.name), nachname(o.name)])}</td>
       <td>${dnaCell(c)}</td>
       ${persTd(c)}
       <td class="${c.delta_score>0?"pos":c.delta_score<0?"neg":"muted"}">${c.delta_score>0?"+":""}${c.delta_score}</td>
@@ -3202,7 +3459,7 @@ function drawRepl(){
 
   box.innerHTML = kopf
     + `<div class="dsub">Zu ersetzen: <b>${esc2(o.name)}</b> · Gesamt ${o.score}
-        · Fit ${o.fit??"–"} · Charakter ${o.charakter??"ungescoutet"}
+        · Fit ${o.fit??"–"} · Leistung ${bandText(o)} · Charakter ${o.charakter??"ungescoutet"}
         · ${o.age==null?"Alter unbekannt":Math.round(o.age)+" Jahre"}
         · ${Math.round(o.minutes||0)} Minuten</div>`
     + replSteuerung()
@@ -3217,6 +3474,8 @@ function drawRepl(){
     + (REPL.treffer.length ? `<table class="repl"><thead><tr>
         <th title="Fit^0,7 × Charakter^0,3 nach Abzug für Umschulung – ohne gescoutete Persönlichkeit nur der Fit">Gesamt</th>
         <th title="Positions-Fit nach Abzug für Umschulung – die Ersatzsuche ist eine Slot-Suche">Fit</th>
+        <th title="${escAttr(`Leistung = √(Fit × Score als ${slot && slot.profil_label || "Rolle"}) mit 95-%-Spanne; graue Fläche = Spanne von ${o.name}. Sortiert wird weiter nach Gesamt.`)}">Leistung</th>
+        <th title="${escAttr(`Gegen ${o.name}, im Rahmen der Messgenauigkeit: ≈ gleichauf, + vorn, − hinten; die Quadrate zeigen, wie sicher (leicht · klar · sicher)`)}">Stufe</th>
         <th title="Vereins-DNA: passstark × Ballgewinner">DNA</th>
         <th title="Persönlichkeit aus dem Spielerprofil">Charakter</th>
         <th title="Unterschied zum aktuellen Spieler">Δ</th>
@@ -3466,11 +3725,66 @@ const TABLE_MAX = 300;
 let TABLE_ALLE = false;
 function tableAlle(){ TABLE_ALLE = true; render(); }
 
+// Spitzengruppe (D19, Entscheidung Head Scout/Analyst 27.09.2026): Bezug ist
+// der Spieler mit der höchsten ERWARTETEN Stärke (score_kal) in der angezeigten
+// Liste – nicht der Erste nach Rohwert. Zur Gruppe gehört, wer mit ihm
+// „gleichauf" ist, also P(Bezug besser) unter der Grenze von „gleichauf"
+// (vergleich_konstanten). Dieselbe kalibrierte Formel wie im Backend
+// (moneyball.score_kalibriert, tactics.listen_vorsprung):
+//   P(A besser als B) = Φ((score_kal_A − score_kal_B) / √(score_sd_A² + score_sd_B²))
+// „Der Stärkste" hängt an Reiter, Mindestminuten, Filtern und Suche – deshalb
+// rechnet die Oberfläche das selbst. Nur in Positionsreitern und je Profil
+// (Abwehr: IV und AV getrennt): Scores verschiedener Profile lassen sich nicht
+// direkt vergleichen. Ohne Bausteine keine Gruppe.
+// Φ(x) = 0,5·(1 + erf(x/√2)), erf nach Abramowitz/Stegun 7.1.26 (Fehler < 1,5·10⁻⁷)
+function phiNorm(z){
+  const x = Math.abs(z) / Math.SQRT2, t = 1 / (1 + 0.3275911 * x);
+  const e = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+    + 0.254829592) * t * Math.exp(-x * x);
+  return 0.5 * (1 + (z < 0 ? -e : e));
+}
+let SPITZE = null;
+function spitzeVon(rows){
+  if(TAB==="all" || TAB==="unk" || !(sortKey==="score" || sortKey==="score_kal") || !sortDesc) return null;
+  const grenze = gleichGrenze(), jeProfil = new Map();
+  rows.forEach(p => { const w = reiterWert(p);
+    if(w.kal==null || w.sd==null) return;
+    if(!jeProfil.has(w.profil)) jeProfil.set(w.profil, []);
+    jeProfil.get(w.profil).push([p, w]); });
+  const gruppen = [], drin = new Set(), bezuege = new Set();
+  for(const [profil, liste] of jeProfil){
+    const [bp, bw] = liste.reduce((m, x) => x[1].kal > m[1].kal ? x : m);
+    let n = 0;
+    for(const [p, w] of liste){
+      const pv = p===bp ? 0.5 : phiNorm((bw.kal - w.kal) / Math.sqrt(bw.sd*bw.sd + w.sd*w.sd));
+      if(pv < grenze){ n++; drin.add(p); }
+    }
+    gruppen.push({profil, bezug:bp, n}); bezuege.add(bp);
+  }
+  gruppen.sort((a, b) => b.n - a.n);
+  return gruppen.length ? {gruppen, drin, bezuege} : null;
+}
+// Spanne des Listen-Scores als Balken – nur zum Listen-Profil, aus score_band
+function spanneTd(p){
+  const w = reiterWert(p);
+  if(w.score==null) return `<td class="muted">–</td>`;
+  if(w.band==null) return `<td class="muted" title="${!w.liste
+    ? `Spanne gibt es nur zum Listen-Profil (${esc2(p.profile_label||"?")})`
+    : !w.aktuell ? escAttr(keineAussage(p)) : "Dünne Datenbasis – unter 180 Minuten keine Aussage"}">–</td>`;
+  const lo = Math.max(0, w.score - w.band), hi = Math.min(100, w.score + w.band);
+  return `<td title="${escAttr(`Score ${w.score} ±${Math.round(w.band)} – 95 % liegen zwischen ${Math.round(lo)} und ${Math.round(hi)}${
+    SPITZE && SPITZE.drin.has(p) ? " · gleichauf mit dem Stärksten" : ""}`)}"><span class="lbar"><i class="iv" style="${
+    bandStrecke(lo, hi)}"></i><b style="left:${bandX(w.score).toFixed(1)}%"></b></span></td>`;
+}
+
 function renderTable(rows, C){
   rows = rows.slice().sort((a,b)=>{
-    const x=a[sortKey]??0, y=b[sortKey]??0;
+    const x=sortWert(a,sortKey)??0, y=sortWert(b,sortKey)??0;
     return sortDesc ? (y>x?1:y<x?-1:0) : (x>y?1:x<y?-1:0);
   });
+  SPITZE = spitzeVon(rows);
+  const mitSpanne = (sortKey==="score" || sortKey==="score_kal") && sortDesc && rows.some(p => reiterWert(p).band!=null);
+  if(mitSpanne) C = C.flatMap(c => c[0]==="score" ? [c, ["_spanne", "Spanne ±95 %"]] : [c]);
   HEAT = {};
   for(const [k] of C){
     if(!(k in HEAT_COLS)) continue;
@@ -3478,17 +3792,23 @@ function renderTable(rows, C){
     if(vals.length) HEAT[k] = [Math.min(...vals), Math.max(...vals)];
   }
   const th = C.map(([k,l])=>
-    `<th class="${k===sortKey?'active':''}${NICHT_GEWICHTET[k]?' ngw':''}"${COL_TIPS[k]?` title="${COL_TIPS[k]}"`:""} onclick="sortBy('${k}')">${l}</th>`).join("");
+    k==="_spanne" ? `<th title="95-%-Spanne des Scores aus der Spielzeit – je weniger Minuten, desto breiter">${l}</th>`
+    : `<th class="${k===sortKey?'active':''}${NICHT_GEWICHTET[k]?' ngw':''}"${COL_TIPS[k]?` title="${COL_TIPS[k]}"`:""} onclick="sortBy('${k}')">${l}</th>`).join("");
   const gedeckelt = !TABLE_ALLE && rows.length > TABLE_MAX;
   const shown = gedeckelt ? rows.slice(0, TABLE_MAX) : rows;
+  const spitze = !SPITZE ? "" : `<div class="spitze" title="${escAttr(`Bezug ist der Spieler mit der höchsten erwarteten Stärke. Gleichauf heißt: er liegt gegen ihn mit weniger als ${
+      pZahl(gleichGrenze())} % vorn – in weniger als ${Math.round(gleichGrenze()*10)} von 10 Halbserien. Es zählen nur Spieler aus dem aktuellen Export, deren Listen-Profil das des Reiters ist.`)}">${
+    SPITZE.gruppen.map(g => `<b>Gleichauf mit dem Stärksten${SPITZE.gruppen.length > 1 ? ` (${PROFIL_KURZ[g.profil]||g.profil})` : ""}: ${
+      g.n.toLocaleString("de-DE")} Spieler</b> <span class="muted">· Bezug ${esc2(g.bezug.name)}</span>`).join("<br>")}
+    <div class="muted" style="margin-top:2px">Ihre Reihenfolge ist im Rahmen der Messgenauigkeit offen.</div></div>`;
   const body = shown.map(p=>
-    `<tr${p.id!=null?` onclick="openDetail(${p.id})"`:""}>${C.map(([k])=>cell(p,k)).join("")}</tr>`).join("");
+    `<tr${SPITZE && SPITZE.drin.has(p) ? ` class="spitz${SPITZE.bezuege.has(p) ? " bezug" : ""}"` : ""}${p.id!=null?` onclick="openDetail(${p.id})"`:""}>${C.map(([k])=>cell(p,k)).join("")}</tr>`).join("");
   const rest = gedeckelt ? `<div class="muted" style="font-size:12px;padding:10px 8px 18px">
       Die ersten ${TABLE_MAX} von ${rows.length} nach Sortierung.
       <button class="linkbtn" onclick="tableAlle()">alle ${rows.length} anzeigen</button>
       – oder über Suche, Minuten und Filter eingrenzen.</div>` : "";
   document.getElementById("tableHost").innerHTML =
-    `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${rest}`;
+    `${spitze}<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${rest}`;
 }
 
 function niceStep(raw){
@@ -3597,6 +3917,7 @@ async function setSrc(src){
 
 async function loadData(){
   if(!window.pywebview){ render(); return; }   // Browser-Testmodus
+  vglKonstantenLaden();
   const st = document.getElementById("status");
   const res = await window.pywebview.api.load_saved(SRC);
   if(res.ok){
@@ -3780,6 +4101,24 @@ function closeAll(){
   document.getElementById("drawer").classList.remove("open");
 }
 
+// Score je Profil im Spielerbogen (D19): das Listen-Profil hervorgehoben
+function profilZeile(p){
+  const je = Object.entries(p.score_je_profil || {}).filter(([k, w]) => w && w.score!=null)
+    .sort((a, b) => b[1].score - a[1].score);
+  if(!je.length) return "";
+  // Band und erwartete Stärke gibt es nur zum Listen-Profil (score_band, score_kal)
+  const akt = p.aktuell === true;
+  const kal = akt && p.score_kal!=null ? ` <span title="${escAttr(`Erwartete Stärke ${p.score_kal.toLocaleString("de-DE", {maximumFractionDigits:1})} – der Listen-Score zur Mitte des Profils gezogen`)}">· erwartet <b>${Math.round(p.score_kal)}</b></span>`
+    : p.score==null ? "" : !akt ? ` <span title="${escAttr(keineAussage(p))}">· ${
+        p.source === "ram" || (p.source === "ram+export" && p.stat_quelle !== "export") ? "RAM-Zahlen, nicht kalibriert" : "älterer Import, ohne Spanne"}</span>`
+    : (p.minutes||0) < 180 ? ` · dünne Datenbasis` : "";
+  if(je.length < 2 && !kal) return "";
+  return `<div class="dprof">Score je Profil: ${je.map(([k, w]) => profilTag(k,
+    `${PROFIL_KURZ[k]} ${w.score}${k===p.profil && akt && p.score_band!=null ? ` ±${Math.round(p.score_band)}` : ""}`,
+    `${w.label}: ${w.score}${w.talent!=null ? ` · Talent ${w.talent}` : ""}${k===p.profil ? " – der Listen-Score" : ""}`,
+    k===p.profil ? "haupt" : "")).join("")}${kal}</div>`;
+}
+
 async function renderDetail(){
   const p = PLAYERS.find(q=>q.id===DETAIL_ID);
   const d = document.getElementById("drawer");
@@ -3790,11 +4129,12 @@ async function renderDetail(){
     ? `<span class="pill" style="background:rgba(var(${p.score>=50?'--heat-pos':'--heat-neg'}),.4)">${p.score}</span>` : "";
   d.innerHTML = `
    <div class="dhead"><h2>${p.name}</h2>${sc}<button class="xbtn" onclick="closeAll()">✕</button></div>
-   <div class="dsub">${p.profile_label||"?"} · ${p.pos_label||"?"} · ${p.age?p.age+" J · ":""}${p.minutes||0} Min${p.value_m!=null?` · <b>${p.value_m} M€</b>`:""}${p.value_score!=null?` · Eff ${p.value_score}`:""} ·
+   <div class="dsub">als ${p.profile_label||"?"} · ${p.pos_label||"?"} · ${p.age?p.age+" J · ":""}${p.minutes||0} Min${p.value_m!=null?` · <b>${p.value_m} M€</b>`:""}${p.value_score!=null?` · Eff ${p.value_score}`:""} ·
      ${p.league?`${p.league} (K ${p.league_coeff})`:"Liga unbekannt"}${p.exp_at?` · <span title="Export-Stand">Export ${p.exp_at.slice(0,10)}</span>`:""}</div>
    ${p.pl_text || p.homegrown ? `<div class="dhg" title="Bezogen auf unseren Verein zum Exportzeitpunkt">${
       p.pl_text ? `Meldeliste · ${plZelle(p)}` : ""}${p.homegrown ? `<div class="muted">Eigengewächs: ${esc2(p.homegrown)}${
       p.homegrown_stand ? ` · Stand ${datumKurz(p.homegrown_stand)}` : ""}</div>` : ""}</div>` : ""}
+   ${profilZeile(p)}
    ${preislot(p)}
    ${charakterBlock(p)}
    <div class="dsec">Merkliste</div>
@@ -3969,7 +4309,8 @@ function drawCompare(){
   const kopf = `<div class="cmhead">
       <span class="cmtile" style="--grp:var(--pg-${SLOT_GRUPPE[key]||"mid"})">${esc2(slot.kurz||slotKurz(key))}</span>
       <div class="cmtitel"><h2>${esc2(slot.label||slotName(key))}</h2>
-        <div class="dsub">${slot.rolle ? `${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")} · ` : ""}Vergleich gegen Stamm und Backup</div></div>
+        <div class="dsub">${slot.rolle ? `${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")} · ` : ""}${
+          slot.profil_label ? `bewertet als <b>${esc2(slot.profil_label)}</b> · ` : ""}Vergleich gegen Stamm und Backup</div></div>
       <label class="status" style="display:flex;gap:6px;align-items:center">Position
         <select onchange="setCmpSlot(this.value)">${optionen}</select></label>
       <button class="xbtn" onclick="closeCompare()" title="schließen (Esc)">✕</button></div>`;
@@ -4016,9 +4357,14 @@ function drawCompare(){
   const dStamm = (s, k) => st && s!==st && s[k]!=null && st[k]!=null ? cmpDelta(s[k]-st[k]) : "";
   let html = sektion("Leistung", "Δ gegen den Stamm")
     + zeile(`<span title="${GESAMT_VGL_TIP}">Gesamt</span>`, "Fit · Score · Charakter", s=>`<div class="cmkpi" style="gap:9px">${pill(s)}${dStamm(s,"gesamt")}</div>`)
+    + zeile(`<span title="Leistung = √(Fit × Score im Profil der Rolle); die Linie ist die 95-%-Spanne aus der Spielzeit, die graue Fläche die des Stammspielers">Leistung</span>`,
+        "√(Fit × Score) · Spanne ±95 %", s=>`<div title="${escAttr(bandTip(s))}">${bandText(s)}${bandBalken(s, s===st ? null : st, true)}</div>`)
+    + zeile("gegen den Stamm", "Stufe · Wahrscheinlichkeit", s=>!st || s===st ? `<span class="cmraw" style="font-size:11px">Bezug</span>`
+        : stufeHtml(s.vergleich_stamm, s.gleichauf_stamm, (s.leistung??0) - (st.leistung??0), false, false,
+            [nachname(s.name), nachname(st.name)]))
     + zeile("Fit auf der Position", "nach Abzug für Umschulung", s=>`<span class="cmwert">${s.fit??"–"}</span>${
         s.abzug ? `<span class="rbadge um" title="Spielt bisher: ${esc2(s.umschulung||"")}">umschulen −${s.abzug}</span>` : ""}`)
-    + zeile("Score", "Moneyball, stilneutral", s=>`<span class="cmwert">${s.mb??"–"}</span>`)
+    + zeile("Score", `als ${esc2(slot.profil_label||"?")} · stilneutral`, s=>`<span class="cmwert">${s.mb??"–"}</span>${abwTag(s.eid ?? s.id, slot.profil)}`)
     + zeile("Charakter", "sichtbare Persönlichkeit", s=>s.pers_score==null
         ? `<span class="cmleer" title="Persönlichkeit noch nicht gescoutet">ungescoutet</span>`
         : `<span style="color:${persInk(s.pers_score)}" title="${persTip(s)}">${esc2(persKurz(s.pers_label))}</span> <span class="cmraw" style="display:inline">${s.pers_score}</span>`);
@@ -4090,6 +4436,8 @@ function drawCompare(){
        <thead><tr><th></th>${kopfzellen}${suchkopf}</tr></thead><tbody>${html}</tbody></table>
        <div class="cmfuss">Δ = Abstand zum Stammspieler in Perzentilpunkten. Perzentile gegen
          ${(CMP.vergleichsbasis||0).toLocaleString("de-DE")} Spieler, die diese Position spielen können.
+         Leistung = √(Fit × Score im Profil der Rolle) mit 95-%-Spanne aus der Spielzeit; „gleichauf“ heißt:
+         im Rahmen der Messgenauigkeit nicht zu trennen, die Stufen sagen, wie sicher ein Vorsprung ist.
          Gesamt = Fit^0,35 × Score^0,35 × Charakter^0,30 – dieselbe Zahl wie auf dem Brett; ohne
          gescoutete Persönlichkeit √(Fit × Score). Die Ersatzsuche rechnet ohne Score und kann für
          denselben Kandidaten eine andere Gesamtzahl zeigen. Kandidaten kommen über das Suchfeld,

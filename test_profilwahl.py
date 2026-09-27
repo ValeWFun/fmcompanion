@@ -397,6 +397,13 @@ try:
         pruefe("load_saved und signals lassen sich wie in pywebview serialisieren", True)
     except TypeError as e:
         pruefe("load_saved und signals lassen sich wie in pywebview serialisieren", False, str(e))
+    ram_rows = [{"eid": 1, "pos_mask": 0, "minutes": 100.0},
+                {"eid": 2, "pos_mask": 1 << 14, "minutes": 100.0}]
+    api._merge_export_stats(ram_rows, {1: {"position": "DM, M (Z)", "minutes": 900},
+                                       2: {"position": "DM, M (Z)", "minutes": 900}})
+    pruefe("RAM-Maske 0 + Export-Position: Maske aus der Export-Position, sonst bleibt sie",
+           ram_rows[0]["pos_mask"] == moneyball.pos_mask_from_string("DM, M (Z)")
+           and ram_rows[1]["pos_mask"] == 1 << 14)
     pruefe("kein Merk-Schluessel _gruppen an den Zeilen",
            not any("_gruppen" in p for p in ls["players"]))
     pruefe("load_saved: jede Zeile hat aktuell (bool) und profile_erlaubt (Liste)",
