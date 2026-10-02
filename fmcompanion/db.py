@@ -420,7 +420,15 @@ def save_export(conn, players, felder=None, datei=None, ts=None):
         "VALUES (?, ?, ?, ?, ?, ?)",
         [[z["eid"], ts, z.get("value"), z.get("wage"), z.get("age"), z.get("rating")]
          for z in zeilen])
-    # Historie: die Datei so, wie sie war – fehlende Felder bleiben NULL
+    _historie_schreiben(conn, players, felder, datei, ts)
+    conn.commit()
+    return len(players)
+
+
+def _historie_schreiben(conn, players, felder, datei, ts):
+    """Eine Datei, so wie sie war, in export_importe und export_stand –
+    fehlende Felder bleiben NULL. Gemeinsam fuer save_export und
+    historie_nachtragen. -> import_id"""
     iid = conn.execute(
         "INSERT INTO export_importe (imported_at, datei, felder, anzahl) "
         "VALUES (?, ?, ?, ?)", (ts, datei, ",".join(felder), len(players))).lastrowid
@@ -429,8 +437,36 @@ def save_export(conn, players, felder=None, datei=None, ts=None):
         f"VALUES ({', '.join('?' * (len(EXPORT_COLS) + 2))})",
         [[iid, int(p["eid"])] + [p.get(c) if c in felder else None for c in EXPORT_COLS]
          for p in players])
+    return iid
+
+
+def historie_nachtragen(conn, players, felder, datei, ts):
+    """Eine ALTE Exportdatei NUR in die Import-Historie nachtragen (D21).
+
+    Anders als save_export wird nichts zusammengefuehrt: export_players (der
+    aktuelle Stand), export_history und die Einstellungen bleiben unberuehrt –
+    eine alte Datei darf keinen aktuellen Wert ueberschreiben. Sie landet nur
+    in export_importe und export_stand, mit ihrem historischen Zeitpunkt `ts`,
+    damit export_stand_bis, export_verlauf und scoutkit._staende die
+    Vorsaisons kennen.
+
+    Idempotent ueber (datei, ts): steht der Eintrag schon da, passiert nichts.
+    Ist die Historie noch leer, wird VORHER wie bei save_export der Altbestand
+    uebernommen (bestand_sichern), sonst ginge er verloren.
+    -> import_id des neuen Eintrags, oder None, wenn er schon da war.
+    """
+    _init_export(conn)
+    _init_historie(conn)
+    if not conn.execute("SELECT 1 FROM export_importe LIMIT 1").fetchone():
+        bestand_sichern(conn)
+    if conn.execute("SELECT 1 FROM export_importe WHERE datei = ? AND imported_at = ? LIMIT 1",
+                    (datei, ts)).fetchone():
+        return None
+    felder = [c for c in EXPORT_COLS if felder is None or c in felder]
+    players = [p for p in players if p.get("eid") is not None]
+    iid = _historie_schreiben(conn, players, felder, datei, ts)
     conn.commit()
-    return len(players)
+    return iid
 
 
 def export_importe(conn):
