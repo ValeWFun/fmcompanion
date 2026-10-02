@@ -350,6 +350,33 @@
     border:1px dashed var(--dim);padding:0 3px;margin-left:5px;vertical-align:middle;
     letter-spacing:.03em;cursor:help}
   .pill.alt{color:var(--muted);font-weight:500}
+
+  /* ---------- Mehrsaison (D11b) ----------
+     Horizont als ruhige Marke mit Strich links; Saisons als kleine Tabelle,
+     der Anteil-Balken in neutralem Grau – er zeigt Gewicht, kein Urteil.
+     Sprung/Absturz neutral mit 45°-Pfeil (Vorsicht, keine Wertung). */
+  .horizont{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--muted);
+    border-left:3px solid var(--dim);padding:1px 7px;margin-left:10px;white-space:nowrap;
+    cursor:help;vertical-align:middle;text-transform:none;font-weight:500}
+  .horizont b{color:var(--text);font-weight:700;text-transform:uppercase;letter-spacing:.1em}
+  .tactnavzeile{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .saisonmarke{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--muted);
+    border:1px solid var(--dim);padding:0 4px;margin-left:5px;white-space:nowrap;cursor:help;
+    vertical-align:middle;letter-spacing:.02em}
+  .saisonmarke.leise{font-weight:500;border-color:var(--rule)}
+  .erwhinweis{font-size:11.5px;margin:6px 0 2px;line-height:1.5;cursor:help}
+  table.sais{width:100%;margin:2px 0 4px;font-size:12px;background:none}
+  table.sais th,table.sais td{position:static;padding:3px 10px 3px 0;border-bottom:1px solid var(--rule);
+    text-align:right;white-space:nowrap;background:none;font-family:var(--mono)}
+  table.sais th{font-size:9.5px;font-weight:500;letter-spacing:.08em;color:var(--muted);
+    text-transform:uppercase;cursor:default;border-bottom:1.5px solid var(--border)}
+  table.sais th:nth-child(-n+2),table.sais td:nth-child(-n+2){text-align:left}
+  table.sais td.sv{white-space:normal;color:var(--muted);font-family:var(--sans,inherit)}
+  table.sais tr.nz td{color:var(--dim)}
+  .saisbar{display:inline-block;width:56px;height:8px;background:var(--surface2);
+    vertical-align:middle;overflow:hidden;margin-right:6px}
+  .saisbar i{display:block;height:100%;background:var(--dim)}
+  .saisfuss{font-size:11.5px;margin:2px 0 8px;line-height:1.5}
   .star{cursor:pointer;font-size:13px;user-select:none;color:var(--mark);
     transition:transform .1s}
   .star:hover{transform:scale(1.25)}
@@ -1504,9 +1531,115 @@ function bandBalken(x, ref, breit){
   return `<span class="lbar${breit ? " breit" : ""}">${r}<i class="iv" style="${bandStrecke(x.leistung_von, x.leistung_bis)}"></i><b style="left:${
     bandX(x.leistung).toFixed(1)}%"></b></span>`;
 }
+// ---- Mehrsaison (D11b) ---------------------------------------------------------
+// Jede Saison wird einzeln gegen die aktuelle Referenz bewertet und danach nach
+// Minuten × d^k gemischt (k = Saisons zurück). Zwei Horizonte: „Form“ (nächste
+// Spiele – Brett, automatische Elf, Liga- und CL-Vergleich) und „Transfer“
+// (nächste Saison – Ersatzsuche, Slot-Vergleich, Planspiel, Tabelle). Jede
+// Ansicht bringt `horizont` {key, stand, text}, jeder Spieler saisons, m_eff
+// (Band und Vergleich rechnen damit) und hinweise. Balken und Perzentile
+// bleiben bei der aktuellen Saison.
+let LS_HORIZONT = null;          // Horizont der Tabelle (load_saved), sonst Transfer
+const zahlDe = v => Math.round(+v || 0).toLocaleString("de-DE");
+const zaehlende = x => ((x && x.saisons) || []).filter(s => s.zaehlt);
+const mehrSaisons = x => zaehlende(x).length > 1;
+function horizontInfo(h){
+  const key = typeof h === "string" ? h : h && h.key;
+  if(!key) return null;
+  const k = (VGL_KONST && VGL_KONST.horizonte && VGL_KONST.horizonte[key]) || {};
+  return Object.assign({key}, k, typeof h === "object" ? h : {});
+}
+function horizontTip(i){
+  if(!i) return "";
+  const wofuer = i.key === "form" ? "Brett, automatische Elf, Kadertiefe, Liga- und CL-Vergleich"
+    : "Ersatzsuche, Slot-Vergleich, Planspiel und Tabelle";
+  const d = i.d, dd = v => (+(+v).toFixed(3)).toLocaleString("de-DE");
+  const gewicht = d == null ? "nach Minuten gewichtet, ältere Saisons schwächer"
+    : d >= 0.999 ? "jede Vorsaison zählt nach ihren Minuten voll mit"
+    : `die Vorsaison zählt je Minute ${dd(d)}-fach, die davor ${dd(d * d)}-fach`;
+  const stand = i.stand === "sommer" ? "Stand Saisonende" : i.stand === "winter" ? "Stand Halbserie" : "";
+  const klammer = [d != null ? `d = ${dd(d)}` : "", stand].filter(Boolean).join(", ");
+  return `${i.text || ""} – gilt für ${wofuer}. Jede Saison wird einzeln bewertet und dann gemischt: ${gewicht}${
+    klammer ? ` (${klammer})` : ""}.` + (i.key === "transfer" ? " Spieler bis 23 rechnen auch hier mit den Form-Gewichten." : "")
+    + " Balken und Perzentile zeigen weiter die aktuelle Saison.";
+}
+function horizontTag(h){
+  const i = horizontInfo(h); if(!i || !i.text) return "";
+  const teil = i.text.split(":");
+  return `<span class="horizont" title="${escAttr(horizontTip(i))}"><b>${esc2(teil[0])}</b>${
+    teil[1] ? " · " + esc2(teil[1].trim()) : ""}</span>`;
+}
+// Band und Vergleich rechnen mit m_eff; ohne Vorsaison sind das die Minuten
+function minutenText(x){
+  const n = zaehlende(x).length;
+  return x.m_eff != null && n > 1
+    ? `${zahlDe(x.m_eff)} effektiven Minuten (${n} Saisons, diese Saison ${zahlDe(x.minutes)})`
+    : `${zahlDe(x.minutes)} Minuten`;
+}
+// Anteile an der Mischung, z. B. „· gemischt: 2030/31 80 · 2.000′ (60 %) · 2029/30 70 · 1.300′ (40 %)“ (erfunden)
+function saisonsKette(x, vorsatz){
+  const z = zaehlende(x); if(z.length < 2) return "";
+  const summe = z.reduce((a, s) => a + (s.gewicht || 0), 0) || 1;
+  return (vorsatz == null ? " · gemischt: " : vorsatz) + z.map(s => `${s.label} ${
+    s.wert != null ? Math.round(s.wert) : "–"} · ${zahlDe(s.minuten)}′ (${Math.round(100 * (s.gewicht || 0) / summe)} %)`).join(" · ");
+}
+const saisonKurz = j => j == null ? "?" : `${j}/${String((+j + 1) % 100).padStart(2, "0")}`;
+// Sprung/Absturz: die letzten zwei ganzen Saisons liegen mindestens 10 Punkte
+// auseinander (je ab 900 Min). Neutral markiert – kein Urteil, nur Vorsicht:
+// im Mittel hält etwa die Hälfte davon (Datenanalyst).
+const HINWEIS_KURZ = {kalenderjahr: "Kalenderjahr", torwart: "nur Verein"};
+function hinweisMarke(x){
+  return ((x && x.hinweise) || []).map(h => {
+    if(h.art === "sprung" || h.art === "absturz"){
+      const auf = h.art === "sprung", d = Math.abs(Math.round(h.delta || 0));
+      const wert = j => { const s = (x.saisons || []).find(e => e.saison === j); return s && s.wert != null ? ` ${Math.round(s.wert)}` : ""; };
+      const [alt, neu] = h.saisons || [];
+      const tip = `${auf ? "Sprung" : "Absturz"}: ${saisonKurz(alt)}${wert(alt)} → ${saisonKurz(neu)}${wert(neu)} (${
+        auf ? "+" : "−"}${d}, zwei ganze Saisons). ${h.text || ""}`;
+      return `<span class="saisonmarke" title="${escAttr(tip)}">${auf ? "Sprung +" : "Absturz −"}${d}</span>`;
+    }
+    // Kalenderjahr-Liga, Torwart: nur eine bzw. nur die Vereins-Saisons zählen
+    const kurz = HINWEIS_KURZ[h.art];
+    return kurz ? `<span class="saisonmarke leise" title="${escAttr(h.text || "")}">${kurz}</span>` : "";
+  }).join("");
+}
+// Saisons als kleine Tabelle (Drawer, Brett-Detail): Wert, Spielzeit, Anteil
+function saisonsBlock(x, wertName, h){
+  const s = (x && x.saisons) || []; if(!s.length) return "";
+  const z = zaehlende(x), summe = z.reduce((a, e) => a + (e.gewicht || 0), 0) || 1;
+  const zeilen = s.map(e => {
+    const anteil = e.zaehlt ? Math.round(100 * (e.gewicht || 0) / summe) : null;
+    const vereine = (e.vereine || []).filter(Boolean);
+    const tip = `${e.label}: ${wertName} ${e.wert != null ? Math.round(e.wert) : "–"} aus ${zahlDe(e.minuten)} Minuten${
+      e.ganz ? "" : " (Halbserie – Stand mitten in der Saison)"}${e.zaehlt ? ` · Anteil an der Mischung ${anteil} %` : " · zählt nicht"}`;
+    return `<tr class="${e.zaehlt ? "" : "nz"}" title="${escAttr(tip)}"><td>${esc2(e.label)}</td>
+      <td class="sv">${esc2(vereine.join(" → ") || "–")}</td><td>${zahlDe(e.minuten)} Min${e.ganz ? "" : " · Halbserie"}</td>
+      <td><b>${e.wert != null ? Math.round(e.wert) : "–"}</b></td>
+      <td>${anteil != null ? `<span class="saisbar"><i style="width:${anteil}%"></i></span>${anteil} %` : "zählt nicht"}</td></tr>`;
+  }).join("");
+  const sprung = (x.hinweise || []).find(e => e.art === "sprung" || e.art === "absturz");
+  const leise = (x.hinweise || []).filter(e => e.art !== "sprung" && e.art !== "absturz").map(e => esc2(e.text || ""));
+  const fuss = [
+    z.length > 1 && x.m_eff != null ? `Band und Vergleich rechnen mit ${zahlDe(x.m_eff)} effektiven Minuten.` : "",
+    sprung ? `${hinweisMarke({hinweise: [sprung], saisons: x.saisons})} ${esc2(sprung.text || "")}` : "",
+    ...leise].filter(Boolean).join(" ");
+  return `<div class="dsec">Saisons${horizontTag(h)}</div>
+    <table class="sais"><thead><tr><th>Saison</th><th>Verein</th><th>Spielzeit</th><th>${esc2(wertName)}</th><th>Anteil</th></tr></thead>
+    <tbody>${zeilen}</tbody></table>${fuss ? `<div class="saisfuss muted">${fuss}</div>` : ""}`;
+}
+// Slot-Vergleich: Saisons kompakt untereinander
+function saisonsZelle(s){
+  const z = zaehlende(s);
+  if(!z.length) return `<span class="cmleer">–</span>`;
+  if(z.length < 2) return `<span class="cmraw" style="font-size:11px">nur ${esc2(z[0].label)}</span>${hinweisMarke(s)}`;
+  const summe = z.reduce((a, e) => a + (e.gewicht || 0), 0) || 1;
+  return z.map(e => `<div class="cmraw" style="font-size:11px">${esc2(e.label)} <b>${e.wert != null ? Math.round(e.wert) : "–"}</b> · ${
+    Math.round(100 * (e.gewicht || 0) / summe)} %</div>`).join("") + hinweisMarke(s);
+}
+
 const bandTip = x => x && x.leistung!=null
   ? `Leistung ${x.leistung}${x.leistung_band!=null ? ` ±${x.leistung_band.toLocaleString("de-DE")} – 95 % liegen zwischen ${
-      x.leistung_von} und ${x.leistung_bis}` : " – ohne Minuten keine Spanne"}, aus ${Math.round(x.minutes||0).toLocaleString("de-DE")} Minuten` : "";
+      x.leistung_von} und ${x.leistung_bis}` : " – ohne Minuten keine Spanne"}, aus ${minutenText(x)}${saisonsKette(x)}` : "";
 
 // ---- Stufen im Vergleich (D19, kalibriert) --------------------------------------
 // Das Backend liefert je Vergleich {vorsprung_p, vorsprung_stufe, vorn,
@@ -1541,12 +1674,12 @@ const stufenText = () => vglStufen().map(s => pZahl(s[0])).join(" / ") + " %";
 // `referenz` kommt mit load_saved und tactic_board; referenz_status() wird
 // bewusst nicht zusätzlich gerufen (jeder Aufruf prüft den Rechen-Fingerabdruck).
 let REFERENZ = null;
-function referenzZeile(r){
+function referenzZeile(r, h){
   if(!r || r.zeilen==null) return "";
   const tip = "Perzentile und Scores beziehen sich auf diese Vergleichsmenge: alle Spieler aus dem aktuellen "
     + "Export-Stand. Mitgezählt sind nur Ligen mit genug Spielern und Torhüter mit Detailstatistik und genug Minuten.";
   return `<div class="refbasis" title="${escAttr(tip)}">Vergleichsbasis: ${(+r.zeilen).toLocaleString("de-DE")} Spieler · ${
-    r.ligen} Ligen · ${r.keeper} Torhüter</div>`;
+    r.ligen} Ligen · ${r.keeper} Torhüter${h ? horizontTag(h) : ""}</div>`;
 }
 function referenzWarnung(r){
   if(!r || !r.schmal) return "";
@@ -1690,7 +1823,7 @@ function cell(p, key){
       : p.stat_quelle==="export"
       ? ` <span class="srcbadge" title="Zahlen aus dem FM-Export (Stand ${(p.stat_stand||'').slice(0,10)}) – der Speicher hatte weniger Minuten, also einen unvollständigen Stand">Exp↑</span>` : "";
     return `<td class="name">${starHtml(p)}<span${dim}${nichtAktuell(p) ? ' class="altname"' : ""}>${
-      p.name}</span>${badge}${stale}${standTag(p)}</td>`;
+      p.name}</span>${badge}${stale}${standTag(p)}${hinweisMarke(p)}</td>`;
   }
   if(key==="pos_label"){
     const g = p.is_gk ? "tw" : ((p.pos_groups||[])[0] || "unk");
@@ -1733,7 +1866,8 @@ function cell(p, key){
       : `Aufschlüsselung nur zum Listen-Score (${p.score??"–"} als ${p.profile_label||"?"})`;
     const liga = p.league ? `${p.league} (Koeff. ${p.league_coeff})` : "unbekannt (Koeff. 1.0)";
     const alt = nichtAktuell(p);
-    const tip = `${alt ? escAttr(standText(p)) + "&#10;" : ""}Score als ${w.label||"?"}${w.band!=null ? ` ±${Math.round(w.band)} (95 %)` : ""}&#10;${parts}&#10;Liga: ${liga}&#10;Perzentile relativ zum Pool, /90-Raten geshrinkt (min/(min+180)) × Liga-Koeffizient`;
+    const tip = `${alt ? escAttr(standText(p)) + "&#10;" : ""}Score als ${w.label||"?"}${w.band!=null ? ` ±${Math.round(w.band)} (95 %)` : ""}${
+      w.liste && mehrSaisons(p) ? "&#10;" + escAttr(saisonsKette(p, `${(horizontInfo(LS_HORIZONT || "transfer") || {}).text || "Transfer"} – gemischt aus `)) + "&#10;Aufschlüsselung der aktuellen Saison:" : ""}&#10;${parts}&#10;Liga: ${liga}&#10;Perzentile relativ zum Pool, /90-Raten geshrinkt (min/(min+180)) × Liga-Koeffizient`;
     // In „Alle" steht das Profil immer dabei; im Reiter nur, wenn die Liste ihn anders sieht
     const tag = TAB==="all" || TAB==="unk" ? profilTag(w.profil, null, `bewertet als ${w.label||"?"}`)
       : !w.liste && p.profil && p.score!=null ? profilTag(p.profil, `${PROFIL_KURZ[p.profil]} ${p.score}`,
@@ -2246,11 +2380,15 @@ async function renderTactic(){
 }
 
 function tactNav(){
-  return `<div class="tactnav"><div class="seg">
+  // Horizont der gezeigten Unteransicht (D11b): Brett und Liga „Form“, Planspiel „Transfer“
+  const L = TACT_VIEW === "liga" ? ligaDaten() : null;
+  const h = TACT_VIEW === "liga" ? L && L.horizont : TACT_VIEW === "plan" ? PLAN_ERG && PLAN_ERG.horizont
+    : TACT && TACT.horizont;
+  return `<div class="tactnav"><div class="tactnavzeile"><div class="seg">
     <button class="${TACT_VIEW==="brett"?"on":""}" onclick="setTactView('brett')">Brett</button>
     <button class="${TACT_VIEW==="liga"?"on":""}" onclick="setTactView('liga')">Ligavergleich</button>
     <button class="${TACT_VIEW==="plan"?"on":""}" onclick="setTactView('plan')">Planspiel</button>
-  </div>${referenzWarnung((TACT && TACT.referenz) || REFERENZ)}</div>`;
+  </div>${horizontTag(h)}</div>${referenzWarnung((TACT && TACT.referenz) || REFERENZ)}</div>`;
 }
 function setTactView(v){ TACT_VIEW = v; renderTactic(); }
 
@@ -2438,7 +2576,7 @@ function drawTactic(host){
         title="${escAttr(`Rechtsklick: Ersatz für diesen Spieler suchen · ${c.stat_quelle==="export"
           ? "Zahlen aus dem FM-Export – der Speicher hatte weniger Minuten" : "Zahlen aus dem Speicher"}${
           c.pos_quelle ? ` · Position: ${c.pos_quelle}` : ""}`)}">
-      <td class="name">${esc2(c.name)}${formPfeil(c.form)}${
+      <td class="name">${esc2(c.name)}${formPfeil(c.form)}${hinweisMarke(c)}${
         c.id===slot.startelf_id
           ? (slot.gepinnt
               ? `<span class="telfmark manuell" title="manuell aufgestellt – Rechtsklick: Pin lösen">manuell</span>`
@@ -2509,6 +2647,7 @@ function drawTactic(host){
         <th title="Leistung = √(Fit × Score im Profil der Rolle) mit 95-%-Spanne aus der Spielzeit – je weniger Minuten, desto breiter">Leistung</th>
         <th title="${escAttr(`Gegen den Stammspieler: ≈ gleichauf, + vorn, − hinten; die Quadrate zeigen, wie sicher (Stufen ab ${stufenText()} – kalibriert: so oft liegt der Vordere in der nächsten Halbserie vorn)`)}">Stufe</th>
       </tr></thead><tbody>${liste}</tbody></table>
+      ${elfHinweis(slot)}
       ${detail}
       <div class="dsec">Was hier nicht messbar ist</div>
       <ul class="tblind">${slot.blind.map(b=>`<li>${esc2(b)}</li>`).join("")}</ul>
@@ -2518,6 +2657,25 @@ function drawTactic(host){
 const scoreInk = v => v>=50 ? "var(--pos)" : "var(--neg)";
 // Stammspieler eines Brett-Slots (Bezug für Band und Stufe)
 const stammVon = s => s ? s.kandidaten.find(k => k.id===s.startelf_id) || null : null;
+
+// Automatische Elf (D11b): Auswahl nach der ERWARTETEN Stärke – die Leistung zur
+// Mitte gezogen (je weniger effektive Minuten, desto stärker), mit Charakter
+// wie die Gesamtzahl. Angezeigt werden weiter Leistung, Band und Gesamtzahl.
+// Steht ein Kandidat mit höherer Gesamtzahl hinter dem Gesetzten, sagt die
+// Zeile warum – sonst wundert man sich über den höheren Rohwert auf der Bank.
+function elfHinweis(slot){
+  const st = stammVon(slot);
+  if(!st || st.erwartet == null) return "";
+  const tip = "Die automatische Elf wählt nach der erwarteten Stärke: der Leistung, zur Mitte gezogen – je weniger "
+    + "effektive Minuten, desto stärker –, mit Charakter wie die Gesamtzahl. So rückt ein hoher Rohwert auf wenigen "
+    + "Minuten nicht automatisch vor einen etablierten Spieler. Den erwarteten Wert zeigt der Tooltip an der Gesamtzahl.";
+  const vor = slot.gepinnt ? null : slot.kandidaten.filter(k => k !== st && !k.gesetzt_auf && k.score != null
+      && k.erwartet != null && k.score > st.score && k.erwartet <= st.erwartet)
+    .sort((a, b) => b.score - a.score)[0];
+  const warum = vor ? ` · ${esc2(nachname(vor.name))} hat die höhere Gesamtzahl (${vor.score} gegen ${st.score}), erwartet aber ${
+    Math.round(vor.erwartet)} gegen ${Math.round(st.erwartet)}` : "";
+  return `<div class="erwhinweis muted" title="${escAttr(tip)}">Automatische Elf: <b>Auswahl nach erwarteter Stärke</b> – angezeigt werden Leistung, Band und Gesamtzahl${warum}.</div>`;
+}
 
 // Gesamt = Fit^0,35 × Score^0,35 × Charakter^0,30 (tactics.gesamt), in der
 // Ersatzsuche ohne Score Fit^0,7 × Charakter^0,3. Ohne gescoutete
@@ -2543,7 +2701,8 @@ const scorePill = c => `<span class="pill${c.verlaesslich<DUENN?" duenn":""}"
         +Math.round(c.verlaesslich*100)+" % Stichprobe)"
       : "Stichprobe "+Math.round(c.verlaesslich*100)+" % – belastbar"}${
       c.charakter!=null ? " · Charakter "+c.charakter+" fließt ein"
-                        : " · Persönlichkeit ungescoutet, nur Leistung"}"
+                        : " · Persönlichkeit ungescoutet, nur Leistung"}${
+      c.erwartet!=null ? " · erwartet "+Math.round(c.erwartet)+" – danach wählt die automatische Elf" : ""}"
     style="background:rgba(${c.score>=50?"var(--heat-pos)":"var(--heat-neg)"},${
       (0.14+Math.abs(c.score-50)/50*0.5).toFixed(2)})">${c.score}</span>`;
 
@@ -2564,10 +2723,11 @@ function tactDetail(c){
       <span class="muted">= ${gesamtFormel(c)}</span></div>
     <div class="muted" style="font-size:11.5px;margin-bottom:6px">
       Balken = Perzentil unter allen Spielern, die diese Position spielen können.
-      Rechts der tatsächliche Wert.${c.verlaesslich<DUENN
+      Rechts der tatsächliche Wert.${mehrSaisons(c) ? ` Balken und Werte gelten für die aktuelle Saison${
+        c.fit_aktuell!=null ? ` (Fit ${c.fit_aktuell})` : ""} – Fit ${c.fit??"–"} und Score ${c.mb??"–"} sind mit den Vorsaisons gemischt.` : ""}${c.verlaesslich<DUENN
         ? ` <b>Nur ${Math.round(c.minutes||0)} Minuten</b> – der Score wird
             trotzdem nicht heruntergerechnet, kann aber auf wenigen guten
-            Spielen beruhen.` : ""}</div>${rows}
+            Spielen beruhen.` : ""}</div>${rows}${saisonsBlock(c, "Leistung", TACT && TACT.horizont)}
     <div style="margin-top:10px">
       <button class="wbtn" onclick="openRepl(${c.id})">Ersatz finden…</button></div>`;
 }
@@ -3006,9 +3166,9 @@ function planErgebnis(R, lName, rName){
     const lg = ligaVon(L, s.key), rg = ligaVon(Rr, s.key);
     const stamm = x => x && x.stamm ? `<span title="${escAttr(`${x.stamm.name} · Gesamt ${x.stamm.gesamt} · ${bandTip(x.stamm)}${
         x.profil_label ? ` · bewertet als ${x.profil_label}` : ""}`)}">${esc2(nachname(x.stamm.name))} <b>${x.stamm.gesamt}</b></span>${
-        x.stamm.neu ? ` <span class="pos">+</span>` : ""}` : `<span class="muted">–</span>`;
+        x.stamm.neu ? ` <span class="pos">+</span>` : ""}${hinweisMarke(x.stamm)}` : `<span class="muted">–</span>`;
     // Backup gegen Stamm im Szenario: neutral – „gleichauf" heißt hier Tiefe
-    const backup = x => x && x.backup ? `<span title="${escAttr(`${x.backup.name} · ${bandTip(x.backup)}`)}">${esc2(nachname(x.backup.name))}</span> ${
+    const backup = x => x && x.backup ? `<span title="${escAttr(`${x.backup.name} · ${bandTip(x.backup)}`)}">${esc2(nachname(x.backup.name))}</span>${hinweisMarke(x.backup)} ${
         stufeHtml(x.backup_vergleich, x.gleichauf, (x.backup.leistung??0) - ((x.stamm||{}).leistung??0), true, true,
           [nachname(x.backup.name), nachname((x.stamm||{}).name)])}` : `<span class="muted">–</span>`;
     const tiefe = x => x ? `<span class="${x.duenn ? "neg" : ""}" title="Kaderspieler mit Leistung ≥ 72">${x.ab_schwelle ?? "–"}${x.duenn ? " dünn" : ""}</span>` : "–";
@@ -3523,7 +3683,8 @@ function drawRepl(){
       <h2>Ersatz suchen${slot?` – ${esc2(slot.label)}`:""}</h2>
       ${vglKnopf}<button class="xbtn" onclick="closeRepl()">✕</button></div>${
       slot && slot.rolle ? `<div class="replrolle">${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")}${
-        slot.profil_label ? ` · bewertet als <b>${esc2(slot.profil_label)}</b>` : ""}</div>` : ""}`;
+        slot.profil_label ? ` · bewertet als <b>${esc2(slot.profil_label)}</b>` : ""}${
+        REPL && REPL.horizont ? horizontTag(REPL.horizont) : ""}</div>` : ""}`;
   if(!REPL){
     box.innerHTML = kopf + `<div class="empty"><span class="spin"></span>
       suche im gesamten Datenbestand…</div>`;
@@ -3543,7 +3704,7 @@ function drawRepl(){
       (c.umschulung ? `<span class="rbadge um"
           title="Spielt bisher: ${esc2(c.umschulung)} – Umschulung kostet ${c.abzug} Punkte">umschulen −${c.abzug}</span>` : "")
       + (c.im_kader ? `<span class="rbadge kader">eigener Kader</span>` : "")
-      + fussMarke(c.fuss_passung)
+      + fussMarke(c.fuss_passung) + hinweisMarke(c)
       + (c.stale ? `<span class="rbadge" title="Zahlen aus einem älteren Scan${
           c.stand?" ("+esc2(String(c.stand).slice(0,10))+")":""}">alt</span>` : "");
     const pos = (c.gruppen||[]).slice(0,3).map(g=>g.toUpperCase()).join(" ")
@@ -3945,7 +4106,7 @@ function renderTable(rows, C){
       <button class="linkbtn" onclick="tableAlle()">alle ${rows.length} anzeigen</button>
       – oder über Suche, Minuten und Filter eingrenzen.</div>` : "";
   document.getElementById("tableHost").innerHTML =
-    `${referenzWarnung(REFERENZ)}${spitze}<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${rest}${referenzZeile(REFERENZ)}`;
+    `${referenzWarnung(REFERENZ)}${spitze}<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${rest}${referenzZeile(REFERENZ, LS_HORIZONT || "transfer")}`;
 }
 
 function niceStep(raw){
@@ -4071,6 +4232,7 @@ async function loadData(){
     PLAYERS = res.players;
     REFERENZ = res.referenz || REFERENZ;
     SNAP_STAND = res.snapshot_stand || null;
+    LS_HORIZONT = res.horizont || null;
     // Zustand des Fair-Value-Modells (Minutenschwelle für den Hinweis im
     // Preislot). Fehlt er, bleibt die geplante Vorgabe stehen.
     if(res.value_model && res.value_model.threshold) FAIR_MIN_MIN = res.value_model.threshold;
@@ -4286,6 +4448,7 @@ async function renderDetail(){
       p.pl_text ? `Meldeliste · ${plZelle(p)}` : ""}${p.homegrown ? `<div class="muted">Eigengewächs: ${esc2(p.homegrown)}${
       p.homegrown_stand ? ` · Stand ${datumKurz(p.homegrown_stand)}` : ""}</div>` : ""}</div>` : ""}
    ${profilZeile(p)}
+   ${saisonsBlock(p, "Score", LS_HORIZONT || "transfer")}
    ${preislot(p)}
    ${charakterBlock(p)}
    <div class="dsec">Merkliste</div>
@@ -4294,7 +4457,7 @@ async function renderDetail(){
        `<button class="wbtn ${w.status===s?'on':''}" onclick="setWatch(${p.id},'${s}')">${s}</button>`).join("")}
    </div>
    <input class="wnote" id="wnote" placeholder="Notiz…" value="${(w.note||"").replace(/"/g,'&quot;')}" onchange="saveNote(${p.id})">
-   <div class="dsec">Perzentile – ${p.profile_label||"?"} (${cohort.length} Spieler im Vergleich)</div>
+   <div class="dsec">Perzentile – ${p.profile_label||"?"} (${cohort.length} Spieler im Vergleich)${mehrSaisons(p) ? " · aktuelle Saison" : ""}</div>
    ${metricBars(p, cohort)}
    <div class="wbtns" style="margin-top:10px"><button class="wbtn" onclick="addCompare(${p.id})">+ zum Vergleich</button>${
      planKnopf(p.eid)}</div>
@@ -4461,7 +4624,8 @@ function drawCompare(){
       <span class="cmtile" style="--grp:var(--pg-${SLOT_GRUPPE[key]||"mid"})">${esc2(slot.kurz||slotKurz(key))}</span>
       <div class="cmtitel"><h2>${esc2(slot.label||slotName(key))}</h2>
         <div class="dsub">${slot.rolle ? `${esc2(slot.rolle)}${rolleKurz(slot)} · ${esc2(slot.duty||"")} · ` : ""}${
-          slot.profil_label ? `bewertet als <b>${esc2(slot.profil_label)}</b> · ` : ""}Vergleich gegen Stamm und Backup</div></div>
+          slot.profil_label ? `bewertet als <b>${esc2(slot.profil_label)}</b> · ` : ""}Vergleich gegen Stamm und Backup${
+          CMP && CMP.ok ? horizontTag(CMP.horizont) : ""}</div></div>
       <label class="status" style="display:flex;gap:6px;align-items:center">Position
         <select onchange="setCmpSlot(this.value)">${optionen}</select></label>
       <button class="xbtn" onclick="closeCompare()" title="schließen (Esc)">✕</button></div>`;
@@ -4510,12 +4674,15 @@ function drawCompare(){
     + zeile(`<span title="${GESAMT_VGL_TIP}">Gesamt</span>`, "Fit · Score · Charakter", s=>`<div class="cmkpi" style="gap:9px">${pill(s)}${dStamm(s,"gesamt")}</div>`)
     + zeile(`<span title="Leistung = √(Fit × Score im Profil der Rolle); die Linie ist die 95-%-Spanne aus der Spielzeit, die graue Fläche die des Stammspielers">Leistung</span>`,
         "√(Fit × Score) · Spanne ±95 %", s=>`<div title="${escAttr(bandTip(s))}">${bandText(s)}${bandBalken(s, s===st ? null : st, true)}</div>`)
+    + zeile("Saisons", "Leistung je Saison · Anteil an der Mischung", s=>saisonsZelle(s))
     + zeile("gegen den Stamm", "Stufe · Wahrscheinlichkeit", s=>!st || s===st ? `<span class="cmraw" style="font-size:11px">Bezug</span>`
         : stufeHtml(s.vergleich_stamm, s.gleichauf_stamm, (s.leistung??0) - (st.leistung??0), false, false,
             [nachname(s.name), nachname(st.name)]))
     + zeile("Fit auf der Position", "nach Abzug für Umschulung", s=>`<span class="cmwert">${s.fit??"–"}</span>${
-        s.abzug ? `<span class="rbadge um" title="Spielt bisher: ${esc2(s.umschulung||"")}">umschulen −${s.abzug}</span>` : ""}`)
-    + zeile("Score", `als ${esc2(slot.profil_label||"?")} · stilneutral`, s=>`<span class="cmwert">${s.mb??"–"}</span>${abwTag(s.eid ?? s.id, slot.profil)}`)
+        s.abzug ? `<span class="rbadge um" title="Spielt bisher: ${esc2(s.umschulung||"")}">umschulen −${s.abzug}</span>` : ""}${
+        s.fit_aktuell!=null && s.fit_aktuell!==s.fit ? `<div class="cmraw">nur diese Saison ${s.fit_aktuell}</div>` : ""}`)
+    + zeile("Score", `als ${esc2(slot.profil_label||"?")} · stilneutral`, s=>`<span class="cmwert">${s.mb??"–"}</span>${abwTag(s.eid ?? s.id, slot.profil)}${
+        s.mb_aktuell!=null && s.mb_aktuell!==s.mb ? `<div class="cmraw">nur diese Saison ${s.mb_aktuell}</div>` : ""}`)
     + zeile("Charakter", "sichtbare Persönlichkeit", s=>s.pers_score==null
         ? `<span class="cmleer" title="Persönlichkeit noch nicht gescoutet">ungescoutet</span>`
         : `<span style="color:${persInk(s.pers_score)}" title="${persTip(s)}">${esc2(persKurz(s.pers_label))}</span> <span class="cmraw" style="display:inline">${s.pers_score}</span>`);
@@ -4575,6 +4742,7 @@ function drawCompare(){
     + zeile("Fuß", "passt er zur Rolle?", s=>(esc2(fussKurz(s.foot)) || `<span class="cmleer">–</span>`)
         + (s.fuss_passung ? `<div class="fusszeile ${FUSS_KLASSE[s.fuss_passung.passung]||""}">${esc2(s.fuss_passung.text)}</div>` : ""))
     + zeile("Spielzeit", "Saison, alle Wettbewerbe", s=>`<span class="cmwert">${Math.round(s.minutes||0).toLocaleString("de-DE")} Min</span>${
+        mehrSaisons(s) && s.m_eff!=null ? `<div class="cmraw">effektiv ${zahlDe(s.m_eff)} Min · ${zaehlende(s).length} Saisons</div>` : ""}${
         s.verlaesslich!=null ? `<div class="cmraw">Stichprobe ${Math.round(s.verlaesslich*100)} %</div>` : ""}`)
     + zeile("Positionen", "laut Export", s=>s.position ? `<span style="font-size:12px">${esc2(s.position)}</span>` : `<span class="cmleer">–</span>`)
     + zeile("Meldeliste", "Premier League, für uns", s=>plZelle(s)
