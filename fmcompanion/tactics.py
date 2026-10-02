@@ -974,6 +974,35 @@ def mehrsaison_felder(p, slot, b, mb, mischen):
              "m_eff": info["m_eff"], "hinweise": info["hinweise"]})
 
 
+def ohne_minuten(p):
+    """True, wenn die Zeile keine Spielminuten hat (D24).
+
+    Ohne Minuten gibt es keine Leistung. score_slot rechnete die Perzentile
+    trotzdem, aus lauter Nullen, und lieferte Fit 0: auf dem Brett stand ein
+    Ersatztorwart ohne Einsatz mit Leistung 0 und erwarteter Staerke 0, als
+    haette er schlecht gespielt. Fit, Score, Leistung und erwartete Staerke
+    sind deshalb None, die Oberflaeche zeigt "–", und die Auto-Elf waehlt
+    ihn nie (startelf)."""
+    return not (p.get("minutes") or 0) > 0
+
+
+def ohne_wertung(b):
+    """Positionswertung b eines Spielers ohne Minuten -> (b, mehr) wie
+    mehrsaison_felder, aber ohne Zahlen: Fit und Score None, die Rohwerte
+    der Kennzahlen bleiben sichtbar, ihre Perzentile nicht."""
+    return (dict(b, score=None, score_roh=None, fit_aktuell=None,
+                 teile=[dict(t, pct=None) for t in b["teile"]]),
+            {"mb": None, "mb_aktuell": None, "saisons": None, "m_eff": None,
+             "hinweise": []})
+
+
+def nach_wert(k, feld="score"):
+    """Sortierschluessel absteigend nach k[feld]; None (ohne Minuten, D24)
+    ans Ende statt TypeError."""
+    w = k.get(feld)
+    return (w is None, -(w or 0))
+
+
 def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=None,
                 mischen=None):
     """Fuer jede Position die passenden Spieler mit Score und Aufschluesselung.
@@ -1000,11 +1029,15 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=Non
             b = score_slot(p, slot, dists, teams)
             if b is None:
                 continue
-            # Moneyball-Score im Slot-Profil; ohne Profilwertung (Aufrufer
-            # ohne add_scores) wie frueher das vom Aufrufer gesetzte 'mb'
-            mb = (moneyball.profil_score(p, sp) if p.get("score_je_profil") is not None
-                  else p.get("mb"))
-            b, mehr = mehrsaison_felder(p, slot, b, mb, mischen)
+            if ohne_minuten(p):
+                # steht auf dem Brett, aber ohne Leistung (D24)
+                b, mehr = ohne_wertung(b)
+            else:
+                # Moneyball-Score im Slot-Profil; ohne Profilwertung (Aufrufer
+                # ohne add_scores) wie frueher das vom Aufrufer gesetzte 'mb'
+                mb = (moneyball.profil_score(p, sp) if p.get("score_je_profil") is not None
+                      else p.get("mb"))
+                b, mehr = mehrsaison_felder(p, slot, b, mb, mischen)
             kandidaten.append({
                 "id": p.get("id"), "name": p.get("name"),
                 "age": p.get("age"), "minutes": p.get("minutes"),
@@ -1030,7 +1063,7 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=Non
                                for k, stats in
                                ARCHETYPEN.get(slot["key"], {}).items()},
                 "stat_quelle": p.get("stat_quelle")} | b)
-        kandidaten.sort(key=lambda k: -k["score"])
+        kandidaten.sort(key=nach_wert)
         out.append({k: slot[k] for k in
                     ("key", "label", "kurz", "rolle", "rolle_kurz", "duty", "x", "y",
                      "aufgaben", "blind")} | {
@@ -1053,6 +1086,9 @@ def startelf(board, pins=None):
     wenn der Spieler auf dieser Position Kandidat ist und nicht schon auf einem
     anderen Pin steht; sonst wird er still ignoriert (z.B. nach einem Import,
     in dem er nicht mehr im Kader ist).
+
+    Kandidaten ohne Wert (ohne Minuten, D24) vergibt die Automatik nie, auch
+    nicht auf einen sonst leeren Platz; ein Pin setzt sie trotzdem.
 
     Drei Schritte: erst gierig nach Score vergeben, dann paarweise tauschen
     und freie Spieler einwechseln, solange ein Zug die Summe verbessert – nur unter den automatisch
@@ -1077,7 +1113,7 @@ def startelf(board, pins=None):
         return k["score"] if e is None else e
 
     paare = sorted(((wert(k), s["key"], k["id"], k)
-                    for s in board for k in s["kandidaten"]),
+                    for s in board for k in s["kandidaten"] if wert(k) is not None),
                    key=lambda t: -t[0])
     for score, skey, pid, k in paare:
         if skey in elf or pid in belegt:
@@ -1094,7 +1130,8 @@ def startelf(board, pins=None):
                 a, b = keys[i], keys[j]
                 pa, pb = elf[a], elf[b]
                 na, nb = punkte[a].get(pb["id"]), punkte[b].get(pa["id"])
-                if na is None or nb is None:
+                if (na is None or nb is None
+                        or wert(na) is None or wert(nb) is None):
                     continue
                 if wert(na) + wert(nb) > wert(pa) + wert(pb):
                     elf[a], elf[b] = na, nb
@@ -1107,7 +1144,8 @@ def startelf(board, pins=None):
         # Schleife endet also.
         belegt = {k["id"] for k in elf.values()}
         for a in keys:
-            frei = [k for k in punkte[a].values() if k["id"] not in belegt]
+            frei = [k for k in punkte[a].values()
+                    if k["id"] not in belegt and wert(k) is not None]
             if not frei:
                 continue
             bester = max(frei, key=wert)
@@ -1527,6 +1565,9 @@ def find_replacements(slot, original, kandidaten, reference,
     if ob is None:
         return {"ok": False, "error": "Für diesen Spieler reichen die Daten "
                                       "auf dieser Position nicht aus."}
+    if ohne_minuten(original):
+        return {"ok": False, "error": "Dieser Spieler hat keine Spielminuten – ohne "
+                                      "Leistung gibt es keinen Maßstab für Ersatz."}
     ob, mehr_o = mehrsaison_felder(original, slot, ob, moneyball.profil_score(original, sp),
                                    mischen)
     spez_stats = None
