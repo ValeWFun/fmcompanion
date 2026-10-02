@@ -21,8 +21,7 @@ import tempfile
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from fmcompanion import db, importer, tactics
-from fmcompanion.scoutkit import Kit
+from fmcompanion import db, importer, saisons, tactics
 import app
 
 _gesamt = 0
@@ -217,11 +216,11 @@ try:
     pruefe("RAM-Geburtsjahr gilt weiter, wenn kein Datum da ist",
            tactics.pl_status({"age": 22, "birth_year": 2007}, 2028, ref_year=2028), ("u21", False))
 
-    print("== Scoutkit: Spanne und Raten werden nicht summiert ==")
-    pruefe("NICHT_SUMMIERBAR", {"value_min", "value_max"} <= Kit.NICHT_SUMMIERBAR, True)
+    print("== Saisons: Spanne und Raten werden nicht summiert ==")
+    pruefe("NICHT_SUMMIERBAR", {"value_min", "value_max"} <= saisons.NICHT_SUMMIERBAR, True)
     pruefe("Siege, Einsaetze und Teamtore sind summierbar",
            {"wins", "draws", "defeats", "apps_start", "apps_sub", "team_tore_on", "team_gt_on"}
-           & Kit.NICHT_SUMMIERBAR, set())
+           & saisons.NICHT_SUMMIERBAR, set())
 finally:
     shutil.rmtree(ordner, ignore_errors=True)
 

@@ -163,6 +163,19 @@ def bezugsdatum(paare):
     return bestes[1], bestes[2]
 
 
+def export_als_spieler(e):
+    """Export-Zeile (export_players oder export_stand) -> Spieler-Dict, wie
+    enrich() es erwartet. Dieselbe Uebersetzung fuer die reinen Export-Spieler
+    der Tabelle, das Brett und die Saisons der Import-Historie (saisons)."""
+    pos = e.get("position") or ""
+    return dict(e, id=int(e["eid"]),
+                is_gk=pos.strip().upper().startswith("TW"),
+                pos_mask=pos_mask_from_string(pos),
+                source="export", stat_quelle="export",
+                stat_stand=e.get("imported_at"), exp_at=e.get("imported_at"),
+                taken_at=e.get("imported_at"))     # "Stand" in der Ersatzsuche
+
+
 def enrich(players, ref_year=None, ref_day=None):
     """Ergaenzt jeden Spieler um abgeleitete Moneyball-Kennzahlen.
 
@@ -782,35 +795,80 @@ def score_sem(profil, minuten):
     return sem_h * (m_h / float(minuten)) ** 0.5
 
 
-LISTEN_M_F = 1500          # Minuten der naechsten Halbserie, wie im Slot-Vergleich
+LISTEN_M_F = 1500          # ohne Horizont: Minuten der naechsten Halbserie (vor D11b)
+
+# Horizont (D11b): (Stand, Art). Art "form" = naechste Spiele (Brett, Liga-/
+# CL-Vergleich), "transfer" = naechste Saison (Kandidaten, Planspiel,
+# Tabelle). Stand "sommer" oder "winter" erkennt saisons.horizont_von am
+# Bezugsdatum der App (Spieltag des aktuellen Export-Stands, aus Geburtsdaten
+# und Export-Altern kalibriert): vor Tag 182 (saisons.STAT_SAISON_AB_TAG) ist
+# die Saison beendet – Sommer-Export, Mitte Mai –, ab Tag 182 laeuft sie –
+# Winter-Export, Ende Dezember. Je Horizont (Datenanalyst,
+# BERICHT_d11b_niveau_kalender_drift, gemessen auf der Import-Historie):
+#   d     Gewicht je Saison zurueck (Minuten x d^k, saisons)
+#   m_f   Minuten der Zukunft, gegen die verglichen wird
+#   drift Drift delta – die echte Veraenderung bis dahin, die keine
+#         Stichprobe wegmittelt; ST und TW wollen mehr (drift_st_tw)
+# Die Drift haengt an der Sommerpause zwischen Daten und Ziel, nicht an Form
+# oder Transfer: im Sommer liegt sie vor jedem Ziel. Im Vergleich kommt
+# delta^2 zum Rauschen der Zukunft, die Schrumpfung bleibt ohne delta. Gilt
+# fuer Slot (tactics) und Liste gleich – eine Stelle.
+HORIZONT_PARAMETER = {
+    ("sommer", "form"):     {"d": 1.0,   "m_f": 1500, "drift": 8.0, "drift_st_tw": 12.0},
+    ("sommer", "transfer"): {"d": 1.0,   "m_f": 3000, "drift": 8.0, "drift_st_tw": 12.0},
+    ("winter", "form"):     {"d": 0.375, "m_f": 1500, "drift": 2.0, "drift_st_tw": 6.0},
+    ("winter", "transfer"): {"d": 1.0,   "m_f": 3000, "drift": 8.0, "drift_st_tw": 12.0},
+}
+HORIZONT_DRIFT_PROFILE = ("st", "tw")      # Profile mit drift_st_tw
+# Das +-Band beschreibt, wie genau die ANGEZEIGTE Zahl bekannt ist: ohne
+# Drift (Empfehlung Datenanalyst). Mit True kaeme delta hinein und die Baender
+# wuerden im Sommer gut 50 % breiter (ST bei 3.000 Min +-13 -> +-20).
+BAND_MIT_DRIFT = False
 
 
-def score_kalibriert(profil, score, minuten):
+def horizont_zukunft(horizont, profil=None):
+    """(M_f, delta^2) des Horizonts (Stand, Art) fuer ein Profil; ohne
+    Horizont wie vor D11b (1500, 0)."""
+    if horizont is None:
+        return LISTEN_M_F, 0.0
+    par = HORIZONT_PARAMETER[horizont]
+    drift = par["drift_st_tw"] if profil in HORIZONT_DRIFT_PROFILE else par["drift"]
+    return par["m_f"], drift * drift
+
+
+def score_kalibriert(profil, score, minuten, horizont=None):
     """Bausteine des kalibrierten Listen-Vergleichs -> (kal, var) oder (None, None).
 
     kal = mu + rel x (score - mu) mit rel = tau^2 / (tau^2 + SEM(M)^2) – der zur
-    Mitte des Profils geschrumpfte Score; var = rel x SEM(M)^2 + SEM(M_f)^2 –
-    Restunsicherheit plus Rauschen der naechsten Halbserie. Zwei Spieler:
-    P(A besser) = Phi((kal_A - kal_B) / sqrt(var_A + var_B)). Genau diese Form
-    rechnet tactics.listen_vorsprung; die Oberflaeche bekommt kal und
-    sqrt(var) je Zeile, weil sie selbst filtert und sortiert. Unter
-    BAND_MIN_MINUTES keine Aussage."""
+    Mitte des Profils geschrumpfte Score; var = rel x SEM(M)^2 + SEM(M_f)^2 +
+    delta^2 – Restunsicherheit plus Rauschen und Drift bis zum Horizont
+    (horizont_zukunft). Zwei Spieler: P(A besser) = Phi((kal_A - kal_B) /
+    sqrt(var_A + var_B)). Genau diese Form rechnet tactics.listen_vorsprung;
+    die Oberflaeche bekommt kal und sqrt(var) je Zeile, weil sie selbst
+    filtert und sortiert. minuten: bei mehreren Saisons die effektiven
+    (saisons.m_eff). Unter BAND_MIN_MINUTES keine Aussage."""
     if score is None or (minuten or 0) < BAND_MIN_MINUTES or profil not in LISTEN_BAND:
         return None, None
     mu, tau, _sem_h, _m_h = LISTEN_BAND[profil]
     sem2 = score_sem(profil, minuten) ** 2
     rel = tau * tau / (tau * tau + sem2)
-    return mu + rel * (score - mu), rel * sem2 + score_sem(profil, LISTEN_M_F) ** 2
+    m_f, drift2 = horizont_zukunft(horizont, profil)
+    return mu + rel * (score - mu), rel * sem2 + score_sem(profil, m_f) ** 2 + drift2
 
 
-def score_band(profil, minuten):
+def score_band(profil, minuten, horizont=None):
     """Band +-95 % des Listen-Scores in Punkten, ungeschrumpft wie das
-    Slot-Band, gedeckelt bei 100. None unter BAND_MIN_MINUTES (duenne
-    Datenbasis) und ohne Profil."""
+    Slot-Band, gedeckelt bei 100: 1,96 x SEM(M), mit BAND_MIT_DRIFT
+    1,96 x sqrt(SEM(M)^2 + delta^2). minuten: bei mehreren Saisons die
+    effektiven. None unter BAND_MIN_MINUTES (duenne Datenbasis) und ohne
+    Profil."""
     if (minuten or 0) < BAND_MIN_MINUTES:
         return None
     sem = score_sem(profil, minuten)
-    return None if sem is None else round(min(100.0, 1.96 * sem), 1)
+    if sem is None:
+        return None
+    drift2 = horizont_zukunft(horizont, profil)[1] if BAND_MIT_DRIFT else 0.0
+    return round(min(100.0, 1.96 * (sem * sem + drift2) ** 0.5), 1)
 
 
 def erlaubte_profile(p):
@@ -1148,7 +1206,8 @@ def _profil_wertung(p, prof, coeff, priors, dists, age_dists):
             "band": band, "talent": round(_pct(pool, total)) if len(pool) >= 8 else None}
 
 
-def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_profile=()):
+def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_profile=(),
+               horizont=None, mischung=None):
     """Ergaenzt jeden Spieler um score (0-100), score_parts (Tooltip),
     profile_label, league(+coeff). Perzentile werden je Positionsprofil ueber
     die reference-Menge (idealerweise der Pool) gebildet.
@@ -1163,7 +1222,14 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
 
     ref_stats: fertiges Ergebnis von score_referenz(reference, leagues). Wer
     dieselbe Referenz oft benutzt (Brett, Liga-/CL-Vergleich, Kaderplaner),
-    rechnet es einmal und gibt es mit – sonst wird es hier gebildet."""
+    rechnet es einmal und gibt es mit – sonst wird es hier gebildet.
+
+    horizont: (Stand, Art) fuer Band und kalibrierten Vergleich
+    (horizont_zukunft); ohne wie vor D11b. mischung: mischung(p, je) ->
+    saisons.Mehrsaison.liste oder None (D11b). Mit ihr sind score, talent,
+    prospect und score_je_profil ueber die Saisons gemischt, Band und
+    Vergleich rechnen mit m_eff, und jede Zeile traegt saisons, m_eff und
+    hinweise (ohne Mehrsaison-Werte: saisons None, m_eff = Minuten)."""
     reference = reference if reference is not None else players
     leagues = leagues or {}
 
@@ -1184,8 +1250,18 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
         profs = erlaubt | set(zusatz_profile) | ({haupt} if haupt else set())
         je = {prof: _profil_wertung(p, prof, coeff, priors, dists, age_dists)
               for prof in PROFIL_REIHENFOLGE if prof in profs}
+        minuten = p.get("minutes")
+        m = mischung(p, je) if mischung else None
+        if m:
+            je = m["je"]
         p["score_je_profil"] = je
         wahl = listen_profil(p, je, erlaubt)
+        if mischung:
+            i = (m["info"].get(wahl) if m and wahl else None) or {}
+            p["saisons"] = i.get("saisons")
+            p["m_eff"] = i.get("m_eff", minuten)
+            p["hinweise"] = i.get("hinweise", [])
+            minuten = p["m_eff"]
         p["profil"] = wahl
         if wahl is None:
             p["score"] = None
@@ -1203,9 +1279,10 @@ def add_scores(players, reference=None, leagues=None, ref_stats=None, zusatz_pro
         p["score_je_profil"] = {pr: {"score": x["score"], "label": x["label"],
                                      "talent": x.get("talent")} for pr, x in je.items()}
         # Band +-95 % des Listen-Scores (LISTEN_BAND, Profil des Listen-Scores)
-        p["score_band"] = score_band(wahl, p.get("minutes")) if w["score"] is not None else None
+        p["score_band"] = (score_band(wahl, minuten, horizont)
+                           if w["score"] is not None else None)
         # Bausteine des kalibrierten Vergleichs fuer die Oberflaeche (score_kalibriert)
-        kal, var = score_kalibriert(wahl, w["score"], p.get("minutes"))
+        kal, var = score_kalibriert(wahl, w["score"], minuten, horizont)
         p["score_kal"] = None if kal is None else round(kal, 3)
         p["score_sd"] = None if var is None else round(var ** 0.5, 4)
         if w["score"] is None:

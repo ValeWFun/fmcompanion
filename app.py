@@ -9,7 +9,7 @@ import time
 import webview
 
 from fmcompanion import (scanner, moneyball, db, importer, tactics, valuemodel, charakter,
-                         positionen)
+                         positionen, saisons)
 
 # Pfad zu den UI-Dateien (funktioniert auch im PyInstaller-Bundle)
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -272,8 +272,11 @@ class Api:
         conn = self._db()
         if not moneyball.referenz_braucht_kohorte():
             basis = basis or self._basis(conn)
+            # Tabelle und Ranglisten im Horizont Transfer (D11b), ueber die Saisons
             moneyball.add_scores(players, basis["referenz"], basis["ligen"],
-                                 ref_stats=self._ref_scores(basis))
+                                 ref_stats=self._ref_scores(basis),
+                                 horizont=saisons.horizont_von(basis["bz"], "transfer"),
+                                 mischung=self._listen_mischung(conn, basis, "transfer"))
             moneyball.add_dna(players, basis["referenz"], basis["ligen"],
                               ref_dists=self._ref_dna(basis))
             return players
@@ -560,6 +563,8 @@ class Api:
                 # eigenes Datum) – fuer "Stand: ..." bei nicht aktuellen Zeilen
                 "referenz": dict(basis["referenz_status"], stand=basis["stand"]),
                 "snapshot_stand": db.latest_snapshot_at(conn),
+                # Die Tabelle rechnet im Horizont Transfer (D11b)
+                "horizont": self._horizont(basis, "transfer"),
                 "value_model": fair_model.status() if fair_model else None}
 
     # Felder einer Tabellenzeile, die die Oberflaeche liest (D23): Feldliste des
@@ -599,6 +604,8 @@ class Api:
         # Torhueter
         "note_resid", "save_pct", "gp_shot", "goals_prevented", "sot_faced", "conceded",
         "conceded_p90", "xga", "apps", "pen_saved", "pen_faced",
+        # Mehrere Saisons (D11b): verwendete Saisons, effektive Minuten, Hinweise
+        "saisons", "m_eff", "hinweise",
     )
 
     @classmethod
@@ -942,15 +949,8 @@ class Api:
 
     @staticmethod
     def _export_row_to_player(e):
-        """Export-Zeile -> Spieler-Dict, wie enrich() es erwartet. Dieselbe
-        Uebersetzung wie fuer die reinen Export-Spieler in load_saved."""
-        pos = e.get("position") or ""
-        return dict(e, id=int(e["eid"]),
-                    is_gk=pos.strip().upper().startswith("TW"),
-                    pos_mask=moneyball.pos_mask_from_string(pos),
-                    source="export", stat_quelle="export",
-                    stat_stand=e.get("imported_at"), exp_at=e.get("imported_at"),
-                    taken_at=e.get("imported_at"))     # "Stand" in der Ersatzsuche
+        """Export-Zeile -> Spieler-Dict (moneyball.export_als_spieler)."""
+        return moneyball.export_als_spieler(e)
 
     def _kader_rows(self, conn, bz, eids, export=None):
         """Der eigene Kader als angereicherte Spieler – aus dem EXPORT.
@@ -1035,7 +1035,8 @@ class Api:
         die Profilwahl (PROFIL_VON_GRUPPE, REFERENZ_WAHL, LISTEN_WAHL) und die
         Positionsgruppen. Aendert jemand eine davon zur Laufzeit (Tests), gibt
         es neue Zahlen statt alter. Kostet unter einer Millisekunde."""
-        return repr([(m.__name__, k, v) for m in (moneyball, tactics, charakter, positionen)
+        return repr([(m.__name__, k, v) for m in (moneyball, tactics, charakter, positionen,
+                                                    saisons)
                      for k, v in sorted(vars(m).items())
                      if k.isupper() and not k.startswith("_")])
 
@@ -1065,6 +1066,55 @@ class Api:
         return self._verteilung(basis, "dna", lambda: moneyball.dna_referenz(
             basis["referenz"], basis["ligen"]))
 
+    def _mehrsaison(self, conn, basis):
+        """Aktuelle Saison und Vorsaisons zur Basis (saisons.Mehrsaison, D11b),
+        einmal je Fingerabdruck. Jede Saison wird gegen die Referenz der
+        Basis bewertet (Datenanalyst: eine Referenz fuer alle Saisons), mit
+        ihren Verteilungen und Teamstaerken. Die Historie haengt am
+        Fingerabdruck (db.rechenstand zaehlt export_importe)."""
+        def rechne():
+            st = saisons.staende(conn)
+            s_akt, ende = saisons.saison_aktuell(basis["bz"])
+            aktuell = saisons.Saisonwerte(s_akt, basis["referenz"], basis["ligen"],
+                                          ref_stats=self._ref_scores(basis),
+                                          teams=basis["teams"],
+                                          verteilungen=basis["verteilungen"])
+            roh = {int(e["eid"]): e for e in basis["export"] if e.get("eid")}
+            return saisons.Mehrsaison(st, aktuell, saisons.vorsaisons(st, s_akt), s_akt, ende,
+                                      basis["stand"], roh, basis["bz"])
+        return self._verteilung(basis, "mehrsaison", rechne)
+
+    def _mischer(self, conn, basis, art):
+        """mischen(p, slot, fit, mb) fuer tactics, im Horizont der Art (D11b)."""
+        ms = self._mehrsaison(conn, basis)
+        h = saisons.horizont_von(basis["bz"], art)
+        return lambda p, slot, fit, mb: ms.slot(p, slot, fit, mb, h)
+
+    def _listen_mischung(self, conn, basis, art):
+        """mischung(p, je) fuer moneyball.add_scores, im Horizont der Art (D11b)."""
+        ms = self._mehrsaison(conn, basis)
+        h = saisons.horizont_von(basis["bz"], art)
+        return lambda p, je: ms.liste(p, je, h)
+
+    @staticmethod
+    def _horizont(basis, art):
+        """js_api-Feld: welcher Horizont eine Ansicht rechnet (D11b) – Art,
+        Stand (Sommer/Winter) und der Text fuer die Oberflaeche."""
+        stand, _ = saisons.horizont_von(basis["bz"], art)
+        return {"key": art, "stand": stand, "text": saisons.HORIZONT_TEXT[art]}
+
+    def _horizont_konstanten(self):
+        """Gewicht d, Minuten der Zukunft und Drift je Art im aktuellen Stand."""
+        bz = self._bezug(self._db())
+        aus = {}
+        for art in saisons.HORIZONTE:
+            h = saisons.horizont_von(bz, art)
+            par = moneyball.HORIZONT_PARAMETER[h]
+            aus[art] = {"text": saisons.HORIZONT_TEXT[art], "stand": h[0], "d": par["d"],
+                        "m_f": par["m_f"], "drift": par["drift"],
+                        "drift_st_tw": par["drift_st_tw"]}
+        return aus
+
     def tactic_board(self):
         """Je Position der Formation die passenden Kaderspieler mit Score und
         Aufschluesselung. Perzentile gegen alle Spieler der Referenz, die dort
@@ -1075,13 +1125,17 @@ class Api:
             return {"ok": False, "kein_kader": True}
         return self._brett(conn, eids, self._pins(conn), self._basis(conn))[0]
 
-    def _brett(self, conn, eids, pins, basis):
+    def _brett(self, conn, eids, pins, basis, art="form"):
         """Das Brett fuer eine beliebige Kadermenge -> (Brett, Kaderzeilen).
 
         Der echte Kader (tactic_board) und die Szenarien des Kaderplaners
         rechnen hier mit demselben Code – nur so ist ein Unterschied zwischen
         Ist und Szenario ein Unterschied im Kader und nicht in der Rechnung.
+        art (D11b): "form" fuer das Brett (naechste Spiele), "transfer" fuer
+        das Planspiel (naechste Saison) – nur die Gewichtung der Saisons und
+        der Vergleich unterscheiden sich, Kader und Pins nicht.
         """
+        horizont = saisons.horizont_von(basis["bz"], art)
         bz, referenz, ligen, teams = basis["bz"], basis["referenz"], basis["ligen"], basis["teams"]
         # Kader aus dem Export (siehe _kader_rows); id = EID, damit Brett,
         # Ersatzsuche und Formkurve denselben Schluessel benutzen.
@@ -1103,7 +1157,8 @@ class Api:
         melde = tactics.meldeliste(kader, *self._meldebasis(conn, kader, bz))
         melde.pop("spieler", None)
         slots = tactics.build_board(kader, referenz, teams=teams,
-                                    cache=basis["verteilungen"])
+                                    cache=basis["verteilungen"],
+                                    mischen=self._mischer(conn, basis, art))
         # Brett-Zahl = geometrisches Mittel aus Fit (passt in den Slot), Score
         # (wie gut allgemein) und Charakter (Persoenlichkeit, tactics.gesamt).
         # Multiplikativ wie bei der DNA: wer alles mitbringt, liegt vorn; ein
@@ -1116,9 +1171,16 @@ class Api:
                 k["fit"] = k["score"]
                 k["charakter"] = k.get("pers_score")
                 k["score"] = tactics.gesamt(k["fit"], k.get("mb"), k.get("pers_score"))
-                # Leistung sqrt(Fit x Slot-Score) mit Band +-95 % (D19)
+                # Leistung sqrt(Fit x Slot-Score) mit Band +-95 % (D19), ueber
+                # die Saisons mit effektiven Minuten und Drift des Horizonts (D11b)
                 k.update(tactics.band_felder(sl["key"], tactics.gesamt(k["fit"], k.get("mb")),
-                                             k.get("minutes")))
+                                             k.get("m_eff"), horizont))
+                # Auswahl der Auto-Elf und des Backups ueber die erwartete
+                # Staerke (geschrumpft, D11b); angezeigt bleibt die rohe Zahl
+                k["erwartet"] = tactics.erwartete_staerke(sl["key"], k["leistung"],
+                                                          k.get("m_eff"), k["charakter"])
+                k["erwartet_leistung"] = tactics.erwartete_staerke(sl["key"], k["leistung"],
+                                                                   k.get("m_eff"))
             sl["kandidaten"].sort(key=lambda k: -k["score"])
         elf = tactics.startelf(slots, pins)
         # Nur die Pins zurueckmelden, die auch greifen – ein Pin auf einen
@@ -1142,8 +1204,9 @@ class Api:
                 # gleichauf_stamm ist daraus abgeleitet.
                 k["vergleich_stamm"] = (None if (stamm is None or k is stamm) else
                                         tactics.vergleich_feld(
-                                            sl["key"], (k["id"], k["leistung"], k.get("minutes")),
-                                            (stamm["id"], stamm["leistung"], stamm.get("minutes"))))
+                                            sl["key"], (k["id"], k["leistung"], k.get("m_eff")),
+                                            (stamm["id"], stamm["leistung"], stamm.get("m_eff")),
+                                            horizont))
                 k["gleichauf_stamm"] = tactics.gleichauf_aus(k["vergleich_stamm"])
                 # Wer anderswo gesetzt ist, ist hier kein echter Herausforderer –
                 # sonst stuende Correia als Konkurrent fuer links, obwohl er
@@ -1152,6 +1215,7 @@ class Api:
                 k["gesetzt_auf"] = anderswo if anderswo != sl["key"] else None
                 k["form"] = form.get(eid_von.get(k["id"]))
         return {"ok": True, "slots": slots, "startelf": list(elf), "pins": pins_aktiv,
+                "horizont": self._horizont(basis, art),
                 "verein": db.get_setting(conn, "own_club", "") or "",
                 "char_gewicht": tactics.CHAR_GEWICHT,
                 "referenz": dict(basis["referenz_status"], stand=basis["stand"]),
@@ -1237,8 +1301,10 @@ class Api:
         zeilen = tactics.liga_vergleich(self._elf(brett), d["pool"], basis["referenz"],
                                         liga, d["verein"], teams=basis["teams"],
                                         min_minutes=max(90, int(min_minutes)),
-                                        cache=basis["verteilungen"])
-        return dict(d["kopf"], ok=True, liga=liga, positionen=zeilen)
+                                        cache=basis["verteilungen"],
+                                        mischen=self._mischer(conn, basis, "form"))
+        return dict(d["kopf"], ok=True, liga=liga, positionen=zeilen,
+                    horizont=self._horizont(basis, "form"))
 
     # ------------------------------------------------------ CL-Niveau
     # Die 8 Vergleichsvereine (typisch: CL-Viertelfinalisten der letzten
@@ -1329,14 +1395,15 @@ class Api:
         zeilen = tactics.cl_vergleich(self._elf(brett), d["pool"], basis["referenz"],
                                       vereine, d["verein"], teams=basis["teams"],
                                       min_minutes=max(90, int(min_minutes)),
-                                      cache=basis["verteilungen"])
+                                      cache=basis["verteilungen"],
+                                      mischen=self._mischer(conn, basis, "form"))
         gewaehlt = [v for v in vereine if v != d["verein"]]
         # Die Regel "6 von 8" sagt nur, OB Daten da sind – nicht, ob es die
         # Stammspieler sind. Aus Scoutinglisten ist der beste Spieler eines
         # Vereins oft nicht sein Stammspieler; das Banner "vorlaeufig" braucht
         # deshalb, wer nur gescoutet ist.
         erfassung = self._cl_erfassung(conn, gewaehlt)
-        return dict(d["kopf"], ok=True, vereine=gewaehlt,
+        return dict(d["kopf"], ok=True, vereine=gewaehlt, horizont=self._horizont(basis, "form"),
                     min_mit_daten=tactics.CL_MIN_VEREINE, positionen=zeilen,
                     mit_aussage=sum(1 for z in zeilen if z["aussage"]),
                     erfassung=erfassung,
@@ -1485,6 +1552,11 @@ class Api:
                 "hinweis": ({"art": "stuermer_wechsel", "text": self.STUERMER_HINWEIS}
                             if (stuermer and richtung == "zugang") else None)}
 
+    # Das Planspiel plant die naechste Saison: BEIDE Seiten im Horizont
+    # Transfer (D11b). Ist im Planer = Brett-Rechnung mit Transfer-Gewichtung,
+    # gleiche Pins, gleicher Kader (test_kaderplaner).
+    PLANER_HORIZONT = "transfer"
+
     def _planer_ergebnis(self, conn, name, zug, abg, pins_szen, basis, daten, liga, cl_vereine,
                          min_minutes):
         """Ein Szenario auf dem virtuellen Kader durchrechnen."""
@@ -1527,7 +1599,8 @@ class Api:
             else:
                 warn.append(f"Szenario-Pin auf {label.get(key, key)} ignoriert "
                             f"(Spieler nicht im Kader).")
-        brett, kader = self._brett(conn, eids, pins, basis)
+        brett, kader = self._brett(conn, eids, pins, basis, art=self.PLANER_HORIZONT)
+        h = saisons.horizont_von(basis["bz"], self.PLANER_HORIZONT)
         tiefe = tactics.kadertiefe(brett["slots"])
         neu = set(z_ok)
         st_slot = next(sl for sl in tactics.FORMATION if sl["key"] == "st")
@@ -1536,7 +1609,9 @@ class Api:
             if k is None:
                 return None
             d = {"id": k["id"], "name": k.get("name"), "neu": k["id"] in neu,
-                 "minutes": k.get("minutes"), **tactics.band_felder(key, lst, k.get("minutes"))}
+                 "minutes": k.get("minutes"), "m_eff": k.get("m_eff"),
+                 "saisons": k.get("saisons"), "hinweise": k.get("hinweise") or [],
+                 **tactics.band_felder(key, lst, k.get("m_eff"), h)}
             if mit_gesamt:
                 d.update(gesamt=k.get("score"), fit=k.get("fit"), mb=k.get("mb"))
             return d
@@ -1546,8 +1621,8 @@ class Api:
             t = tiefe["slots"][sl["key"]]
             stamm = kurz(sl["key"], *(t["stamm"] or (None, None)), mit_gesamt=True)
             backup = kurz(sl["key"], *(t["backup"] or (None, None)))
-            bv = (tactics.vergleich_feld(sl["key"], (backup["id"], backup["leistung"], backup["minutes"]),
-                                         (stamm["id"], stamm["leistung"], stamm["minutes"]))
+            bv = (tactics.vergleich_feld(sl["key"], (backup["id"], backup["leistung"], backup["m_eff"]),
+                                         (stamm["id"], stamm["leistung"], stamm["m_eff"]), h)
                   if stamm and backup else None)
             slots.append({**{k: sl[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz",
                                                  "duty", "x", "y", "gepinnt", "profil",
@@ -1564,14 +1639,16 @@ class Api:
         weg = set(z_ok) | set(a_ok)
         pool = [p for p in daten["pool"] if int(p["eid"]) not in weg]
         mm = max(90, int(min_minutes))
+        mischen = self._mischer(conn, basis, self.PLANER_HORIZONT)
         liga_z = (tactics.liga_vergleich(elf, pool, basis["referenz"], liga, daten["verein"],
                                          teams=basis["teams"], min_minutes=mm,
-                                         cache=basis["verteilungen"]) if liga else [])
+                                         cache=basis["verteilungen"], mischen=mischen)
+                  if liga else [])
         cl = {"keine_vereine": True}
         if cl_vereine:
             cl_z = tactics.cl_vergleich(elf, pool, basis["referenz"], cl_vereine,
                                         daten["verein"], teams=basis["teams"], min_minutes=mm,
-                                        cache=basis["verteilungen"])
+                                        cache=basis["verteilungen"], mischen=mischen)
             cl = {"vereine": [v for v in cl_vereine if v != daten["verein"]],
                   "positionen": [{k: z.get(k) for k in (
                       "key", "label", "wert", "messlatte", "abstand", "aussage",
@@ -1686,6 +1763,7 @@ class Api:
             for x in erg:
                 x["cl"]["nur_gescoutet"] = sum(1 for e in erfassung if not e["kader"])
         return {"ok": True, "links": erg[0], "rechts": erg[1],
+                "horizont": self._horizont(basis, self.PLANER_HORIZONT),
                 "delta": self._planer_delta(erg[0], erg[1])}
 
     # ------------------------------------------------ manuelle Aufstellung
@@ -1850,7 +1928,9 @@ class Api:
         # positionsfremder Kandidat im Profil des gesuchten Slots zaehlt. VOR
         # add_dna: die DNA-Gruppe ist die Gruppe des Listen-Profils.
         moneyball.add_scores(pool, referenz, ligen, ref_stats=self._ref_scores(basis),
-                             zusatz_profile=moneyball.PROFIL_REIHENFOLGE)
+                             zusatz_profile=moneyball.PROFIL_REIHENFOLGE,
+                             horizont=saisons.horizont_von(bz, "transfer"),
+                             mischung=self._listen_mischung(conn, basis, "transfer"))
         moneyball.add_dna(pool, referenz, ligen, ref_dists=self._ref_dna(basis))
         self._pl_markieren(conn, pool, bz)
         self._repl_cache = (key, pool, referenz, kader_ids)
@@ -1889,12 +1969,17 @@ class Api:
             return {"ok": False, "error": "Spieler nicht im Datenbestand."}
         mm = (tactics.MIN_MINUTES if min_minutes in (None, "")
               else max(90, int(min_minutes)))
+        # Ersatz fuer die naechste Saison: Horizont Transfer (D11b)
+        basis = self._basis(conn)
         res = tactics.find_replacements(
             slot, original, pool, referenz, modus=modus,
             min_minutes=mm, kader_ids=kader_ids, archetyp=archetyp,
             teams=tactics.team_strength(db.load_export(conn)),
-            nur_charakter=bool(nur_charakter))
+            nur_charakter=bool(nur_charakter),
+            mischen=self._mischer(conn, basis, "transfer"),
+            horizont=saisons.horizont_von(basis["bz"], "transfer"))
         if res.get("ok"):
+            res["horizont"] = self._horizont(basis, "transfer")
             res["stand"] = None if alle else self._pool_stand(conn)
             res["pool"] = len(pool)
         return res
@@ -1926,14 +2011,17 @@ class Api:
         eids = self._squad_eids(conn)
         if not eids:
             return {"ok": False, "kein_kader": True}
-        brett = self.tactic_board()
-        if not brett.get("ok"):
-            return brett
+        # Kandidaten-Vergleich fuer die naechste Saison: Stamm, Backup und
+        # Kandidaten im Horizont Transfer (D11b), dasselbe Brett wie im Planspiel
+        brett = self._brett(conn, eids, self._pins(conn), self._basis(conn),
+                            art="transfer")[0]
         bs = next(s for s in brett["slots"] if s["key"] == slot_key)
         # Nachschlagen in ALLEN Export-Zeilen der Basis (nur lesen, kopie()
         # unten), bewertet gegen die Referenz der Basis mit ihren gecachten
         # Verteilungen – dieselbe wie Brett und Ersatzsuche.
         rb = self._basis(conn)
+        mischen = self._mischer(conn, rb, "transfer")
+        h = saisons.horizont_von(rb["bz"], "transfer")
         referenz = rb["referenz"]
         nach_eid = {int(r["eid"]): r for r in rb["export_rows"]
                     if r.get("source") == "export" and r.get("eid")}
@@ -1974,7 +2062,10 @@ class Api:
             return {"gesamt": k["score"], "fit": k["fit"], "mb": k.get("mb"),
                     "abzug": 0, "umschulung": None, "teile": k.get("teile") or [],
                     "verlaesslich": k.get("verlaesslich"), "carry": k.get("carry"),
-                    **tactics.band_felder(slot_key, k.get("leistung"), k.get("minutes"))}
+                    "m_eff": k.get("m_eff"), "saisons": k.get("saisons"),
+                    "fit_aktuell": k.get("fit_aktuell"), "mb_aktuell": k.get("mb_aktuell"),
+                    "hinweise": k.get("hinweise") or [],
+                    **tactics.band_felder(slot_key, k.get("leistung"), k.get("m_eff"), h)}
 
         # Kopien: die Zeilen stecken im Cache der Ersatzsuche
         def kopie(e):
@@ -2046,11 +2137,17 @@ class Api:
                                           "Umschulung möglich." if kosten is None else
                                           "Zu wenige Kennzahlen für diese Position.")})
                 continue
+            b, mehr = tactics.mehrsaison_felder(r, slot, b, moneyball.profil_score(r, profil),
+                                                mischen)
             fit = max(0, min(100, round(b["score"] - kosten)))
-            mb = moneyball.profil_score(r, profil)
+            mb = mehr["mb"]
+            # nur die aktuelle Saison, mit demselben Umschulungsabzug
+            fit_akt = max(0, min(100, round(b["fit_aktuell"] - kosten)))
             spieler.append(zeile("kandidat", r, {
                 "gesamt": tactics.gesamt(fit, mb, r.get("pers_score")),
-                **tactics.band_felder(slot_key, tactics.gesamt(fit, mb), r.get("minutes")),
+                **tactics.band_felder(slot_key, tactics.gesamt(fit, mb), mehr["m_eff"], h),
+                "m_eff": mehr["m_eff"], "saisons": mehr["saisons"], "hinweise": mehr["hinweise"],
+                "fit_aktuell": fit_akt, "mb_aktuell": mehr["mb_aktuell"],
                 "fit": fit, "mb": mb, "abzug": round(kosten),
                 "umschulung": None if not kosten else tactics.GROUP_LABEL.get(von, von),
                 "teile": b["teile"], "verlaesslich": b["verlaesslich"],
@@ -2061,14 +2158,14 @@ class Api:
             if "leistung" in z:
                 z["vergleich_stamm"] = (None if (st is None or z is st) else
                                         tactics.vergleich_feld(
-                                            slot_key, (z["id"], z["leistung"], z.get("minutes")),
-                                            (st["id"], st["leistung"], st.get("minutes"))))
+                                            slot_key, (z["id"], z["leistung"], z.get("m_eff")),
+                                            (st["id"], st["leistung"], st.get("m_eff")), h))
                 z["gleichauf_stamm"] = tactics.gleichauf_aus(z["vergleich_stamm"])
         return {"ok": True,
                 "slot": {k: slot[k] for k in ("key", "label", "kurz", "rolle", "rolle_kurz", "duty")}
                 | {"profil": profil, "profil_label": moneyball.PROFILE_LABEL[profil]},
                 "vergleichsbasis": basis, "char_gewicht": tactics.CHAR_GEWICHT,
-                "spieler": spieler}
+                "horizont": self._horizont(rb, "transfer"), "spieler": spieler}
 
     def watchlist(self):
         return db.watchlist_all(self._db())
@@ -2098,7 +2195,10 @@ class Api:
         return {"ok": True, "stufen": [[g, n] for g, n in tactics.VORSPRUNG_STUFEN],
                 "unter_stufen": "gleichauf", "spitzengruppe_p": tactics.SPITZENGRUPPE_P,
                 "spitzengruppe_bezug": "hoechstes score_kal",
-                "min_minutes": tactics.MIN_MINUTES}
+                "min_minutes": tactics.MIN_MINUTES,
+                # D11b: Gewicht d, Minuten der Zukunft und Drift je Art im
+                # aktuellen Stand (Sommer/Winter)
+                "horizonte": self._horizont_konstanten()}
 
     def referenz_status(self):
         """Umfang der Perzentil-Referenz und der Hinweis "Referenz schmal"

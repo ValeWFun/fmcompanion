@@ -185,9 +185,20 @@ try:
            z1p["kalenderjahr"] is False and z1p["stand"] == "2026-09-22T10:00:00")
     tb = api.tactic_board()
     unveraendert("tactic_board")
-    pruefe("Ist = Taktikbrett (Elf)",
-           {s["key"]: (s["stamm"] or {}).get("id") for s in li["brett"]["slots"]}
-           == {s["key"]: s["startelf_id"] for s in tb["slots"]})
+    # D14-Invariante seit D11b: Ist im Planer = Brett-Rechnung mit Transfer-
+    # Gewichtung, gleiche Pins und gleicher Kader (das Brett selbst rechnet
+    # im Horizont Form – nur die Gewichtung der Saisons unterscheidet sich)
+    bt = api._brett(conn, api._squad_eids(conn), api._pins(conn), api._basis(conn),
+                    art="transfer")[0]
+    unveraendert("Brett im Horizont Transfer")
+    pruefe("Ist im Planer = Brett-Rechnung mit Transfer-Gewichtung (Elf und Leistung)",
+           {s["key"]: ((s["stamm"] or {}).get("id"), (s["stamm"] or {}).get("leistung"))
+            for s in li["brett"]["slots"]}
+           == {s["key"]: (s["startelf_id"],
+                          next((k["leistung"] for k in s["kandidaten"] if k["id"] == s["startelf_id"]),
+                               None)) for s in bt["slots"]})
+    pruefe("Planspiel im Horizont Transfer, Brett im Horizont Form",
+           r["horizont"]["key"] == "transfer" and tb["horizont"]["key"] == "form")
     pruefe("Ist = Taktikbrett (Meldeliste)", li["meldeliste"]["pl"] == tb["meldeliste"]["pl"])
     pruefe("Delta Elf markiert Aenderungen",
            all(e["geaendert"] == ((e["links"] or {}).get("id") != (e["rechts"] or {}).get("id"))

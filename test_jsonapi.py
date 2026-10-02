@@ -230,6 +230,32 @@ try:
            and ls.get("snapshot_stand") == db.latest_snapshot_at(conn) is not None
            and (antworten.get("tactic_board") or {}).get("referenz", {}).get("stand")
            == api._pool_stand(conn))
+    print("== Mehrere Saisons (D11b): Horizont und Felder ==")
+    hz = {n: (antworten.get(n) or {}).get("horizont") or {} for n in
+          ("tactic_board", "league_comparison", "cl_comparison", "planer_vergleich",
+           "tactic_replacements besser", "slot_compare", "load_saved last")}
+    pruefe("jede Ansicht nennt ihren Horizont (Form: Brett/Vergleiche, Transfer: Planer/Kandidaten)",
+           {n: h.get("key") for n, h in hz.items()}
+           == {"tactic_board": "form", "league_comparison": "form", "cl_comparison": "form",
+               "planer_vergleich": "transfer", "tactic_replacements besser": "transfer",
+               "slot_compare": "transfer", "load_saved last": "transfer"}
+           and all(h.get("text") and h.get("stand") in ("sommer", "winter") for h in hz.values()),
+           str({n: h.get("key") for n, h in hz.items()}))
+    akt_zeilen = [p for p in ls.get("players", []) if p.get("aktuell")]
+    pruefe("Tabellenzeilen des aktuellen Stands mit saisons, m_eff und hinweise",
+           akt_zeilen and all(isinstance(p.get("saisons"), list) and p.get("m_eff") is not None
+                              and isinstance(p.get("hinweise"), list) for p in akt_zeilen))
+    kand = [k for sl in (antworten.get("tactic_board") or {}).get("slots", []) for k in sl["kandidaten"]]
+    pruefe("Brett-Kandidaten mit fit_aktuell, mb_aktuell, saisons, m_eff und hinweise",
+           kand and all({"fit_aktuell", "mb_aktuell", "saisons", "m_eff", "hinweise"} <= set(k)
+                        for k in kand))
+    sc_z = [z for z in (antworten.get("slot_compare") or {}).get("spieler", []) if "leistung" in z]
+    tr_z = (antworten.get("tactic_replacements besser") or {}).get("treffer", [])
+    pruefe("Slot-Vergleich und Ersatzsuche mit fit_aktuell und mb_aktuell",
+           sc_z and all(z.get("fit_aktuell") is not None and "mb_aktuell" in z for z in sc_z)
+           and all("fit_aktuell" in t and "mb_aktuell" in t for t in tr_z))
+    pruefe("vergleich_konstanten nennt d, M_f und Drift je Art",
+           set((antworten.get("vergleich_konstanten") or {}).get("horizonte", {})) == {"form", "transfer"})
     zwei = api.load_saved("last")
     pruefe("die Feldliste arbeitet auf Kopien: zweiter Aufruf liefert dasselbe",
            js(zwei["players"]) == js(ls["players"]))

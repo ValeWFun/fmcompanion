@@ -368,6 +368,7 @@ def slot_profil(slot):
 for _sl in FORMATION:
     _pr = {moneyball.PROFIL_VON_GRUPPE[g] for g in _sl["gruppen"]}
     assert len(_pr) == 1, f"Slot {_sl['key']}: mehrere Profile {_pr}"
+_PROFIL_DES_SLOTS = {_sl["key"]: slot_profil(_sl) for _sl in FORMATION}
 
 MIN_MINUTES = 180          # darunter sind /90-Raten Rauschen
 
@@ -399,18 +400,24 @@ def leistung_sem(slot_key, minuten):
     return sem_h * (m_h / float(minuten)) ** 0.5
 
 
-def leistung_band(slot_key, minuten):
+def leistung_band(slot_key, minuten, horizont=None):
     """Band +-95 % der Leistung in Punkten, auf die Skala gedeckelt (hoechstens
-    100): beim ST sind es mit 180 Minuten +-53, mit 900 +-24, mit 3000 +-13.
-    None ohne Minuten."""
+    100): 1,96 x SEM(M); mit moneyball.BAND_MIT_DRIFT 1,96 x sqrt(SEM(M)^2 +
+    delta^2), delta = Drift des Horizonts. Beim ST sind es mit 180 Minuten
+    +-53, mit 900 +-24, mit 3000 +-13. minuten: bei mehreren Saisons die
+    effektiven (saisons.m_eff). None ohne Minuten."""
     sem = leistung_sem(slot_key, minuten)
-    return None if sem is None else round(min(100.0, Z95 * sem), 1)
+    if sem is None:
+        return None
+    drift2 = (moneyball.horizont_zukunft(horizont, _PROFIL_DES_SLOTS[slot_key])[1]
+              if moneyball.BAND_MIT_DRIFT else 0.0)
+    return round(min(100.0, Z95 * math.sqrt(sem * sem + drift2)), 1)
 
 
-def band_felder(slot_key, leistung, minuten):
+def band_felder(slot_key, leistung, minuten, horizont=None):
     """js_api-Felder einer Slot-Bewertung: leistung, leistung_band (+- Punkte)
     und das Intervall leistung_von/leistung_bis, auf 0-100 begrenzt."""
-    b = leistung_band(slot_key, minuten)
+    b = leistung_band(slot_key, minuten, horizont)
     ok = b is not None and leistung is not None
     return {"leistung": leistung, "leistung_band": b,
             "leistung_von": max(0, round(leistung - b)) if ok else None,
@@ -427,11 +434,16 @@ def band_felder(slot_key, leistung, minuten):
 #   SEM(M) = SEM_h x sqrt(M_h / M)                      (LEISTUNG_SEM)
 #   rel    = tau^2 / (tau^2 + SEM(M)^2)
 #   post   = mu + rel x (L - mu),  v = rel x SEM(M)^2
-#   p(a)   = Phi((post_a - post_b) / sqrt(v_a + v_b + SEM_a(M_f)^2 + SEM_b(M_f)^2))
+#   f2     = SEM(M_f)^2 + delta^2                       (Horizont, D11b)
+#   p(a)   = Phi((post_a - post_b) / sqrt(v_a + v_b + f2_a + f2_b))
+# Seit D11b ist M bei mehreren Saisons M_eff (saisons.m_eff), M_f und delta
+# kommen aus dem Horizont (moneyball.HORIZONT_PARAMETER, je Stand und Art;
+# ohne Horizont 1.500 / 0 wie vorher).
 # Angezeigte Leistung und +-Band bleiben UNGESCHRUMPFT; das Schrumpfen steckt
 # nur in diesem Vergleich. Formel, Konstanten und Stufen stehen nur hier.
+# Minuten der Zukunft M_f und Drift je Horizont: moneyball.HORIZONT_PARAMETER
+# (D11b), dieselben fuer Slot und Liste.
 VORSPRUNG_MU = 50.0
-VORSPRUNG_M_F = 1500       # Minuten der naechsten Halbserie
 VORSPRUNG_TAU = {          # wahre Streuung der Leistung je Slot
     "tw": 20.3, "lv": 14.1, "rv": 14.1, "ivl": 10.7, "ivr": 10.7,
     "dml": 11.8, "dmr": 11.8, "aml": 14.5, "amc": 14.6, "amr": 15.0, "st": 14.6,
@@ -463,9 +475,12 @@ def _vorsprung_aus(post_a, v_a, f2_a, post_b, v_b, f2_b):
             "vorn": "a" if p > 0.5 else ("b" if p < 0.5 else None)}
 
 
-def vorsprung(slot_key, l_a, min_a, l_b, min_b):
+def vorsprung(slot_key, l_a, min_a, l_b, min_b, horizont=None):
     """Kalibrierter Vergleich zweier Leistungen auf demselben Slot.
 
+    min_a/min_b: Minuten, bei mehreren Saisons die effektiven (saisons.m_eff).
+    horizont: (Stand, Art) – Minuten der Zukunft und Drift
+    (moneyball.horizont_zukunft); ohne Horizont wie vor D11b.
     -> {"p_a": P(a besser), "vorsprung_p": P_fav, "vorsprung_stufe":
     "gleichauf"|"leicht"|"klar"|"sicher", "vorn": "a"|"b"|None}, oder None
     ohne Aussage: ein Wert fehlt oder einer hat weniger als MIN_MINUTES – dort
@@ -475,13 +490,38 @@ def vorsprung(slot_key, l_a, min_a, l_b, min_b):
     if (min_a or 0) < MIN_MINUTES or (min_b or 0) < MIN_MINUTES:
         return None
     tau2 = VORSPRUNG_TAU[slot_key] ** 2
-    s_f2 = leistung_sem(slot_key, VORSPRUNG_M_F) ** 2
+    m_f, drift2 = moneyball.horizont_zukunft(horizont, _PROFIL_DES_SLOTS[slot_key])
+    s_f2 = leistung_sem(slot_key, m_f) ** 2 + drift2
     post_a, v_a = _geschrumpft(l_a, leistung_sem(slot_key, min_a) ** 2, VORSPRUNG_MU, tau2)
     post_b, v_b = _geschrumpft(l_b, leistung_sem(slot_key, min_b) ** 2, VORSPRUNG_MU, tau2)
     return _vorsprung_aus(post_a, v_a, s_f2, post_b, v_b, s_f2)
 
 
-def listen_vorsprung(a, b):
+def erwartete_staerke(slot_key, leistung, minuten, charakter=None):
+    """Erwartete Staerke fuer die AUSWAHL von Auto-Elf und Backup (D11b,
+    Head Scout; die genaue Form legt der Datenanalyst fest).
+
+    Die rohe Leistung zieht Spieler mit wenig Minuten und ohne Historie
+    systematisch vor etablierte: seit der Mischung der Saisons behalten sie
+    ihren Rohwert, waehrend Spieler mit Vorsaisons zu ihrem langjaehrigen
+    Mittel gezogen werden (Mazraoui mit 920 Minuten vor Dorgu). Deshalb
+    zaehlt hier die zur Mitte geschrumpfte Leistung – post wie in vorsprung()
+    (mu, tau je Slot, SEM mit den effektiven Minuten, OHNE Drift) –, mit
+    Charakter wie die Gesamtzahl: post^(1-CHAR_GEWICHT) x Charakter^CHAR_GEWICHT,
+    ohne Charakter post allein. Angezeigt werden weiter Leistung, Band und
+    Gesamtzahl. None ohne Leistung; ohne Minuten die Leistung ungeschrumpft."""
+    if leistung is None:
+        return None
+    sem = leistung_sem(slot_key, minuten)
+    post = (float(leistung) if sem is None else
+            _geschrumpft(float(leistung), sem * sem, VORSPRUNG_MU, VORSPRUNG_TAU[slot_key] ** 2)[0])
+    if charakter is None:
+        return round(post, 2)
+    c = max(1.0, float(charakter))
+    return round(max(0.0, min(100.0, max(0.0, post) ** (1 - CHAR_GEWICHT) * c ** CHAR_GEWICHT)), 2)
+
+
+def listen_vorsprung(a, b, horizont=None):
     """Kalibrierter Vergleich zweier LISTEN-Scores (Tabelle, Ranglisten).
 
     a/b: (score, minuten, profil des Listen-Scores). Dieselbe Formel wie im
@@ -490,8 +530,8 @@ def listen_vorsprung(a, b):
     verschiedene Profile haben. Die Bausteine je Spieler liefert
     moneyball.score_kalibriert (dieselben, die die Oberflaeche als score_kal /
     score_sd bekommt). -> wie vorsprung(), oder None ohne Aussage."""
-    kal_a, var_a = moneyball.score_kalibriert(a[2], a[0], a[1])
-    kal_b, var_b = moneyball.score_kalibriert(b[2], b[0], b[1])
+    kal_a, var_a = moneyball.score_kalibriert(a[2], a[0], a[1], horizont)
+    kal_b, var_b = moneyball.score_kalibriert(b[2], b[0], b[1], horizont)
     if kal_a is None or kal_b is None:
         return None
     return _vorsprung_aus(kal_a, var_a, 0.0, kal_b, var_b, 0.0)
@@ -509,11 +549,13 @@ def listen_vorsprung(a, b):
 SPITZENGRUPPE_P = VORSPRUNG_STUFEN[-1][0]
 
 
-def listen_vergleich(eintraege):
+def listen_vergleich(eintraege, horizont=None):
     """Liste -> Bezug (hoechstes score_kal), Vergleich jedes Eintrags mit ihm
     und die Groesse der Spitzengruppe.
 
-    eintraege: [{"id", "score", "minutes", "profil"}], Reihenfolge egal.
+    eintraege: [{"id", "score", "minutes", "profil"}], Reihenfolge egal;
+    minutes bei mehreren Saisons die effektiven (m_eff). horizont wie in
+    vorsprung().
     -> {"bezug": id oder None, "spitzengruppe": n oder None, "eintraege":
     [{"id", "vergleich_bezug": vergleich_feld-Objekt, None beim Bezug}]}.
     Die Oberflaeche rechnet dasselbe aus score_kal/score_sd selbst (sie
@@ -521,7 +563,8 @@ def listen_vergleich(eintraege):
     Gegenprobe. Wer keine Aussage erlaubt (duenne Datenbasis), zaehlt nicht."""
     kal = {}
     for i, e in enumerate(eintraege):
-        k, _var = moneyball.score_kalibriert(e.get("profil"), e.get("score"), e.get("minutes"))
+        k, _var = moneyball.score_kalibriert(e.get("profil"), e.get("score"), e.get("minutes"),
+                                             horizont)
         if k is not None:
             kal[i] = k
     if not kal:
@@ -536,7 +579,7 @@ def listen_vergleich(eintraege):
             aus.append({"id": e.get("id"), "vergleich_bezug": None})
             gruppe += 1
             continue
-        v = listen_vorsprung((e.get("score"), e.get("minutes"), e.get("profil")), b)
+        v = listen_vorsprung((e.get("score"), e.get("minutes"), e.get("profil")), b, horizont)
         if v is None:
             feld = {"vorsprung_p": None, "vorsprung_stufe": None, "vorn": None,
                     "p_besser": None, "duenn": True}
@@ -550,13 +593,14 @@ def listen_vergleich(eintraege):
     return {"bezug": bezug.get("id"), "spitzengruppe": gruppe, "eintraege": aus}
 
 
-def vergleich_feld(slot_key, selbst, bezug):
+def vergleich_feld(slot_key, selbst, bezug, horizont=None):
     """js_api-Objekt 'Spieler gegen Bezugsperson' auf demselben Slot.
 
-    selbst/bezug: (id, leistung, minuten). -> {vorsprung_p, vorsprung_stufe,
+    selbst/bezug: (id, leistung, minuten), minuten bei mehreren Saisons die
+    effektiven (m_eff); horizont wie in vorsprung(). -> {vorsprung_p, vorsprung_stufe,
     vorn (id des Fuehrenden oder None), p_besser (P, dass SELBST besser ist),
     duenn (True = keine Aussage, duenne Datenbasis)}."""
-    v = vorsprung(slot_key, selbst[1], selbst[2], bezug[1], bezug[2])
+    v = vorsprung(slot_key, selbst[1], selbst[2], bezug[1], bezug[2], horizont)
     if v is None:
         return {"vorsprung_p": None, "vorsprung_stufe": None, "vorn": None,
                 "p_besser": None, "duenn": True}
@@ -565,10 +609,10 @@ def vergleich_feld(slot_key, selbst, bezug):
             "p_besser": v["p_a"], "duenn": False}
 
 
-def _vergleich_original(slot_key, selbst, original):
+def _vergleich_original(slot_key, selbst, original, horizont=None):
     """Treffer der Ersatzsuche gegen das Original: vergleich_original und das
     daraus abgeleitete Bool gleichauf."""
-    v = vergleich_feld(slot_key, selbst, original)
+    v = vergleich_feld(slot_key, selbst, original, horizont)
     return {"vergleich_original": v, "gleichauf": gleichauf_aus(v)}
 
 
@@ -911,13 +955,36 @@ def score_slot(p, slot, dists, teams=None):
             "teile": sorted(teile, key=lambda t: -t["gewicht"])}
 
 
-def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=None):
+def mehrsaison_felder(p, slot, b, mb, mischen):
+    """Positionswertung b (score_slot) und Slot-Score mb ueber mehrere
+    Saisons (D11b) -> (b, mehr).
+
+    b behaelt seine Aufschluesselung, 'score' (der Fit) wird zum gemischten,
+    'fit_aktuell' haelt den der aktuellen Saison. mehr: mb (gemischt),
+    mb_aktuell, saisons, m_eff, hinweise. Ohne Mischer oder ohne
+    Mehrsaison-Werte (Zeile nicht aus dem aktuellen Stand) bleibt alles wie
+    vor D11b; m_eff sind dann die Minuten."""
+    info = mischen(p, slot, b["score"], mb) if mischen else None
+    if not info:
+        return (dict(b, fit_aktuell=b["score"]),
+                {"mb": mb, "mb_aktuell": mb, "saisons": None,
+                 "m_eff": p.get("minutes"), "hinweise": []})
+    return (dict(b, score=info["fit"], fit_aktuell=b["score"]),
+            {"mb": info["mb"], "mb_aktuell": mb, "saisons": info["saisons"],
+             "m_eff": info["m_eff"], "hinweise": info["hinweise"]})
+
+
+def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=None,
+                mischen=None):
     """Fuer jede Position die passenden Spieler mit Score und Aufschluesselung.
 
     squad     : Spieler, die bewertet werden (der eigene Kader)
-    reference : Vergleichsmenge fuer die Perzentile (Pool + Kohorte)
+    reference : Vergleichsmenge fuer die Perzentile (aktueller Export-Stand)
     teams      : team_strength() fuer den Carry-Zuschlag, oder None
     cache      : Verteilungs-Cache zu dieser Referenz (siehe slot_dists)
+    mischen    : mischen(p, slot, fit, mb) -> Mehrsaison-Werte oder None
+                 (saisons.Mehrsaison.slot mit Horizont, D11b). Ohne: nur die
+                 aktuelle Saison, wie vor D11b.
     """
     out = []
     for slot in FORMATION:
@@ -933,6 +1000,11 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=Non
             b = score_slot(p, slot, dists, teams)
             if b is None:
                 continue
+            # Moneyball-Score im Slot-Profil; ohne Profilwertung (Aufrufer
+            # ohne add_scores) wie frueher das vom Aufrufer gesetzte 'mb'
+            mb = (moneyball.profil_score(p, sp) if p.get("score_je_profil") is not None
+                  else p.get("mb"))
+            b, mehr = mehrsaison_felder(p, slot, b, mb, mischen)
             kandidaten.append({
                 "id": p.get("id"), "name": p.get("name"),
                 "age": p.get("age"), "minutes": p.get("minutes"),
@@ -940,10 +1012,8 @@ def build_board(squad, reference, min_minutes=MIN_MINUTES, teams=None, cache=Non
                 "club": p.get("club"), "league": p.get("league"),
                 "dna": p.get("dna"), "dna_pass": p.get("dna_pass"),
                 "dna_ball": p.get("dna_ball"),
-                # Moneyball-Score im Slot-Profil; ohne Profilwertung (Aufrufer
-                # ohne add_scores) wie frueher das vom Aufrufer gesetzte 'mb'
-                "mb": (moneyball.profil_score(p, sp) if p.get("score_je_profil") is not None
-                       else p.get("mb")),
+                # mb (gemischt), mb_aktuell, saisons, m_eff, hinweise (D11b)
+                **mehr,
                 # Persoenlichkeit (sichtbare Beschreibung) neben dem Score
                 "pers_score": p.get("pers_score"), "pers_label": p.get("pers_label"),
                 "pers_stufe": p.get("pers_stufe"), "pers_medien": p.get("pers_medien"),
@@ -1000,7 +1070,13 @@ def startelf(board, pins=None):
         belegt.add(pid)
     fest = set(elf)
 
-    paare = sorted(((k["score"], s["key"], k["id"], k)
+    # Ausgewaehlt wird nach der erwarteten Staerke (erwartete_staerke, D11b),
+    # wo das Brett sie liefert, sonst nach der Gesamtzahl wie vorher
+    def wert(k):
+        e = k.get("erwartet")
+        return k["score"] if e is None else e
+
+    paare = sorted(((wert(k), s["key"], k["id"], k)
                     for s in board for k in s["kandidaten"]),
                    key=lambda t: -t[0])
     for score, skey, pid, k in paare:
@@ -1020,7 +1096,7 @@ def startelf(board, pins=None):
                 na, nb = punkte[a].get(pb["id"]), punkte[b].get(pa["id"])
                 if na is None or nb is None:
                     continue
-                if na["score"] + nb["score"] > pa["score"] + pb["score"]:
+                if wert(na) + wert(nb) > wert(pa) + wert(pb):
                     elf[a], elf[b] = na, nb
                     verbessert = True
         # Einwechseln: ein FREIER Spieler, der auf einem Platz besser ist als
@@ -1034,8 +1110,8 @@ def startelf(board, pins=None):
             frei = [k for k in punkte[a].values() if k["id"] not in belegt]
             if not frei:
                 continue
-            bester = max(frei, key=lambda k: k["score"])
-            if bester["score"] > elf[a]["score"]:
+            bester = max(frei, key=wert)
+            if wert(bester) > wert(elf[a]):
                 belegt.discard(elf[a]["id"])
                 elf[a] = bester
                 belegt.add(bester["id"])
@@ -1100,7 +1176,7 @@ LIGA_POSITIONEN = [
 
 
 def liga_vergleich(elf, pool, referenz, liga, verein, teams=None,
-                   min_minutes=450, cache=None):
+                   min_minutes=450, cache=None, mischen=None):
     """Je Position: eigene Elf gegen die Liga.
 
     elf      : {slot_key: Kandidat aus dem Brett} mit 'fit', 'mb', 'name', 'minutes'
@@ -1115,7 +1191,7 @@ def liga_vergleich(elf, pool, referenz, liga, verein, teams=None,
     return _positionsvergleich(
         elf, pool, referenz,
         lambda p: p.get("league") == liga and p.get("club") != verein,
-        teams, min_minutes, cache)
+        teams, min_minutes, cache, mischen)
 
 
 # CL-Niveau: dieselbe Rechnung, aber gegen eine FESTE Liste von 8 Vereinen
@@ -1129,7 +1205,7 @@ CL_MIN_VEREINE = 6
 
 
 def cl_vergleich(elf, pool, referenz, vereine, verein, teams=None,
-                 min_minutes=450, cache=None):
+                 min_minutes=450, cache=None, mischen=None):
     """Je Position: eigene Elf gegen die festgelegten CL-Vergleichsvereine.
 
     vereine: Vereinsnamen wie im Export; der eigene Verein zaehlt nie mit.
@@ -1139,7 +1215,7 @@ def cl_vergleich(elf, pool, referenz, vereine, verein, teams=None,
     ref = {v for v in (vereine or []) if v and v != verein}
     zeilen = _positionsvergleich(elf, pool, referenz,
                                  lambda p: p.get("club") in ref, teams, min_minutes,
-                                 cache)
+                                 cache, mischen)
     for z in zeilen:
         mit = {v["club"] for v in z["vereine"]}
         werte = sorted(v["wert"] for v in z["vereine"])
@@ -1159,10 +1235,11 @@ def cl_vergleich(elf, pool, referenz, vereine, verein, teams=None,
 
 
 def _positionsvergleich(elf, pool, referenz, gehoert_dazu, teams=None,
-                        min_minutes=450, cache=None):
+                        min_minutes=450, cache=None, mischen=None):
     """Gemeinsamer Kern von Liga- und CL-Vergleich: je Position die eigene Elf
     gegen den jeweils besten Spieler jedes Vereins, der gehoert_dazu(p) erfuellt.
-    cache: Verteilungs-Cache zu dieser Referenz (siehe slot_dists)."""
+    cache: Verteilungs-Cache zu dieser Referenz (siehe slot_dists). mischen:
+    wie in build_board – die Gegner im selben Horizont wie die eigene Elf."""
     slots = {s["key"]: s for s in FORMATION}
     out = []
     for key, label, skeys in LIGA_POSITIONEN:
@@ -1181,6 +1258,8 @@ def _positionsvergleich(elf, pool, referenz, gehoert_dazu, teams=None,
             b = score_slot(p, slot, dists, teams)
             if b is None:
                 continue
+            b, mehr = mehrsaison_felder(p, slot, b, mb, mischen)
+            mb = mehr["mb"]
             wert = gesamt(b["score"], mb, None)
             eintrag = {"name": p.get("name"), "club": p.get("club"), "leistung": wert,
                        "fit": b["score"], "score": mb, "age": p.get("age"),
@@ -1419,7 +1498,8 @@ def _aehnlichkeit(teile_a, teile_b):
 def find_replacements(slot, original, kandidaten, reference,
                       modus="aehnlich", min_minutes=MIN_MINUTES, limit=30,
                       max_umschulung=MAX_UMSCHULUNG, kader_ids=(),
-                      archetyp=None, teams=None, nur_charakter=False):
+                      archetyp=None, teams=None, nur_charakter=False,
+                      mischen=None, horizont=None):
     """Ersatz fuer einen Spieler auf einer bestimmten Position.
 
     Bewertet wird JEDER Kandidat nach den Gewichten DIESER Position – auch
@@ -1435,16 +1515,20 @@ def find_replacements(slot, original, kandidaten, reference,
     kader_ids  : eigene Spieler; sie werden nicht ausgeschlossen, sondern nur
                  markiert – wer intern ersetzen kann, ist die guenstigste Loesung
     nur_charakter : Kandidaten ohne gescoutete Persoenlichkeit auslassen
+    mischen    : wie in build_board (D11b); horizont fuer Band und Vergleich
 
     Verglichen und sortiert wird die GESAMTZAHL (siehe gesamt()): Fit nach
     Umschulungsabzug, dazu der Charakterfaktor. Der reine Fit bleibt als
     'fit' im Treffer, damit sichtbar ist, woher ein Abstand kommt.
     """
     dists, basis = slot_dists(slot, reference, min_minutes)
+    sp = slot_profil(slot)
     ob = score_slot(original, slot, dists, teams)
     if ob is None:
         return {"ok": False, "error": "Für diesen Spieler reichen die Daten "
                                       "auf dieser Position nicht aus."}
+    ob, mehr_o = mehrsaison_felder(original, slot, ob, moneyball.profil_score(original, sp),
+                                   mischen)
     spez_stats = None
     if modus == "spezialist":
         spez_stats = ARCHETYPEN.get(slot["key"], {}).get(archetyp)
@@ -1456,8 +1540,7 @@ def find_replacements(slot, original, kandidaten, reference,
     ziel = gesamt(ziel_fit, None, original.get("pers_score"))
     # Leistung sqrt(Fit x Slot-Score) mit Band, fuer "gleichauf" (D19). Die
     # Suche selbst sortiert weiter nach Fit und Charakter.
-    sp = slot_profil(slot)
-    ziel_leistung = gesamt(ziel_fit, moneyball.profil_score(original, sp))
+    ziel_leistung = gesamt(ziel_fit, mehr_o["mb"])
     if modus == "juenger" and alter is None:
         return {"ok": False, "error": "Von diesem Spieler ist kein Geburtsdatum "
                                       "bekannt – ohne Alter keine Suche nach "
@@ -1488,9 +1571,10 @@ def find_replacements(slot, original, kandidaten, reference,
             continue
         if nur_charakter and p.get("pers_score") is None:
             continue
+        b, mehr = mehrsaison_felder(p, slot, b, moneyball.profil_score(p, sp), mischen)
         fit = max(0, min(100, round(b["score"] - kosten)))
         score = gesamt(fit, None, p.get("pers_score"))
-        leistung = gesamt(fit, moneyball.profil_score(p, sp))
+        leistung = gesamt(fit, mehr["mb"])
         a = p.get("age")
         spez = None
         if modus == "besser":
@@ -1541,9 +1625,14 @@ def find_replacements(slot, original, kandidaten, reference,
             "delta_score": score - ziel,
             "delta_age": None if (a is None or alter is None) else round(a - alter, 1),
             "verlaesslich": b["verlaesslich"], "teile": b["teile"],
-            **band_felder(slot["key"], leistung, p.get("minutes")),
-            **_vergleich_original(slot["key"], (pid, leistung, p.get("minutes")),
-                                  (eigen, ziel_leistung, original.get("minutes"))),
+            "mb": mehr["mb"], "saisons": mehr["saisons"], "m_eff": mehr["m_eff"],
+            "hinweise": mehr["hinweise"],
+            # nur die aktuelle Saison (fit mit demselben Umschulungsabzug)
+            "fit_aktuell": max(0, min(100, round(b["fit_aktuell"] - kosten))),
+            "mb_aktuell": mehr["mb_aktuell"],
+            **band_felder(slot["key"], leistung, mehr["m_eff"], horizont),
+            **_vergleich_original(slot["key"], (pid, leistung, mehr["m_eff"]),
+                                  (eigen, ziel_leistung, mehr_o["m_eff"]), horizont),
         })
 
     if modus == "aehnlich":
@@ -1741,7 +1830,9 @@ def kadertiefe(slots, schwelle=TIEFE_SCHWELLE):
     slots: Brett-Ausgabe (Kandidaten mit 'fit' und 'mb', Slot mit
     'startelf_id'). -> {"slots": {key: {stamm, backup, ab_schwelle, duenn}},
     "ueberzaehlig": [{id, name, leistung, slot}]}; stamm/backup sind
-    (Kandidat, Leistung) oder None.
+    (Kandidat, Leistung) oder None. Den Backup waehlt die erwartete Leistung
+    ('erwartet_leistung', D11b), wo das Brett sie liefert – wie die Auto-Elf;
+    angezeigt wird die rohe Leistung.
     """
     stamm_ids = {s.get("startelf_id") for s in slots if s.get("startelf_id") is not None}
     paare, beste, namen = [], {}, {}
@@ -1754,10 +1845,11 @@ def kadertiefe(slots, schwelle=TIEFE_SCHWELLE):
             if k["id"] not in beste or lst > beste[k["id"]][0]:
                 beste[k["id"]] = (lst, s["key"])
             if k["id"] not in stamm_ids:
-                paare.append((lst, s["key"], k))
+                erw = k.get("erwartet_leistung")
+                paare.append((lst if erw is None else erw, lst, s["key"], k))
     paare.sort(key=lambda t: -t[0])
     backup, vergeben = {}, set()
-    for lst, key, k in paare:
+    for _wahl, lst, key, k in paare:
         if key in backup or k["id"] in vergeben:
             continue
         backup[key] = (k, lst)
