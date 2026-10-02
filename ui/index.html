@@ -2538,7 +2538,7 @@ function drawTactic(host){
     // der Beste dieser Position. Borges ist auf beiden Fluegeln der Staerkste,
     // spielen kann er nur auf einem (siehe tactics.startelf).
     const best = s.kandidaten.find(k=>k.id===s.startelf_id) || s.kandidaten[0];
-    const col = best ? scoreInk(best.score) : "var(--dim)";
+    const col = best && best.score!=null ? scoreInk(best.score) : "var(--dim)";
     const f = best && best.form;
     return `<g class="tslot${on?" on":""}" onclick="tactPick('${s.key}')">
       <rect x="${s.x-7}" y="${s.y-5.2}" width="14" height="10.4"
@@ -2550,14 +2550,14 @@ function drawTactic(host){
       ${s.gepinnt ? `<rect x="${s.x+5.3}" y="${s.y-4.6}" width="1.3" height="1.3"
             fill="${on?"var(--on-accent)":"var(--accent)"}"><title>manuell aufgestellt</title></rect>` : ""}
       <text x="${s.x}" y="${s.y+3.4}" text-anchor="middle" font-size="3.6"
-            font-weight="700" fill="${on?"var(--on-accent)":col}">${best?best.score:"–"}</text>
+            font-weight="700" fill="${on?"var(--on-accent)":col}">${best && best.score!=null ? best.score : "–"}</text>
       ${f && f.richtung ? `<path d="${f.richtung>0
           ? `M${s.x+5} ${s.y-3.4} l1.3 1.3 l-2.6 0 Z`
           : `M${s.x+5} ${s.y-2.1} l1.3 -1.3 l-2.6 0 Z`}"
           fill="${on?"var(--on-accent)":(f.richtung>0?"var(--pos)":"var(--neg)")}"/>` : ""}
       ${best ? `<title>${esc2(best.name)} · ${Math.round(best.minutes||0)} Minuten`
         + ` · Stichprobe ${Math.round(best.verlaesslich*100)} %`
-        + ` · Gesamt ${best.score} = ${gesamtFormel(best)}`
+        + ` · Gesamt ${best.score ?? "–"} = ${gesamtFormel(best)}`
         + (s.profil_label ? ` · bewertet als ${s.profil_label}` : "")
         + (best.leistung!=null && best.leistung_band!=null ? ` · Leistung ${best.leistung} ±${Math.round(best.leistung_band)}` : "")
         + (f ? ` · Form ${f.form_note.toFixed(2)} gegen Saison ${f.saison_note.toFixed(2)}`
@@ -2695,7 +2695,9 @@ const GESAMT_TIP = "Fit^0,35 × Score^0,35 × Charakter^0,30 – wer alles mitbr
 // alten 0.6 (270 Minuten): solange der Score gedämpft wurde, war die Markierung
 // nur eine Fußnote – jetzt ist sie der ganze Ausreißerschutz.
 const DUENN = 0.8;
-const scorePill = c => `<span class="pill${c.verlaesslich<DUENN?" duenn":""}"
+const scorePill = c => c.score == null
+  ? `<span class="muted" title="Keine Minuten – ohne Spielzeit kein Fit, keine Leistung und keine Gesamtzahl">–</span>`
+  : `<span class="pill${c.verlaesslich<DUENN?" duenn":""}"
     title="${c.verlaesslich<DUENN
       ? "Nur "+Math.round(c.minutes||0)+" Minuten Spielzeit – der Score ist echt, aber wacklig ("
         +Math.round(c.verlaesslich*100)+" % Stichprobe)"
@@ -2719,7 +2721,7 @@ function tactDetail(c){
       <span class="ptrack"><i style="width:${t.pct}%;background:rgba(${col},.85)"></i></span>
       <b>${t.pct}</b><span class="tval">${w}</span></div>`;
   }).join("");
-  return `<div class="dsec">${esc2(c.name)} · Gesamt ${c.score}
+  return `<div class="dsec">${esc2(c.name)} · Gesamt ${c.score ?? "–"}
       <span class="muted">= ${gesamtFormel(c)}</span></div>
     <div class="muted" style="font-size:11.5px;margin-bottom:6px">
       Balken = Perzentil unter allen Spielern, die diese Position spielen können.
@@ -2964,7 +2966,7 @@ function planPlatz(erg, geaendert){
   const tiles = planSlots(erg).map(s => {
     const st = s.stamm, neu = st && st.neu, ae = geaendert.has(s.key);
     const nm = st ? nachname(st.name) : "–";
-    return `<g><title>${escAttr(`${s.label}: ${st ? `${st.name} · Gesamt ${st.gesamt}` : "unbesetzt"}${
+    return `<g><title>${escAttr(`${s.label}: ${st ? `${st.name} · Gesamt ${st.gesamt ?? "– (keine Minuten)"}` : "unbesetzt"}${
       s.profil_label ? ` · bewertet als ${s.profil_label}` : ""}${st && st.leistung_band!=null ? ` · Leistung ${st.leistung} ±${Math.round(st.leistung_band)}` : ""}${
       s.duenn ? " · dünn besetzt" : ""}`)}</title>
       <rect x="${s.x-9.5}" y="${s.y-5.6}" width="19" height="11.2" fill="var(--surface)"
@@ -2972,7 +2974,7 @@ function planPlatz(erg, geaendert){
       <text x="${s.x}" y="${s.y-1.2}" text-anchor="middle" font-size="2.7" font-family="var(--sans)"
         fill="var(--text)">${esc2(nm.length > 11 ? nm.slice(0,10) + "…" : nm)}</text>
       <text x="${s.x}" y="${s.y+3.6}" text-anchor="middle" font-size="3.4" font-weight="700"
-        font-family="var(--mono)" fill="${st ? scoreInk(st.gesamt) : "var(--dim)"}">${st ? st.gesamt : "–"}</text>
+        font-family="var(--mono)" fill="${st && st.gesamt!=null ? scoreInk(st.gesamt) : "var(--dim)"}">${st && st.gesamt!=null ? st.gesamt : "–"}</text>
       ${neu ? `<text x="${s.x+8.2}" y="${s.y-2.2}" text-anchor="middle" font-size="3.4" font-weight="700" fill="var(--pos)">+</text>` : ""}
     </g>`;
   }).join("");
@@ -3164,8 +3166,8 @@ function planErgebnis(R, lName, rName){
     const l = planSlots(L).find(x => x.key === s.key) || {};
     const ae = geaendert.has(s.key);
     const lg = ligaVon(L, s.key), rg = ligaVon(Rr, s.key);
-    const stamm = x => x && x.stamm ? `<span title="${escAttr(`${x.stamm.name} · Gesamt ${x.stamm.gesamt} · ${bandTip(x.stamm)}${
-        x.profil_label ? ` · bewertet als ${x.profil_label}` : ""}`)}">${esc2(nachname(x.stamm.name))} <b>${x.stamm.gesamt}</b></span>${
+    const stamm = x => x && x.stamm ? `<span title="${escAttr(`${x.stamm.name} · Gesamt ${x.stamm.gesamt ?? "– (keine Minuten)"} · ${bandTip(x.stamm)}${
+        x.profil_label ? ` · bewertet als ${x.profil_label}` : ""}`)}">${esc2(nachname(x.stamm.name))} <b>${x.stamm.gesamt ?? "–"}</b></span>${
         x.stamm.neu ? ` <span class="pos">+</span>` : ""}${hinweisMarke(x.stamm)}` : `<span class="muted">–</span>`;
     // Backup gegen Stamm im Szenario: neutral – „gleichauf" heißt hier Tiefe
     const backup = x => x && x.backup ? `<span title="${escAttr(`${x.backup.name} · ${bandTip(x.backup)}`)}">${esc2(nachname(x.backup.name))}</span>${hinweisMarke(x.backup)} ${
@@ -3833,7 +3835,7 @@ function replDetail(c){
         ${c.score_pos} minus ${c.abzug} Punkte Umschulung = ${c.fit}.</div>` : "";
   const chr = c.charakter!=null
     ? `<div class="muted" style="font-size:11.5px;margin-top:4px">
-        Gesamt ${c.score} = Fit ${c.fit} und Charakter ${c.charakter}
+        Gesamt ${c.score ?? "–"} = Fit ${c.fit ?? "–"} und Charakter ${c.charakter}
         (Gewicht 0,3, geometrisch).</div>`
     : `<div class="muted" style="font-size:11.5px;margin-top:4px">
         Persönlichkeit ungescoutet – Gesamt ist der Fit allein.</div>`;
