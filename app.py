@@ -1181,7 +1181,7 @@ class Api:
                                                           k.get("m_eff"), k["charakter"])
                 k["erwartet_leistung"] = tactics.erwartete_staerke(sl["key"], k["leistung"],
                                                                    k.get("m_eff"))
-            sl["kandidaten"].sort(key=lambda k: -k["score"])
+            sl["kandidaten"].sort(key=tactics.nach_wert)
         elf = tactics.startelf(slots, pins)
         # Nur die Pins zurueckmelden, die auch greifen – ein Pin auf einen
         # Spieler, der nicht mehr im Kader ist, soll nicht als "manuell" stehen.
@@ -2129,13 +2129,16 @@ class Api:
             gruppen, _ = tactics.player_groups(r)
             kosten, von = tactics.umschulung(gruppen, slot["gruppen"])
             b = tactics.score_slot(r, slot, dists, teams) if kosten is not None else None
-            if kosten is None or b is None:
+            if kosten is None or b is None or tactics.ohne_minuten(r):
                 spieler.append({"rolle": "kandidat", "anfrage_id": anfrage,
                                 "id": int(r["eid"]), "eid": int(r["eid"]),
                                 "name": r.get("name"), "club": r.get("club"),
                                 "fehlt": ("Kann diese Position nicht spielen – keine "
                                           "Umschulung möglich." if kosten is None else
-                                          "Zu wenige Kennzahlen für diese Position.")})
+                                          "Zu wenige Kennzahlen für diese Position."
+                                          if b is None else
+                                          "Keine Spielminuten – ohne Leistung kein "
+                                          "Vergleich.")})
                 continue
             b, mehr = tactics.mehrsaison_felder(r, slot, b, moneyball.profil_score(r, profil),
                                                 mischen)

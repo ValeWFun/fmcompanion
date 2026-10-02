@@ -11,6 +11,8 @@ Die Vorschau des Designers serialisiert mit default=str und sah davon nichts.
 Geprueft wird deshalb mit json.dumps OHNE default= und mit allow_nan=False,
 dazu fachliche Kleinigkeiten, die nur in echten Zeilen auffallen:
 - keine Tabellenzeile mit Export-Position hat POS "?" (RAM-Maske 0)
+- Kaderspieler ohne Minuten stehen ohne Zahlen auf dem Brett und nie in der
+  Auto-Elf (D24)
 
 Die Wegwerf-DB hat Export-Zeilen (aktuell und aelter), einen RAM-Snapshot mit
 Export-Spielern (Export gewinnt / RAM gewinnt, Maske 0), reine RAM-Zeilen und
@@ -88,6 +90,21 @@ def zeile(eid, pos, club, liga):
     return z
 
 
+OHNE_NULL = ("minutes", "goals", "assists", "xg", "xa", "apps", "duels", "duels_total",
+             "shots_total", "shots_on", "pass_try", "pass_ok", "dribbles", "prog_passes",
+             "press_win", "press_try", "interceptions", "key_passes", "clearances",
+             "headers_won", "headers_total", "losses", "recoveries", "conceded", "pen_goals",
+             "chances", "long_goals", "blocks", "errors", "crosses_ok", "crosses_try", "sprints")
+
+
+def ohne_minuten(eid, pos, vorbild):
+    """Kaderspieler ohne Einsatz (D24): alle Zaehlwerte 0, keine Note – ohne
+    Zufall, damit die uebrigen Zeilen dieselben bleiben."""
+    z = dict(vorbild, eid=eid, name=f"Spieler {eid}", position=pos, club="Test FC")
+    z.update({k: 0 for k in OHNE_NULL} | {"rating": None, "xga": None})
+    return z
+
+
 def ram(pid, eid, minuten, maske, tw=False):
     r = {"id": pid, "name": f"RAM {pid}", "eid": eid, "pos_mask": maske, "is_gk": 1.0 if tw else 0.0,
          "birth_year": 2000.0, "birth_day": 100.0, "fouls": 10, "fouls_against": 12, "yellow": 2}
@@ -112,6 +129,9 @@ try:
     aktuell = [zeile(5000 + i, pos, "Test FC" if i < 26 else f"Verein {i % 12}", LIGEN[i % len(LIGEN)])
                for i, pos in enumerate(POSITIONEN * 10)]
     alt = [zeile(6000 + i, pos, "Alter FC", "Eredivisie") for i, pos in enumerate(POSITIONEN)]
+    # zwei Kaderspieler ohne Minuten (D24), hinten angehaengt
+    OHNE_TW, OHNE_ST = 5990, 5991
+    aktuell += [ohne_minuten(OHNE_TW, "TW", aktuell[0]), ohne_minuten(OHNE_ST, "ST (Z)", aktuell[0])]
     db.save_export(conn, alt, None, datei="alt.html", ts="2026-09-01T10:00:00")
     db.save_export(conn, aktuell, None, datei="syn.html", ts="2026-09-26T10:00:00")
     # RAM-Snapshot: Export-Spieler mit Maske 0 (Export gewinnt / RAM gewinnt),
@@ -259,6 +279,65 @@ try:
     zwei = api.load_saved("last")
     pruefe("die Feldliste arbeitet auf Kopien: zweiter Aufruf liefert dasselbe",
            js(zwei["players"]) == js(ls["players"]))
+
+    print("== Spieler ohne Minuten (D24) ==")
+    tb = antworten.get("tactic_board") or {}
+    ohne_ids = {OHNE_TW, OHNE_ST}
+    ohne_k = [(sl["key"], k) for sl in tb.get("slots", []) for k in sl["kandidaten"]
+              if k["id"] in ohne_ids]
+    pruefe("beide stehen als Kandidaten auf dem Brett (TW- und ST-Slot)",
+           {(key, k["id"]) for key, k in ohne_k} >= {("tw", OHNE_TW), ("st", OHNE_ST)},
+           str([(key, k["id"]) for key, k in ohne_k]))
+    leer = ("fit", "mb", "score", "leistung", "leistung_band", "leistung_von", "leistung_bis",
+            "erwartet", "erwartet_leistung", "fit_aktuell", "mb_aktuell", "m_eff", "saisons")
+    voll = [(k["id"], f, k.get(f)) for _, k in ohne_k for f in leer if k.get(f) is not None]
+    pruefe("Fit, Score, Leistung, Band und erwartete Staerke sind None", ohne_k and not voll,
+           str(voll[:4]))
+    pruefe("Kennzahlen ohne Perzentil (Rohwerte bleiben), keine Archetyp-Werte",
+           all(t.get("pct") is None for _, k in ohne_k for t in k["teile"])
+           and all(v is None for _, k in ohne_k for v in k["archetypen"].values()))
+    pruefe("Vergleich mit dem Stammspieler ohne Aussage",
+           all((k.get("vergleich_stamm") or {}).get("duenn") for _, k in ohne_k))
+    pruefe("Kandidaten ohne Wert stehen am Ende ihres Slots",
+           all(sl["kandidaten"][-1]["score"] is None
+               and all(k["score"] is not None for k in sl["kandidaten"]
+                       if k["id"] not in ohne_ids)
+               for sl in tb.get("slots", []) if any(k["id"] in ohne_ids for k in sl["kandidaten"])))
+    pruefe("die Auto-Elf waehlt keinen von beiden",
+           not ohne_ids & {sl.get("startelf_id") for sl in tb.get("slots", [])})
+    pl = antworten.get("planer_vergleich") or {}
+    pruefe("Planspiel und Kadertiefe laufen mit ihnen (kein Backup ohne Wert)",
+           pl.get("ok") is not False and not any(
+               ((s.get("backup") or {}).get("id") in ohne_ids)
+               for e in (pl.get("links"), pl.get("rechts")) if isinstance(e, dict)
+               for s in (e.get("brett") or {}).get("slots", [])))
+    er = api.tactic_replacements("st", OHNE_ST, "besser")
+    pruefe("Ersatzsuche fuer einen Spieler ohne Minuten: klare Meldung statt Ziel 0",
+           er.get("ok") is False and "Spielminuten" in (er.get("error") or ""), str(er)[:120])
+    sc = api.slot_compare("st", [OHNE_ST])
+    sc_ohne = [z for z in sc.get("spieler", []) if z.get("id") == OHNE_ST]
+    pruefe("Slot-Vergleich: angefragter Spieler ohne Minuten mit Hinweis statt Zahlen",
+           sc_ohne and "fehlt" in sc_ohne[0] and "leistung" not in sc_ohne[0], str(sc_ohne)[:160])
+    # Ein Pin setzt ihn trotzdem – manuell entscheidet der Nutzer
+    api.set_pin("st", OHNE_ST)
+    tb_pin = api.tactic_board()
+    st_pin = next(sl for sl in tb_pin["slots"] if sl["key"] == "st")
+    pruefe("ein Pin setzt ihn trotzdem (manuelle Entscheidung), Brett serialisierbar",
+           st_pin["startelf_id"] == OHNE_ST and st_pin["gepinnt"] and js(tb_pin) is not None)
+    api.clear_pins()
+    # startelf direkt: ein Platz, auf dem nur ein Spieler ohne Wert steht, bleibt leer
+    from fmcompanion import tactics
+    k_a = {"id": 1, "score": 60, "erwartet": 55.0}
+    k_b = {"id": 2, "score": None, "erwartet": None}
+    k_c = {"id": 3, "score": 40, "erwartet": 45.0}
+    brett = [{"key": "x", "kandidaten": [k_a, k_b]}, {"key": "y", "kandidaten": [k_b]},
+             {"key": "z", "kandidaten": [k_c, k_b]}]
+    elf = tactics.startelf(brett)
+    pruefe("startelf: Platz nur mit Spieler ohne Wert bleibt leer, sonst die anderen",
+           {s: k["id"] for s, k in elf.items()} == {"x": 1, "z": 3}, str({s: k["id"] for s, k in elf.items()}))
+    elf = tactics.startelf(brett, {"y": 2})
+    pruefe("startelf: Pin auf Spieler ohne Wert greift",
+           {s: k["id"] for s, k in elf.items()} == {"x": 1, "y": 2, "z": 3})
     conn.close()
 finally:
     shutil.rmtree(ordner, ignore_errors=True)
